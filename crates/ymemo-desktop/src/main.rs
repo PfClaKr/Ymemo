@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use slint::{ModelRc, SharedString, TimerMode, VecModel};
-use ymemo_core::{sync::Syncthing, vault::Vault, Memo, Store};
+use ymemo_core::{pairing::PairingCode, sync::Syncthing, vault::Vault, Memo, Store};
 
 slint::include_modules!();
 
@@ -67,7 +67,22 @@ fn main() -> Result<()> {
             match Vault::open_or_create(dir.join("vault"), password.as_bytes(), store) {
                 Ok(v) => {
                     refresh(&v, &model);
-                    *syncthing.borrow_mut() = start_syncthing(&dir, v.dir());
+                    let st = start_syncthing(&dir, v.dir());
+                    if let Some(st) = &st {
+                        // 페어링 정보: 자기 코드 + QR 을 UI 에 노출.
+                        match st.device_id() {
+                            Ok(id) => {
+                                let code = PairingCode::new(id).encode();
+                                if let Some(img) = qr_image(&code) {
+                                    ui.set_qr_image(img);
+                                }
+                                ui.set_my_pairing_code(SharedString::from(code));
+                                ui.set_sync_available(true);
+                            }
+                            Err(e) => eprintln!("기기 ID 조회 실패: {e}"),
+                        }
+                    }
+                    *syncthing.borrow_mut() = st;
                     *vault.borrow_mut() = Some(v);
                     ui.set_locked(false);
                 }
@@ -95,6 +110,25 @@ fn main() -> Result<()> {
                 return;
             }
             refresh(v, &model);
+        });
+    }
+
+    // "등록" 콜백: 상대 페어링 코드로 peer 를 등록하고 vault 폴더를 공유
+    {
+        let syncthing = syncthing.clone();
+        let ui_weak = ui.as_weak();
+        ui.on_add_peer(move |code| {
+            let ui = ui_weak.unwrap();
+            let guard = syncthing.borrow();
+            let Some(st) = guard.as_ref() else { return };
+            let msg = match PairingCode::decode(&code) {
+                Ok(peer) => match st.share_folder_with(SYNC_FOLDER_ID, &peer.syncthing_device_id) {
+                    Ok(()) => "등록 완료. 상대 기기에서도 이 코드를 등록하세요.".to_string(),
+                    Err(e) => format!("등록 실패: {e}"),
+                },
+                Err(e) => format!("{e}"),
+            };
+            ui.set_peer_message(SharedString::from(msg));
         });
     }
 
@@ -126,11 +160,6 @@ fn start_syncthing(data_dir: &std::path::Path, vault_dir: &std::path::Path) -> O
             if let Err(e) = st.ensure_folder(SYNC_FOLDER_ID, "Ymemo Vault", vault_dir) {
                 eprintln!("공유 폴더 등록 실패: {e}");
             }
-            match st.device_id() {
-                // 페어링 UI 전까지는 로그로 안내 (상대 기기에서 이 ID 를 등록해야 한다).
-                Ok(id) => println!("Syncthing 기기 ID: {id}"),
-                Err(e) => eprintln!("기기 ID 조회 실패: {e}"),
-            }
             Some(st)
         }
         Err(e) => {
@@ -138,6 +167,27 @@ fn start_syncthing(data_dir: &std::path::Path, vault_dir: &std::path::Path) -> O
             None
         }
     }
+}
+
+/// 페어링 코드를 QR 이미지로 렌더링한다 (quiet zone 2모듈 포함, 확대는 UI 몫).
+fn qr_image(text: &str) -> Option<slint::Image> {
+    let code = qrcode::QrCode::new(text.as_bytes()).ok()?;
+    let width = code.width();
+    let colors = code.to_colors();
+    let quiet = 2usize;
+    let size = width + quiet * 2;
+
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(size as u32, size as u32);
+    let pixels = buf.make_mut_slice();
+    pixels.fill(slint::Rgb8Pixel { r: 255, g: 255, b: 255 });
+    for y in 0..width {
+        for x in 0..width {
+            if colors[y * width + x] == qrcode::Color::Dark {
+                pixels[(y + quiet) * size + (x + quiet)] = slint::Rgb8Pixel { r: 0, g: 0, b: 0 };
+            }
+        }
+    }
+    Some(slint::Image::from_rgb8(buf))
 }
 
 /// vault 캐시의 메모 제목들을 Slint 모델에 반영한다.

@@ -16,6 +16,7 @@ ymemo-core = { path = "crates/ymemo-core" }
 # GUI (데스크탑)
 slint = "1"
 slint-build = "1"
+qrcode = { version = "0.14", default-features = false } # 페어링 QR (렌더링은 slint 이미지로 직접)
 
 # 저장소 / 데이터
 rusqlite = { version = "0.32", features = ["bundled"] } # bundled: 시스템 libsqlite3 불필요, 소스에서 컴파일

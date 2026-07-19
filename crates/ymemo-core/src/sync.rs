@@ -24,16 +24,22 @@ pub struct Syncthing {
 }
 
 impl Syncthing {
-    /// syncthing 바이너리 탐색: `YMEMO_SYNCTHING_BIN` 환경변수 → PATH 순.
-    /// (배포 시엔 앱 옆에 번들된 경로를 환경변수/설정으로 가리키게 한다.)
+    /// syncthing 바이너리 탐색: `YMEMO_SYNCTHING_BIN` 환경변수 → 실행파일 옆(번들) → PATH 순.
     pub fn find_binary() -> Option<PathBuf> {
+        let exe = if cfg!(windows) { "syncthing.exe" } else { "syncthing" };
         if let Ok(p) = std::env::var("YMEMO_SYNCTHING_BIN") {
             let p = PathBuf::from(p);
             if p.is_file() {
                 return Some(p);
             }
         }
-        let exe = if cfg!(windows) { "syncthing.exe" } else { "syncthing" };
+        // 릴리스 패키지는 syncthing 을 앱 실행파일 옆에 번들한다.
+        if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)) {
+            let bundled = dir.join(exe);
+            if bundled.is_file() {
+                return Some(bundled);
+            }
+        }
         std::env::split_paths(&std::env::var_os("PATH")?)
             .map(|d| d.join(exe))
             .find(|p| p.is_file())

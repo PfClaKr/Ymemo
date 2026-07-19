@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 ymemo-core.workspace = true
 slint.workspace = true
+qrcode.workspace = true
 directories.workspace = true
 anyhow.workspace = true
 

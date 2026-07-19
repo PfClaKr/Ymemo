@@ -3,6 +3,7 @@ import { LineEdit, Button } from "std-widgets.slint";
 // 스티커 메모 창.
 //  - no-frame + always-on-top + 반투명 배경 (데스크탑 위젯 스타일)
 //  - 시작 시 잠금 화면: 마스터 암호 입력 → Rust 쪽에서 vault 를 열면 메모 UI 로 전환.
+//  - 🔗 버튼으로 페어링 패널(자기 QR + 상대 기기 ID 등록) 토글.
 export component AppWindow inherits Window {
     title: "Ymemo";
     no-frame: true;
@@ -19,10 +20,23 @@ export component AppWindow inherits Window {
     in property <bool> locked: true;
     // 암호 오류 등 잠금 화면에 띄울 메시지
     in property <string> lock-message;
+    // syncthing 이 떠 있는가 (페어링 가능 여부)
+    in property <bool> sync-available: false;
+    // 이 기기의 페어링 코드 (YMEMO1:...)
+    in property <string> my-pairing-code;
+    // 페어링 코드의 QR 렌더링
+    in property <image> qr-image;
+    // peer 등록 결과 메시지
+    in property <string> peer-message;
     // 새 메모 추가 요청 (제목 문자열)
     callback add-memo(string);
     // 마스터 암호로 vault 열기 요청
     callback unlock(string);
+    // 상대 기기 페어링 코드 등록 요청
+    callback add-peer(string);
+
+    // 페어링 패널 표시 여부 (앱 내 토글)
+    private property <bool> show-sync: false;
 
     Rectangle {
         background: #fff9b1f2; // 반투명 노란 스티커
@@ -68,19 +82,76 @@ export component AppWindow inherits Window {
             padding: 12px;
             spacing: 8px;
 
-            Text {
-                text: "Ymemo 📝";
-                font-size: 16px;
-                font-weight: 700;
-                color: #5c5c25;
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: "Ymemo 📝";
+                    font-size: 16px;
+                    font-weight: 700;
+                    color: #5c5c25;
+                    horizontal-stretch: 1;
+                }
+                Button {
+                    text: "🔗";
+                    clicked => { root.show-sync = !root.show-sync; }
+                }
             }
 
-            // 메모 목록
-            for memo in root.memos: Text {
-                text: "• " + memo;
-                font-size: 14px;
-                color: #333333;
+            // ---- 페어링 패널 ----
+            if root.show-sync && root.sync-available: VerticalLayout {
+                spacing: 6px;
+                Text {
+                    text: "기기 페어링";
+                    font-size: 13px;
+                    font-weight: 700;
+                    color: #5c5c25;
+                }
+                Image {
+                    source: root.qr-image;
+                    width: 150px;
+                    height: 150px;
+                    image-rendering: pixelated;
+                }
+                Text {
+                    text: root.my-pairing-code;
+                    font-size: 9px;
+                    color: #666;
+                    wrap: char-wrap;
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    peer := LineEdit {
+                        placeholder-text: "상대 페어링 코드...";
+                        accepted => { root.add-peer(self.text); }
+                    }
+                    Button {
+                        text: "등록";
+                        clicked => { root.add-peer(peer.text); }
+                    }
+                }
+                Text {
+                    text: root.peer-message;
+                    font-size: 11px;
+                    color: #5c5c25;
+                    wrap: word-wrap;
+                }
+            }
+            if root.show-sync && !root.sync-available: Text {
+                text: "syncthing 을 찾지 못해 동기화가 꺼져 있습니다.";
+                font-size: 12px;
+                color: #a03a3a;
                 wrap: word-wrap;
+            }
+
+            // ---- 메모 목록 ----
+            if !root.show-sync: VerticalLayout {
+                spacing: 8px;
+                for memo in root.memos: Text {
+                    text: "• " + memo;
+                    font-size: 14px;
+                    color: #333333;
+                    wrap: word-wrap;
+                }
             }
 
             // 남는 공간을 채워 입력 줄을 아래로 밀어낸다
