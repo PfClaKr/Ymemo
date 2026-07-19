@@ -9,6 +9,9 @@
 # 모바일은 현재 Rust FFI 라이브러리까지만 빌드한다. APK/IPA 패키징은
 # flutter_rust_bridge codegen + flutter create + 서명 설정이 갖춰지면 추가한다
 # (apps/mobile/README.md 참조).
+#
+# 주의: GitHub 소유 액션(actions/*)만 쓴다 — 서드파티 액션 차단 정책에서도 돌도록.
+# 툴체인은 러너에 내장된 rustup, 릴리스 생성은 내장 gh CLI 를 쓴다.
 
 name: release
 
@@ -25,8 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      # slint 의존성이 edition2024 를 요구 → 최신 stable 로 갱신
+      - run: rustup update stable
       # GUI(slint) 를 빌드하지 않으므로 fontconfig 불필요
       - run: cargo test -p ymemo-core -p ymemo-ffi
 
@@ -35,8 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - run: rustup update stable
       - name: Install slint deps
         run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
       - run: cargo build --release -p ymemo-desktop
@@ -59,8 +61,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - run: rustup update stable
       - run: cargo build --release -p ymemo-desktop
       - name: Bundle syncthing + package
         shell: pwsh
@@ -82,10 +83,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
-      - uses: Swatinem/rust-cache@v2
+      - run: |
+          rustup update stable
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
       - name: Build .so for all ABIs
@@ -104,10 +104,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim
-      - uses: Swatinem/rust-cache@v2
+      - run: |
+          rustup update stable
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
       - name: Build static libs (device + simulator)
         run: |
           cargo build --release --target aarch64-apple-ios -p ymemo-ffi
@@ -130,11 +129,14 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ymemo-desktop-linux-x86_64.tar.gz
-            ymemo-desktop-windows-x86_64.zip
-            ymemo-ffi-android-jniLibs.zip
+      - name: Create release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" --generate-notes || true
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+            ymemo-desktop-linux-x86_64.tar.gz \
+            ymemo-desktop-windows-x86_64.zip \
+            ymemo-ffi-android-jniLibs.zip \
             ymemo-ffi-ios.zip
-          generate_release_notes: true
