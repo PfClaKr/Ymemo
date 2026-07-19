@@ -6,6 +6,7 @@
 
 pub mod changelog;
 pub mod crypto;
+pub mod sync;
 pub mod vault;
 
 use anyhow::Result;

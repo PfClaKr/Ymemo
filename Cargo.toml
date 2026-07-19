@@ -32,5 +32,8 @@ chacha20poly1305 = "0.10" # XChaCha20-Poly1305 AEAD (24B nonce)
 argon2 = "0.5"            # Argon2id 키 유도
 rand = "0.8"              # salt/nonce 생성 (OsRng)
 
+# Syncthing REST 제어용 HTTP 클라이언트 (localhost 전용이라 TLS 불필요)
+ureq = { version = "3", default-features = false, features = ["json"] }
+
 # 공통 유틸
 anyhow = "1"
