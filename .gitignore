@@ -1,0 +1,12 @@
+# Rust 빌드 산출물
+/target
+
+# 로컬 전용 cargo 설정 (fontconfig shim 의 PKG_CONFIG_PATH 등, 머신 종속)
+.cargo/config.toml
+
+# Slint/IME 검증 스파이크 (머신 종속 경로, 커밋하지 않음)
+/experiments
+
+# OS / 에디터 잡동사니
+.DS_Store
+*.swp

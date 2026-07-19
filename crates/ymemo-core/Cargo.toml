@@ -1,0 +1,17 @@
+[package]
+name = "ymemo-core"
+description = "Ymemo 공유 코어: 데이터 모델, 로컬 저장소(SQLite). 이후 CRDT/암호화/동기화가 여기에 추가된다."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+anyhow.workspace = true
+chacha20poly1305.workspace = true
+argon2.workspace = true
+rand.workspace = true

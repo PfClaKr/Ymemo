@@ -1,0 +1,69 @@
+import { LineEdit, Button } from "std-widgets.slint";
+
+// Phase 0 스캐폴딩용 스티커 메모 창.
+//  - no-frame + always-on-top + 반투명 배경 (데스크탑 위젯 스타일)
+//  - ymemo-core 의 메모 목록을 표시하고, 새 메모를 추가한다.
+export component AppWindow inherits Window {
+    title: "Ymemo";
+    no-frame: true;
+    always-on-top: true;
+    background: #0000; // 창 자체는 투명, 실제 배경은 아래 Rectangle
+    preferred-width: 300px;
+    preferred-height: 380px;
+    min-width: 220px;
+    min-height: 160px;
+
+    // Rust 쪽에서 채워 넣는 메모 제목 목록
+    in property <[string]> memos;
+    // 새 메모 추가 요청 (제목 문자열)
+    callback add-memo(string);
+
+    Rectangle {
+        background: #fff9b1f2; // 반투명 노란 스티커
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: #e6d24a;
+
+        VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+
+            Text {
+                text: "Ymemo 📝";
+                font-size: 16px;
+                font-weight: 700;
+                color: #5c5c25;
+            }
+
+            // 메모 목록
+            for memo in root.memos: Text {
+                text: "• " + memo;
+                font-size: 14px;
+                color: #333333;
+                wrap: word-wrap;
+            }
+
+            // 남는 공간을 채워 입력 줄을 아래로 밀어낸다
+            Rectangle { vertical-stretch: 1; }
+
+            // 입력 줄
+            HorizontalLayout {
+                spacing: 6px;
+                input := LineEdit {
+                    placeholder-text: "새 메모 입력...";
+                    accepted => {
+                        root.add-memo(self.text);
+                        self.text = "";
+                    }
+                }
+                Button {
+                    text: "추가";
+                    clicked => {
+                        root.add-memo(input.text);
+                        input.text = "";
+                    }
+                }
+            }
+        }
+    }
+}

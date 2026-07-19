@@ -1,0 +1,16 @@
+[package]
+name = "ymemo-desktop"
+description = "Ymemo 데스크탑 앱 (Slint). 스티커 메모 UI. ymemo-core 를 사용한다."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ymemo-core.workspace = true
+slint.workspace = true
+directories.workspace = true
+anyhow.workspace = true
+
+[build-dependencies]
+slint-build.workspace = true

@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = ["crates/ymemo-core", "crates/ymemo-desktop"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/PfClaKr/Ymemo"
+authors = ["PfClaKr"]
+
+# 공용 의존성. 각 crate 는 `xxx.workspace = true` 로 참조한다.
+[workspace.dependencies]
+ymemo-core = { path = "crates/ymemo-core" }
+
+# GUI (데스크탑)
+slint = "1"
+slint-build = "1"
+
+# 저장소 / 데이터
+rusqlite = { version = "0.32", features = ["bundled"] } # bundled: 시스템 libsqlite3 불필요, 소스에서 컴파일
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+directories = "5"
+
+# 암호화 (순수 Rust RustCrypto: 시스템 libsodium 불필요, 크로스컴파일 용이)
+chacha20poly1305 = "0.10" # XChaCha20-Poly1305 AEAD (24B nonce)
+argon2 = "0.5"            # Argon2id 키 유도
+rand = "0.8"              # salt/nonce 생성 (OsRng)
+
+# 공통 유틸
+anyhow = "1"
