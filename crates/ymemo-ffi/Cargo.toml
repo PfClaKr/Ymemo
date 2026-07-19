@@ -1,0 +1,15 @@
+[package]
+name = "ymemo-ffi"
+description = "Ymemo 모바일(Flutter) FFI 계층. flutter_rust_bridge 가 src/api.rs 를 스캔해 Dart 바인딩을 생성한다."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+# staticlib: iOS (.a) / cdylib: Android (.so) / rlib: 호스트 테스트용
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+ymemo-core.workspace = true
+anyhow.workspace = true

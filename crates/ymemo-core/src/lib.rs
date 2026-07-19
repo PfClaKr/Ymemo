@@ -173,7 +173,8 @@ impl Store {
     }
 }
 
-fn now_millis() -> i64 {
+/// 현재 시각 (Unix epoch millis). FFI 등 코어 밖에서도 같은 시계를 쓰도록 공개.
+pub fn now_millis() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
