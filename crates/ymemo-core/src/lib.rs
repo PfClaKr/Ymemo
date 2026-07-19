@@ -6,6 +6,7 @@
 
 pub mod changelog;
 pub mod crypto;
+pub mod vault;
 
 use anyhow::Result;
 use rusqlite::{params, Connection};
@@ -74,8 +75,48 @@ impl Store {
                 body       TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
+            );
+            -- 기기 로컬 메타데이터 (device_id 등). 동기화되지 않는 기기별 값.
+            CREATE TABLE IF NOT EXISTS meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
             );",
         )?;
+        Ok(())
+    }
+
+    /// 이 저장소(=이 기기)의 고유 식별자. 없으면 생성해 meta 에 영속화한다.
+    ///
+    /// SQLite 캐시는 기기별 자산이므로 device_id 를 여기 두면 동기화 대상에서
+    /// 자연히 제외된다. (캐시를 지우면 새 id 가 나오지만, 옛 로그는 남고
+    /// 새 append 가 새 로그 파일로 갈 뿐이라 무해하다.)
+    pub fn device_id(&self) -> Result<String> {
+        if let Some(id) = self.meta_get("device_id")? {
+            return Ok(id);
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        self.meta_set("device_id", &id)?;
+        Ok(id)
+    }
+
+    fn meta_get(&self, key: &str) -> Result<Option<String>> {
+        let mut stmt = self.conn.prepare("SELECT value FROM meta WHERE key = ?1")?;
+        let mut rows = stmt.query_map([key], |row| row.get(0))?;
+        Ok(rows.next().transpose()?)
+    }
+
+    fn meta_set(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = ?2",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    /// 메모 테이블 전체 비우기 (로그 재생 전 초기화용; meta 는 유지).
+    pub fn clear_memos(&self) -> Result<()> {
+        self.conn.execute("DELETE FROM memos", [])?;
         Ok(())
     }
 

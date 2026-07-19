@@ -30,6 +30,8 @@ pub fn generate_salt() -> Salt {
 /// 마스터 암호에서 유도한 대칭 암호화 키.
 ///
 /// 원시 키 바이트는 밖으로 노출하지 않고, 준비된 AEAD cipher 만 들고 있는다.
+/// Clone 은 같은 키를 여러 로그(vault 의 기기별 로그들)에서 쓰기 위함.
+#[derive(Clone)]
 pub struct MasterKey {
     cipher: XChaCha20Poly1305,
 }
