@@ -1,58 +1,25 @@
-//! 기기별 append-only 암호화 change 로그.
+//! 기기별 append-only 암호화 레코드 로그.
 //!
-//! 데이터 모델의 핵심(재론 금지 결정): 각 기기는 자기 변경분만 로그 끝에 덧붙인다.
+//! 데이터 모델의 핵심(재론 금지 결정): 각 기기는 자기 로그 파일 끝에만 덧붙인다.
 //! 파일을 되쓰지 않으므로 동기화 시 파일 충돌이 0 이다. 각 레코드는 XChaCha20-Poly1305
-//! 로 개별 암호화되며, 복호화 후 순서대로 재생하면 로컬 SQLite 상태가 재구성된다.
+//! 로 개별 암호화된다.
+//!
+//! 레코드 내용은 이 계층에선 불투명한 바이트다 — 현재는 automerge change 바이너리가
+//! 들어간다(actor·seq·타임스탬프·의존성은 automerge change 에 내장). 해석은 vault 몫.
 //!
 //! 온디스크 포맷(레코드 반복):
 //! ```text
 //! [u32 LE 레코드 길이][nonce(24B) || ciphertext+tag] ...
 //! ```
-//! 평문은 `Change` 의 JSON 직렬화다. (이후 CRDT=Automerge 로 교체 예정, 지금은 단순 저장.)
 
 use anyhow::{anyhow, Result};
-use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
 use crate::crypto::MasterKey;
-use crate::{now_millis, Memo, Store};
 
-/// 한 change 가 담는 연산.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ChangeOp {
-    /// 메모 삽입 또는 갱신 (전체 스냅샷).
-    Upsert(Memo),
-    /// 메모 삭제.
-    Delete { id: String },
-}
-
-/// 로그에 기록되는 변경 한 건.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Change {
-    /// 기록한 기기 식별자.
-    pub device_id: String,
-    /// 기기 내 단조 증가 시퀀스 (기기별 순서 보장).
-    pub seq: u64,
-    /// 기록 시각 (Unix epoch millis).
-    pub timestamp: i64,
-    pub op: ChangeOp,
-}
-
-impl Change {
-    /// 현재 시각으로 새 change 생성.
-    pub fn new(device_id: impl Into<String>, seq: u64, op: ChangeOp) -> Self {
-        Self {
-            device_id: device_id.into(),
-            seq,
-            timestamp: now_millis(),
-            op,
-        }
-    }
-}
-
-/// 암호화된 append-only change 로그 파일.
+/// 암호화된 append-only 레코드 로그 파일.
 ///
 /// 키를 소유하며, append/read 시 자동으로 암·복호화한다.
 pub struct ChangeLog {
@@ -69,10 +36,9 @@ impl ChangeLog {
         }
     }
 
-    /// change 하나를 암호화해 파일 끝에 덧붙인다.
-    pub fn append(&self, change: &Change) -> Result<()> {
-        let plaintext = serde_json::to_vec(change)?;
-        let record = self.key.encrypt(&plaintext)?;
+    /// 레코드(평문 바이트) 하나를 암호화해 파일 끝에 덧붙인다.
+    pub fn append(&self, plaintext: &[u8]) -> Result<()> {
+        let record = self.key.encrypt(plaintext)?;
         let len = u32::try_from(record.len())
             .map_err(|_| anyhow!("레코드가 u32 범위를 넘음 ({}B)", record.len()))?;
 
@@ -82,15 +48,15 @@ impl ChangeLog {
         Ok(())
     }
 
-    /// 로그를 처음부터 끝까지 읽어 복호화한 change 들을 순서대로 반환.
+    /// 로그를 처음부터 끝까지 읽어 복호화한 레코드들을 순서대로 반환.
     ///
     /// 파일이 없으면 빈 벡터.
-    pub fn read_all(&self) -> Result<Vec<Change>> {
+    pub fn read_all(&self) -> Result<Vec<Vec<u8>>> {
         if !self.path.exists() {
             return Ok(Vec::new());
         }
         let mut reader = BufReader::new(File::open(&self.path)?);
-        let mut changes = Vec::new();
+        let mut records = Vec::new();
 
         loop {
             let mut len_buf = [0u8; 4];
@@ -103,20 +69,58 @@ impl ChangeLog {
 
             let mut record = vec![0u8; len];
             reader.read_exact(&mut record)?;
-            let plaintext = self.key.decrypt(&record)?;
-            changes.push(serde_json::from_slice(&plaintext)?);
+            records.push(self.key.decrypt(&record)?);
         }
-        Ok(changes)
+        Ok(records)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::{generate_salt, MasterKey};
+
+    fn temp_path() -> PathBuf {
+        std::env::temp_dir().join(format!("ymemo-log-{}.bin", uuid::Uuid::new_v4()))
     }
 
-    /// 로그를 복호화해 전부 `store` 에 재생(replay)한다.
-    ///
-    /// 현재는 로그에 적힌 순서대로 적용한다(단일 기기 기준). 다기기 병합은
-    /// 이후 CRDT 단계에서 순서 무관 병합으로 대체된다.
-    pub fn rebuild_into(&self, store: &Store) -> Result<()> {
-        for change in self.read_all()? {
-            store.apply(&change.op)?;
-        }
-        Ok(())
+    #[test]
+    fn append_read_roundtrip() {
+        let path = temp_path();
+        let salt = generate_salt();
+        let log = ChangeLog::open(&path, MasterKey::derive(b"pw", &salt).unwrap());
+
+        log.append(b"record-1").unwrap();
+        log.append("두 번째 🦀".as_bytes()).unwrap();
+
+        // 파일엔 평문이 없어야 한다.
+        let raw = std::fs::read(&path).unwrap();
+        assert!(!raw.windows(8).any(|w| w == b"record-1"));
+
+        // 별도 인스턴스(같은 키)로 읽어도 순서대로 복원.
+        let log2 = ChangeLog::open(&path, MasterKey::derive(b"pw", &salt).unwrap());
+        let records = log2.read_all().unwrap();
+        assert_eq!(records, vec![b"record-1".to_vec(), "두 번째 🦀".as_bytes().to_vec()]);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn wrong_key_fails() {
+        let path = temp_path();
+        let salt = generate_salt();
+        ChangeLog::open(&path, MasterKey::derive(b"pw", &salt).unwrap())
+            .append(b"secret")
+            .unwrap();
+        let wrong = ChangeLog::open(&path, MasterKey::derive(b"nope", &salt).unwrap());
+        assert!(wrong.read_all().is_err());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn missing_file_is_empty() {
+        let salt = generate_salt();
+        let log = ChangeLog::open(temp_path(), MasterKey::derive(b"pw", &salt).unwrap());
+        assert!(log.read_all().unwrap().is_empty());
     }
 }

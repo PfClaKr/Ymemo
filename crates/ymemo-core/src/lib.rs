@@ -12,8 +12,6 @@ use anyhow::Result;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
-use changelog::ChangeOp;
-
 /// 메모 한 건. (사진 첨부 등은 이후 단계에서 확장)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Memo {
@@ -171,14 +169,6 @@ impl Store {
         self.conn.execute("DELETE FROM memos WHERE id = ?1", [id])?;
         Ok(())
     }
-
-    /// change 로그의 연산 하나를 로컬 상태에 적용(replay).
-    pub fn apply(&self, op: &ChangeOp) -> Result<()> {
-        match op {
-            ChangeOp::Upsert(memo) => self.upsert(memo),
-            ChangeOp::Delete { id } => self.delete(id),
-        }
-    }
 }
 
 fn now_millis() -> i64 {
@@ -208,62 +198,6 @@ mod tests {
 
         store.delete(&memo.id).unwrap();
         assert_eq!(store.list().unwrap().len(), 0);
-    }
-
-    /// Phase 1 왕복: 변경 → 암호화 change 로그(파일) → 복호화 → SQLite 재구성.
-    #[test]
-    fn changelog_roundtrip_rebuilds_store() {
-        use changelog::{Change, ChangeLog, ChangeOp};
-        use crypto::{generate_salt, MasterKey};
-
-        // 임시 로그 파일 경로.
-        let path = std::env::temp_dir().join(format!("ymemo-log-{}.bin", uuid::Uuid::new_v4()));
-        let salt = generate_salt();
-
-        // --- 기록 측: 원본 store 에 변경을 가하며 로그에 append ---
-        let source = Store::open_in_memory().unwrap();
-        let log = ChangeLog::open(&path, MasterKey::derive(b"master-pw", &salt).unwrap());
-
-        let mut seq = 0u64;
-        let mut record = |op: ChangeOp| {
-            source.apply(&op).unwrap();
-            log.append(&Change::new("device-A", seq, op)).unwrap();
-            seq += 1;
-        };
-
-        let mut m1 = Memo::new("첫 메모", "본문");
-        record(ChangeOp::Upsert(m1.clone()));
-
-        let m2 = Memo::new("둘째", "🦀");
-        record(ChangeOp::Upsert(m2.clone()));
-
-        m1.title = "첫 메모(수정)".into();
-        m1.updated_at += 1000;
-        record(ChangeOp::Upsert(m1.clone())); // 갱신
-
-        let throwaway = Memo::new("지울 것", "");
-        record(ChangeOp::Upsert(throwaway.clone()));
-        record(ChangeOp::Delete { id: throwaway.id.clone() }); // 삭제
-
-        // 파일은 실제로 암호화돼 있어야 한다 (평문 제목이 안 보임).
-        let raw = std::fs::read(&path).unwrap();
-        assert!(!raw.windows("첫 메모".len()).any(|w| w == "첫 메모".as_bytes()));
-
-        // --- 복원 측: 새 store 를 로그만으로 재구성 ---
-        let rebuilt = Store::open_in_memory().unwrap();
-        let log2 = ChangeLog::open(&path, MasterKey::derive(b"master-pw", &salt).unwrap());
-        log2.rebuild_into(&rebuilt).unwrap();
-
-        assert_eq!(rebuilt.list().unwrap(), source.list().unwrap());
-        assert_eq!(rebuilt.get(&m1.id).unwrap().unwrap().title, "첫 메모(수정)");
-        assert_eq!(rebuilt.get(&m2.id).unwrap(), Some(m2));
-        assert!(rebuilt.get(&throwaway.id).unwrap().is_none());
-
-        // 틀린 암호로는 재구성 불가.
-        let wrong = ChangeLog::open(&path, MasterKey::derive(b"wrong", &salt).unwrap());
-        assert!(wrong.read_all().is_err());
-
-        std::fs::remove_file(&path).ok();
     }
 
     #[test]
