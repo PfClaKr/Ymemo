@@ -1,9 +1,67 @@
 import { LineEdit, Button } from "std-widgets.slint";
 
+// 기기 페어링 패널: 자기 QR/코드 표시 + 상대 코드 등록.
+// 잠금 화면과 메모 화면 양쪽에서 쓴다 — 새 기기는 unlock 전에 먼저 페어링해야
+// 기존 vault(salt/로그)가 동기화된 뒤 같은 키로 합류할 수 있다.
+component PairingPanel inherits VerticalLayout {
+    in property <bool> available;
+    in property <string> my-code;
+    in property <image> qr;
+    in property <string> message;
+    callback add-peer(string);
+
+    spacing: 6px;
+
+    if root.available: VerticalLayout {
+        spacing: 6px;
+        Text {
+            text: "기기 페어링";
+            font-size: 13px;
+            font-weight: 700;
+            color: #5c5c25;
+        }
+        Image {
+            source: root.qr;
+            width: 150px;
+            height: 150px;
+            image-rendering: pixelated;
+        }
+        Text {
+            text: root.my-code;
+            font-size: 9px;
+            color: #666;
+            wrap: char-wrap;
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            peer := LineEdit {
+                placeholder-text: "상대 페어링 코드...";
+                accepted => { root.add-peer(self.text); }
+            }
+            Button {
+                text: "등록";
+                clicked => { root.add-peer(peer.text); }
+            }
+        }
+        Text {
+            text: root.message;
+            font-size: 11px;
+            color: #5c5c25;
+            wrap: word-wrap;
+        }
+    }
+    if !root.available: Text {
+        text: "syncthing 을 찾지 못해 동기화가 꺼져 있습니다.";
+        font-size: 12px;
+        color: #a03a3a;
+        wrap: word-wrap;
+    }
+}
+
 // 스티커 메모 창.
 //  - no-frame + always-on-top + 반투명 배경 (데스크탑 위젯 스타일)
 //  - 시작 시 잠금 화면: 마스터 암호 입력 → Rust 쪽에서 vault 를 열면 메모 UI 로 전환.
-//  - 🔗 버튼으로 페어링 패널(자기 QR + 상대 기기 ID 등록) 토글.
+//  - 🔗 버튼으로 페어링 패널 토글 (잠금 화면 포함).
 export component AppWindow inherits Window {
     title: "Ymemo";
     no-frame: true;
@@ -44,48 +102,15 @@ export component AppWindow inherits Window {
         border-width: 1px;
         border-color: #e6d24a;
 
-        if root.locked: VerticalLayout {
+        VerticalLayout {
             padding: 12px;
             spacing: 8px;
 
-            Text {
-                text: "Ymemo 🔒";
-                font-size: 16px;
-                font-weight: 700;
-                color: #5c5c25;
-            }
-
-            Rectangle { vertical-stretch: 1; }
-
-            Text {
-                text: root.lock-message;
-                font-size: 12px;
-                color: #a03a3a;
-                wrap: word-wrap;
-            }
-
-            HorizontalLayout {
-                spacing: 6px;
-                pw := LineEdit {
-                    placeholder-text: "마스터 암호...";
-                    input-type: InputType.password;
-                    accepted => { root.unlock(self.text); }
-                }
-                Button {
-                    text: "열기";
-                    clicked => { root.unlock(pw.text); }
-                }
-            }
-        }
-
-        if !root.locked: VerticalLayout {
-            padding: 12px;
-            spacing: 8px;
-
+            // ---- 헤더 (항상 표시) ----
             HorizontalLayout {
                 spacing: 6px;
                 Text {
-                    text: "Ymemo 📝";
+                    text: root.locked ? "Ymemo 🔒" : "Ymemo 📝";
                     font-size: 16px;
                     font-weight: 700;
                     color: #5c5c25;
@@ -97,54 +122,17 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // ---- 페어링 패널 ----
-            if root.show-sync && root.sync-available: VerticalLayout {
-                spacing: 6px;
-                Text {
-                    text: "기기 페어링";
-                    font-size: 13px;
-                    font-weight: 700;
-                    color: #5c5c25;
-                }
-                Image {
-                    source: root.qr-image;
-                    width: 150px;
-                    height: 150px;
-                    image-rendering: pixelated;
-                }
-                Text {
-                    text: root.my-pairing-code;
-                    font-size: 9px;
-                    color: #666;
-                    wrap: char-wrap;
-                }
-                HorizontalLayout {
-                    spacing: 6px;
-                    peer := LineEdit {
-                        placeholder-text: "상대 페어링 코드...";
-                        accepted => { root.add-peer(self.text); }
-                    }
-                    Button {
-                        text: "등록";
-                        clicked => { root.add-peer(peer.text); }
-                    }
-                }
-                Text {
-                    text: root.peer-message;
-                    font-size: 11px;
-                    color: #5c5c25;
-                    wrap: word-wrap;
-                }
-            }
-            if root.show-sync && !root.sync-available: Text {
-                text: "syncthing 을 찾지 못해 동기화가 꺼져 있습니다.";
-                font-size: 12px;
-                color: #a03a3a;
-                wrap: word-wrap;
+            // ---- 페어링 패널 (잠금 여부 무관) ----
+            if root.show-sync: PairingPanel {
+                available: root.sync-available;
+                my-code: root.my-pairing-code;
+                qr: root.qr-image;
+                message: root.peer-message;
+                add-peer(code) => { root.add-peer(code); }
             }
 
-            // ---- 메모 목록 ----
-            if !root.show-sync: VerticalLayout {
+            // ---- 메모 목록 (unlock 후) ----
+            if !root.show-sync && !root.locked: VerticalLayout {
                 spacing: 8px;
                 for memo in root.memos: Text {
                     text: "• " + memo;
@@ -157,8 +145,31 @@ export component AppWindow inherits Window {
             // 남는 공간을 채워 입력 줄을 아래로 밀어낸다
             Rectangle { vertical-stretch: 1; }
 
-            // 입력 줄
-            HorizontalLayout {
+            // ---- 잠금 화면: 오류 메시지 + 암호 입력 ----
+            if root.locked && !root.show-sync: VerticalLayout {
+                spacing: 8px;
+                Text {
+                    text: root.lock-message;
+                    font-size: 12px;
+                    color: #a03a3a;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    pw := LineEdit {
+                        placeholder-text: "마스터 암호...";
+                        input-type: InputType.password;
+                        accepted => { root.unlock(self.text); }
+                    }
+                    Button {
+                        text: "열기";
+                        clicked => { root.unlock(pw.text); }
+                    }
+                }
+            }
+
+            // ---- 메모 입력 줄 (unlock 후) ----
+            if !root.locked && !root.show-sync: HorizontalLayout {
                 spacing: 6px;
                 input := LineEdit {
                     placeholder-text: "새 메모 입력...";

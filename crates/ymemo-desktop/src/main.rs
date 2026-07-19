@@ -33,10 +33,33 @@ fn data_dir() -> std::path::PathBuf {
 
 fn main() -> Result<()> {
     let vault: Rc<RefCell<Option<Vault>>> = Rc::new(RefCell::new(None));
-    // 앱 종료 시 Drop 으로 데몬도 함께 종료된다.
-    let syncthing: Rc<RefCell<Option<Syncthing>>> = Rc::new(RefCell::new(None));
 
     let ui = AppWindow::new()?;
+
+    // syncthing 은 unlock 전에 띄운다 (키가 필요 없음). 이래야 새 기기가
+    // "먼저 페어링 → vault.json/로그 동기화 → 그 다음 암호 입력" 순서로
+    // 기존 vault 에 합류할 수 있다. (unlock 을 먼저 하면 새 salt 로 vault 를
+    // 만들어버려 기존 기기와 키가 갈라진다.)
+    let dir = data_dir();
+    let vault_dir = dir.join("vault");
+    let _ = std::fs::create_dir_all(&vault_dir);
+    let st = start_syncthing(&dir, &vault_dir);
+    if let Some(st) = &st {
+        // 페어링 정보: 자기 코드 + QR 을 UI 에 노출 (잠금 화면에서도 접근 가능).
+        match st.device_id() {
+            Ok(id) => {
+                let code = PairingCode::new(id).encode();
+                if let Some(img) = qr_image(&code) {
+                    ui.set_qr_image(img);
+                }
+                ui.set_my_pairing_code(SharedString::from(code));
+                ui.set_sync_available(true);
+            }
+            Err(e) => eprintln!("기기 ID 조회 실패: {e}"),
+        }
+    }
+    // 앱 종료 시 Drop 으로 데몬도 함께 종료된다.
+    let syncthing: Rc<RefCell<Option<Syncthing>>> = Rc::new(RefCell::new(st));
 
     // 메모 목록 모델 (vault 가 열리면 채워진다)
     let model: Rc<VecModel<SharedString>> = Rc::new(VecModel::from(Vec::<SharedString>::new()));
@@ -45,16 +68,15 @@ fn main() -> Result<()> {
     // "열기" 콜백: 마스터 암호로 vault 를 열거나 생성
     {
         let vault = vault.clone();
-        let syncthing = syncthing.clone();
         let model = model.clone();
         let ui_weak = ui.as_weak();
+        let dir = dir.clone();
         ui.on_unlock(move |password| {
             let ui = ui_weak.unwrap();
             if password.is_empty() {
                 ui.set_lock_message("암호를 입력하세요".into());
                 return;
             }
-            let dir = data_dir();
             // 캐시 DB 는 로컬 전용, vault/ 는 Syncthing 공유 폴더가 된다.
             let store = match Store::open(dir.join("ymemo.db")) {
                 Ok(s) => s,
@@ -67,22 +89,6 @@ fn main() -> Result<()> {
             match Vault::open_or_create(dir.join("vault"), password.as_bytes(), store) {
                 Ok(v) => {
                     refresh(&v, &model);
-                    let st = start_syncthing(&dir, v.dir());
-                    if let Some(st) = &st {
-                        // 페어링 정보: 자기 코드 + QR 을 UI 에 노출.
-                        match st.device_id() {
-                            Ok(id) => {
-                                let code = PairingCode::new(id).encode();
-                                if let Some(img) = qr_image(&code) {
-                                    ui.set_qr_image(img);
-                                }
-                                ui.set_my_pairing_code(SharedString::from(code));
-                                ui.set_sync_available(true);
-                            }
-                            Err(e) => eprintln!("기기 ID 조회 실패: {e}"),
-                        }
-                    }
-                    *syncthing.borrow_mut() = st;
                     *vault.borrow_mut() = Some(v);
                     ui.set_locked(false);
                 }
