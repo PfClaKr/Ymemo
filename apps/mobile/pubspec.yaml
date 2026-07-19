@@ -1,0 +1,22 @@
+# Ymemo 모바일 (Flutter). Rust 코어는 crates/ymemo-ffi 를 flutter_rust_bridge 로 사용.
+name: ymemo_mobile
+description: Local-first encrypted memo app (mobile).
+publish_to: "none"
+version: 0.1.0
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # Rust FFI 바인딩 런타임 (생성 코드가 사용)
+  flutter_rust_bridge: ^2.11.1
+  # 플랫폼별 앱 데이터 디렉터리 (vault/캐시 경로)
+  path_provider: ^2.1.0
+
+dev_dependencies:
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

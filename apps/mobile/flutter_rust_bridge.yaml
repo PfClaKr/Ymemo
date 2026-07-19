@@ -1,0 +1,5 @@
+# flutter_rust_bridge codegen 설정.
+# 실행: apps/mobile 에서 `flutter_rust_bridge_codegen generate`
+rust_input: crate::api
+rust_root: ../../crates/ymemo-ffi
+dart_output: lib/src/rust

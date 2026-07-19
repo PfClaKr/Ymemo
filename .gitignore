@@ -7,6 +7,17 @@
 # Slint/IME 검증 스파이크 (머신 종속 경로, 커밋하지 않음)
 /experiments
 
+# Flutter (apps/mobile): 소스만 커밋, 생성물/플랫폼 디렉터리는 flutter create + codegen 으로
+apps/mobile/android/
+apps/mobile/ios/
+apps/mobile/build/
+apps/mobile/.dart_tool/
+apps/mobile/.flutter-plugins*
+apps/mobile/.metadata
+apps/mobile/pubspec.lock
+apps/mobile/lib/src/rust/
+crates/ymemo-ffi/src/frb_generated.rs
+
 # OS / 에디터 잡동사니
 .DS_Store
 *.swp
