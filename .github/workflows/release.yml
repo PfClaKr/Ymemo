@@ -1,0 +1,140 @@
+# 릴리스 태그(v*)가 올라오면 데스크탑/모바일 바이너리를 빌드해 GitHub Release 에 첨부한다.
+#
+# 산출물:
+#  - ymemo-desktop-linux-x86_64.tar.gz   (앱 + syncthing 번들)
+#  - ymemo-desktop-windows-x86_64.zip    (앱 + syncthing 번들)
+#  - ymemo-ffi-android-jniLibs.zip       (arm64-v8a / armeabi-v7a / x86_64 .so)
+#  - ymemo-ffi-ios.zip                   (aarch64 기기·시뮬레이터 .a)
+#
+# 모바일은 현재 Rust FFI 라이브러리까지만 빌드한다. APK/IPA 패키징은
+# flutter_rust_bridge codegen + flutter create + 서명 설정이 갖춰지면 추가한다
+# (apps/mobile/README.md 참조).
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  # 데스크탑에 번들할 syncthing 버전 (통째 번들 결정 사항)
+  SYNCTHING_VERSION: v2.1.2
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # GUI(slint) 를 빌드하지 않으므로 fontconfig 불필요
+      - run: cargo test -p ymemo-core -p ymemo-ffi
+
+  linux-desktop:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install slint deps
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+      - run: cargo build --release -p ymemo-desktop
+      - name: Bundle syncthing + package
+        run: |
+          curl -sL -o st.tar.gz "https://github.com/syncthing/syncthing/releases/download/${SYNCTHING_VERSION}/syncthing-linux-amd64-${SYNCTHING_VERSION}.tar.gz"
+          tar xzf st.tar.gz
+          mkdir -p pkg/ymemo
+          cp target/release/ymemo-desktop pkg/ymemo/
+          cp "syncthing-linux-amd64-${SYNCTHING_VERSION}/syncthing" pkg/ymemo/
+          cp LICENSE pkg/ymemo/
+          tar czf ymemo-desktop-linux-x86_64.tar.gz -C pkg ymemo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-desktop
+          path: ymemo-desktop-linux-x86_64.tar.gz
+
+  windows-desktop:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p ymemo-desktop
+      - name: Bundle syncthing + package
+        shell: pwsh
+        run: |
+          curl.exe -sL -o st.zip "https://github.com/syncthing/syncthing/releases/download/$env:SYNCTHING_VERSION/syncthing-windows-amd64-$env:SYNCTHING_VERSION.zip"
+          Expand-Archive st.zip -DestinationPath st
+          New-Item -ItemType Directory -Force -Path pkg/ymemo | Out-Null
+          Copy-Item target/release/ymemo-desktop.exe pkg/ymemo/
+          Copy-Item "st/syncthing-windows-amd64-$env:SYNCTHING_VERSION/syncthing.exe" pkg/ymemo/
+          Copy-Item LICENSE pkg/ymemo/
+          Compress-Archive -Path pkg/ymemo -DestinationPath ymemo-desktop-windows-x86_64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-desktop
+          path: ymemo-desktop-windows-x86_64.zip
+
+  android-libs:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+      - name: Build .so for all ABIs
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \
+            -o jniLibs build --release -p ymemo-ffi
+          zip -r ymemo-ffi-android-jniLibs.zip jniLibs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-libs
+          path: ymemo-ffi-android-jniLibs.zip
+
+  ios-lib:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+      - name: Build static libs (device + simulator)
+        run: |
+          cargo build --release --target aarch64-apple-ios -p ymemo-ffi
+          cargo build --release --target aarch64-apple-ios-sim -p ymemo-ffi
+          mkdir -p ios-libs/device ios-libs/simulator
+          cp target/aarch64-apple-ios/release/libymemo_ffi.a ios-libs/device/
+          cp target/aarch64-apple-ios-sim/release/libymemo_ffi.a ios-libs/simulator/
+          zip -r ymemo-ffi-ios.zip ios-libs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-lib
+          path: ymemo-ffi-ios.zip
+
+  release:
+    needs: [linux-desktop, windows-desktop, android-libs, ios-lib]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ymemo-desktop-linux-x86_64.tar.gz
+            ymemo-desktop-windows-x86_64.zip
+            ymemo-ffi-android-jniLibs.zip
+            ymemo-ffi-ios.zip
+          generate_release_notes: true
