@@ -1,8 +1,8 @@
 import { LineEdit, Button } from "std-widgets.slint";
 
-// Phase 0 스캐폴딩용 스티커 메모 창.
+// 스티커 메모 창.
 //  - no-frame + always-on-top + 반투명 배경 (데스크탑 위젯 스타일)
-//  - ymemo-core 의 메모 목록을 표시하고, 새 메모를 추가한다.
+//  - 시작 시 잠금 화면: 마스터 암호 입력 → Rust 쪽에서 vault 를 열면 메모 UI 로 전환.
 export component AppWindow inherits Window {
     title: "Ymemo";
     no-frame: true;
@@ -15,8 +15,14 @@ export component AppWindow inherits Window {
 
     // Rust 쪽에서 채워 넣는 메모 제목 목록
     in property <[string]> memos;
+    // vault 가 열리기 전엔 잠금 화면을 보여준다
+    in property <bool> locked: true;
+    // 암호 오류 등 잠금 화면에 띄울 메시지
+    in property <string> lock-message;
     // 새 메모 추가 요청 (제목 문자열)
     callback add-memo(string);
+    // 마스터 암호로 vault 열기 요청
+    callback unlock(string);
 
     Rectangle {
         background: #fff9b1f2; // 반투명 노란 스티커
@@ -24,7 +30,41 @@ export component AppWindow inherits Window {
         border-width: 1px;
         border-color: #e6d24a;
 
-        VerticalLayout {
+        if root.locked: VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+
+            Text {
+                text: "Ymemo 🔒";
+                font-size: 16px;
+                font-weight: 700;
+                color: #5c5c25;
+            }
+
+            Rectangle { vertical-stretch: 1; }
+
+            Text {
+                text: root.lock-message;
+                font-size: 12px;
+                color: #a03a3a;
+                wrap: word-wrap;
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+                pw := LineEdit {
+                    placeholder-text: "마스터 암호...";
+                    input-type: InputType.password;
+                    accepted => { root.unlock(self.text); }
+                }
+                Button {
+                    text: "열기";
+                    clicked => { root.unlock(pw.text); }
+                }
+            }
+        }
+
+        if !root.locked: VerticalLayout {
             padding: 12px;
             spacing: 8px;
 
