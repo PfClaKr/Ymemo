@@ -1,4 +1,4 @@
-import { LineEdit, Button, TextEdit, ListView } from "std-widgets.slint";
+import { LineEdit, Button, TextEdit, ListView, Slider } from "std-widgets.slint";
 
 // 스티커 팔레트: 색상 키("yellow"/"pink"/"green"/"blue"/"purple") → 실제 색.
 // 코어(Memo.color)는 키 문자열만 저장·동기화하고, 실제 색 해석은 여기 한곳에 모은다.
@@ -307,11 +307,14 @@ export component StickyWindow inherits Window {
     in property <string> memo-title;
     in-out property <string> memo-text;
     in property <string> sticky-color: "yellow";
+    // 창 불투명도(%). 슬라이더를 끄는 동안엔 UI 가 직접 갱신(미리보기)하므로 in-out.
+    in-out property <float> sticky-opacity: 100;
     in property <bool> collapsed: false;
     callback edited(string);
     callback close-requested();
     callback new-memo();
     callback set-color(string);
+    callback set-opacity(float);
     callback start-drag();
     callback toggle-collapse();
 
@@ -325,6 +328,8 @@ export component StickyWindow inherits Window {
         border-width: 1px;
         border-color: Palette.bar(root.sticky-color).darker(0.15);
         clip: true;
+        // 창 전체(배경+글자)를 함께 흐리게 한다 — 데스크탑이 비쳐 보이는 위젯 느낌.
+        opacity: root.sticky-opacity / 100;
 
         VerticalLayout {
             // ---- 제목 바 (드래그 핸들 + 접기 토글) ----
@@ -400,26 +405,55 @@ export component StickyWindow inherits Window {
                 }
             }
 
-            // ---- 색 팔레트 (🎨 로 토글) ----
+            // ---- 색 · 투명도 패널 (🎨 로 토글) ----
+            // 색과 투명도를 함께 만지는 경우가 많아, 고른 뒤에도 패널을 닫지 않는다.
             if root.show-palette: Rectangle {
-                height: 34px;
+                height: 72px;
                 background: Palette.bar(root.sticky-color).darker(0.06);
-                HorizontalLayout {
+                VerticalLayout {
                     padding: 6px;
-                    spacing: 8px;
-                    alignment: center;
-                    for key in ["yellow", "pink", "green", "blue", "purple"]: Rectangle {
-                        width: 22px;
-                        height: 22px;
-                        border-radius: 11px;
-                        background: Palette.swatch(key);
-                        border-width: root.sticky-color == key ? 3px : 1px;
-                        border-color: root.sticky-color == key ? #ffffff : #00000040;
-                        chip := TouchArea {
-                            clicked => {
-                                root.set-color(key);
-                                root.show-palette = false;
+                    spacing: 4px;
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: center;
+                        for key in ["yellow", "pink", "green", "blue", "purple"]: Rectangle {
+                            width: 22px;
+                            height: 22px;
+                            border-radius: 11px;
+                            background: Palette.swatch(key);
+                            border-width: root.sticky-color == key ? 3px : 1px;
+                            border-color: root.sticky-color == key ? #ffffff : #00000040;
+                            chip := TouchArea {
+                                clicked => { root.set-color(key); }
                             }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: "투명도";
+                            font-size: 11px;
+                            color: Palette.ink(root.sticky-color);
+                            vertical-alignment: center;
+                        }
+                        Slider {
+                            horizontal-stretch: 1;
+                            minimum: 20; // 하한 — 코어의 MIN_OPACITY 와 맞춘다
+                            maximum: 100;
+                            value: root.sticky-opacity;
+                            // 끄는 동안엔 미리보기만, 손을 뗄 때 한 번 저장한다.
+                            changed(v) => { root.sticky-opacity = v; }
+                            released(v) => { root.set-opacity(v); }
+                        }
+                        Text {
+                            text: Math.round(root.sticky-opacity) + "%";
+                            font-size: 11px;
+                            color: Palette.ink(root.sticky-color);
+                            vertical-alignment: center;
+                            horizontal-alignment: right;
+                            width: 34px;
                         }
                     }
                 }

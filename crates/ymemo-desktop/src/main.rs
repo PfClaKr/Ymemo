@@ -245,6 +245,7 @@ fn main() -> Result<()> {
                                 }
                                 entry.window.set_memo_title(m.title.into());
                                 entry.window.set_sticky_color(m.color.into());
+                                entry.window.set_sticky_opacity(m.opacity as f32);
                             }
                             // 다른 기기에서 삭제됨 → 창만 숨긴다 (제거는 다음 닫기에서).
                             Ok(None) => {
@@ -374,6 +375,7 @@ fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     window.set_memo_title(SharedString::from(memo.title.clone()));
     window.set_memo_text(SharedString::from(sticky_text(memo)));
     window.set_sticky_color(SharedString::from(memo.color.clone()));
+    window.set_sticky_opacity(memo.opacity as f32);
 
     let dirty = Rc::new(Cell::new(false));
     let expanded_height = Rc::new(Cell::new(0.0f32));
@@ -447,6 +449,26 @@ fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
             }
             if let Some(w) = weak.upgrade() {
                 w.set_sticky_color(key);
+            }
+        });
+    }
+
+    // 투명도 슬라이더 → 손을 뗄 때 한 번 저장 (드래그 중 미리보기는 UI 가 처리).
+    {
+        let ctx = ctx.clone();
+        let id = memo.id.clone();
+        window.on_set_opacity(move |pct| {
+            let pct = ymemo_core::clamp_opacity(pct.round() as i64);
+            let mut guard = ctx.vault.borrow_mut();
+            let Some(v) = guard.as_mut() else { return };
+            let Ok(Some(mut m)) = v.store().get(&id) else { return };
+            if m.opacity == pct {
+                return;
+            }
+            m.opacity = pct;
+            m.updated_at = now_millis();
+            if let Err(e) = v.upsert(&m) {
+                eprintln!("투명도 변경 실패: {e}");
             }
         });
     }
