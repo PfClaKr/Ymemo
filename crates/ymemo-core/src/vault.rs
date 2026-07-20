@@ -6,7 +6,6 @@
 //!   vault.json            ← 헤더: salt + key_check. 생성 시 1회 기록, 이후 불변 → 동기화 충돌 없음.
 //!   logs/<device_id>.ymlog ← 기기별 append-only 암호화 로그. 각 기기는 자기 파일에만 쓴다.
 //! ```
-//! 로그가 진실의 원천(source of truth)이고 SQLite 는 재구성 가능한 로컬 캐시다.
 //!
 //! 로그 레코드 = **automerge change 바이너리** (암호화됨). 문서 구조:
 //! `ROOT.memos: Map<memo_id, {title, body, created_at, updated_at}>`.
@@ -94,7 +93,7 @@ impl Vault {
         // 암호 검증: 카나리 복호화가 실패하면 틀린 암호.
         let check = key
             .decrypt(&from_hex(&header.key_check)?)
-            .map_err(|_| anyhow!("마스터 암호가 틀렸다"))?;
+            .map_err(|_| anyhow!("암호가 틀렸습니다, 다시 입력해주세요"))?;
         if check != KEY_CHECK {
             bail!("key_check 불일치 (헤더 손상?)");
         }
