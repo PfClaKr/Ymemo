@@ -1,13 +1,49 @@
-import { LineEdit, Button } from "std-widgets.slint";
+import { LineEdit, Button, TextEdit, ListView } from "std-widgets.slint";
+
+// 스티커 팔레트: 색상 키("yellow"/"pink"/"green"/"blue"/"purple") → 실제 색.
+// 코어(Memo.color)는 키 문자열만 저장·동기화하고, 실제 색 해석은 여기 한곳에 모은다.
+export global Palette {
+    // 스티커 본문 배경 (반투명 — 데스크탑 위젯 느낌)
+    pure public function bg(key: string) -> color {
+        return key == "pink" ? #ffd6e6f2
+             : key == "green" ? #d2f0c8f2
+             : key == "blue" ? #cfe6fff2
+             : key == "purple" ? #e6d6f5f2
+             : #fff9b1f2; // yellow (기본)
+    }
+    // 제목 바 (본문보다 진한 불투명색)
+    pure public function bar(key: string) -> color {
+        return key == "pink" ? #f7b8ce
+             : key == "green" ? #b6e0a8
+             : key == "blue" ? #b0d4f2
+             : key == "purple" ? #d0b8ec
+             : #f4e98c; // yellow
+    }
+    // 제목 바 글자색 (색상별로 대비 유지)
+    pure public function ink(key: string) -> color {
+        return key == "pink" ? #7a3350
+             : key == "green" ? #35662f
+             : key == "blue" ? #2a5578
+             : key == "purple" ? #573377
+             : #5c5c25; // yellow
+    }
+    // 팔레트 칩/목록 악센트용 채도 높은 대표색 (불투명)
+    pure public function swatch(key: string) -> color {
+        return key == "pink" ? #ff9fc0
+             : key == "green" ? #8fd678
+             : key == "blue" ? #7db8ec
+             : key == "purple" ? #b98fe0
+             : #ffe15c; // yellow
+    }
+}
 
 // 기기 페어링 패널: 자기 QR/코드 표시 + 상대 코드 등록.
-// 잠금 화면과 메모 화면 양쪽에서 쓴다 — 새 기기는 unlock 전에 먼저 페어링해야
-// 기존 vault(salt/로그)가 동기화된 뒤 같은 키로 합류할 수 있다.
 component PairingPanel inherits VerticalLayout {
     in property <bool> available;
     in property <string> my-code;
     in property <image> qr;
     in property <string> message;
+    in property <color> ink: #5c5c25;
     callback add-peer(string);
 
     spacing: 6px;
@@ -18,7 +54,7 @@ component PairingPanel inherits VerticalLayout {
             text: "기기 페어링";
             font-size: 13px;
             font-weight: 700;
-            color: #5c5c25;
+            color: root.ink;
         }
         Image {
             source: root.qr;
@@ -29,7 +65,8 @@ component PairingPanel inherits VerticalLayout {
         Text {
             text: root.my-code;
             font-size: 9px;
-            color: #666;
+            color: root.ink;
+            opacity: 0.75;
             wrap: char-wrap;
         }
         HorizontalLayout {
@@ -46,145 +83,357 @@ component PairingPanel inherits VerticalLayout {
         Text {
             text: root.message;
             font-size: 11px;
-            color: #5c5c25;
+            color: root.ink;
             wrap: word-wrap;
         }
     }
     if !root.available: Text {
         text: "syncthing 을 찾지 못해 동기화가 꺼져 있습니다.";
         font-size: 12px;
-        color: #a03a3a;
+        color: #d98a8a;
         wrap: word-wrap;
     }
 }
 
-// 스티커 메모 창.
-//  - no-frame + always-on-top + 반투명 배경 (데스크탑 위젯 스타일)
-//  - 시작 시 잠금 화면: 마스터 암호 입력 → Rust 쪽에서 vault 를 열면 메모 UI 로 전환.
-//  - 🔗 버튼으로 페어링 패널 토글 (잠금 화면 포함).
-export component AppWindow inherits Window {
-    title: "Ymemo";
-    no-frame: true;
-    always-on-top: true;
-    background: #0000; // 창 자체는 투명, 실제 배경은 아래 Rectangle
-    preferred-width: 300px;
-    preferred-height: 380px;
-    min-width: 220px;
-    min-height: 160px;
+// 목록 창 한 행에 넘기는 메모 표현. (본문은 스티커 창을 열 때 Rust 가 채운다)
+export struct MemoItem {
+    id: string,
+    title: string,
+    color: string,
+}
 
-    // Rust 쪽에서 채워 넣는 메모 제목 목록
-    in property <[string]> memos;
-    // vault 가 열리기 전엔 잠금 화면을 보여준다
-    in property <bool> locked: true;
-    // 암호 오류 등 잠금 화면에 띄울 메시지
+// ---------------------------------------------------------------------------
+// 잠금 창: 시작 시 마스터 암호 입력. unlock 성공 후엔 숨겨진다.
+// ---------------------------------------------------------------------------
+export component LockWindow inherits Window {
+    title: "Ymemo — 잠금";
+    preferred-width: 320px;
+    preferred-height: 180px;
+    background: #2e2b27;
+
     in property <string> lock-message;
-    // syncthing 이 떠 있는가 (페어링 가능 여부)
     in property <bool> sync-available: false;
-    // 이 기기의 페어링 코드 (YMEMO1:...)
     in property <string> my-pairing-code;
-    // 페어링 코드의 QR 렌더링
     in property <image> qr-image;
-    // peer 등록 결과 메시지
     in property <string> peer-message;
-    // 새 메모 추가 요청 (제목 문자열)
-    callback add-memo(string);
-    // 마스터 암호로 vault 열기 요청
     callback unlock(string);
-    // 상대 기기 페어링 코드 등록 요청
     callback add-peer(string);
 
-    // 페어링 패널 표시 여부 (앱 내 토글)
     private property <bool> show-sync: false;
 
-    Rectangle {
-        background: #fff9b1f2; // 반투명 노란 스티커
-        border-radius: 10px;
-        border-width: 1px;
-        border-color: #e6d24a;
+    VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
 
-        VerticalLayout {
-            padding: 12px;
+        HorizontalLayout {
+            spacing: 6px;
+            Text {
+                text: "Ymemo 🔒";
+                font-size: 16px;
+                font-weight: 700;
+                color: #f0ead6;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            Button {
+                text: "🔗";
+                clicked => { root.show-sync = !root.show-sync; }
+            }
+        }
+
+        if root.show-sync: PairingPanel {
+            available: root.sync-available;
+            my-code: root.my-pairing-code;
+            qr: root.qr-image;
+            message: root.peer-message;
+            ink: #d8d2c2;
+            add-peer(code) => { root.add-peer(code); }
+        }
+
+        if !root.show-sync: VerticalLayout {
             spacing: 8px;
-
-            // ---- 헤더 (항상 표시) ----
+            Text {
+                text: root.lock-message;
+                font-size: 12px;
+                color: #e79a9a;
+                wrap: word-wrap;
+            }
             HorizontalLayout {
                 spacing: 6px;
-                Text {
-                    text: root.locked ? "Ymemo 🔒" : "Ymemo 📝";
-                    font-size: 16px;
-                    font-weight: 700;
-                    color: #5c5c25;
-                    horizontal-stretch: 1;
+                pw := LineEdit {
+                    placeholder-text: "마스터 암호...";
+                    input-type: InputType.password;
+                    accepted => { root.unlock(self.text); }
                 }
                 Button {
-                    text: "🔗";
-                    clicked => { root.show-sync = !root.show-sync; }
+                    text: "열기";
+                    clicked => { root.unlock(pw.text); }
                 }
             }
+        }
 
-            // ---- 페어링 패널 (잠금 여부 무관) ----
-            if root.show-sync: PairingPanel {
-                available: root.sync-available;
-                my-code: root.my-pairing-code;
-                qr: root.qr-image;
-                message: root.peer-message;
-                add-peer(code) => { root.add-peer(code); }
+        Rectangle { vertical-stretch: 1; }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 메모 목록 창: 트레이 아이콘 클릭으로 토글된다. 어두운 배경 + 밝은 글자.
+// 행 클릭 → 스티커 창 열기. ＋ 새 메모, 🗑 삭제. 왼쪽 악센트로 스티커 색 표시.
+// ---------------------------------------------------------------------------
+export component ListWindow inherits Window {
+    title: "Ymemo";
+    preferred-width: 300px;
+    preferred-height: 420px;
+    background: #2e2b27;
+
+    in property <[MemoItem]> memos;
+    in property <bool> sync-available: false;
+    in property <string> my-pairing-code;
+    in property <image> qr-image;
+    in property <string> peer-message;
+    callback open-memo(string);   // 인자: memo id
+    callback new-memo();
+    callback delete-memo(string); // 인자: memo id
+    callback add-peer(string);
+
+    private property <bool> show-sync: false;
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
+
+        HorizontalLayout {
+            spacing: 6px;
+            Text {
+                text: "Ymemo 📝";
+                font-size: 16px;
+                font-weight: 700;
+                color: #f0ead6;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
             }
-
-            // ---- 메모 목록 (unlock 후) ----
-            if !root.show-sync && !root.locked: VerticalLayout {
-                spacing: 8px;
-                for memo in root.memos: Text {
-                    text: "• " + memo;
-                    font-size: 14px;
-                    color: #333333;
-                    wrap: word-wrap;
-                }
+            Button {
+                text: "🔗";
+                clicked => { root.show-sync = !root.show-sync; }
             }
+            Button {
+                text: "＋";
+                clicked => { root.new-memo(); }
+            }
+        }
 
-            // 남는 공간을 채워 입력 줄을 아래로 밀어낸다
-            Rectangle { vertical-stretch: 1; }
+        if root.show-sync: PairingPanel {
+            available: root.sync-available;
+            my-code: root.my-pairing-code;
+            qr: root.qr-image;
+            message: root.peer-message;
+            ink: #d8d2c2;
+            add-peer(code) => { root.add-peer(code); }
+        }
 
-            // ---- 잠금 화면: 오류 메시지 + 암호 입력 ----
-            if root.locked && !root.show-sync: VerticalLayout {
-                spacing: 8px;
-                Text {
-                    text: root.lock-message;
-                    font-size: 12px;
-                    color: #a03a3a;
-                    wrap: word-wrap;
+        if !root.show-sync && root.memos.length == 0: Text {
+            text: "메모가 없습니다. ＋ 를 눌러 새 메모를 만드세요.";
+            font-size: 12px;
+            color: #b0a99a;
+            wrap: word-wrap;
+        }
+
+        if !root.show-sync: ListView {
+            vertical-stretch: 1;
+            for item in root.memos: Rectangle {
+                height: 40px;
+                border-radius: 6px;
+                background: row-ta.has-hover ? #ffffff1a : transparent;
+
+                row-ta := TouchArea {
+                    clicked => { root.open-memo(item.id); }
                 }
                 HorizontalLayout {
-                    spacing: 6px;
-                    pw := LineEdit {
-                        placeholder-text: "마스터 암호...";
-                        input-type: InputType.password;
-                        accepted => { root.unlock(self.text); }
+                    padding-left: 6px;
+                    padding-right: 4px;
+                    spacing: 8px;
+                    // 스티커 색 악센트
+                    Rectangle {
+                        width: 5px;
+                        height: 22px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 2.5px;
+                        background: Palette.swatch(item.color);
                     }
-                    Button {
-                        text: "열기";
-                        clicked => { root.unlock(pw.text); }
+                    Text {
+                        text: item.title == "" ? "(빈 메모)" : item.title;
+                        font-size: 14px;
+                        color: item.title == "" ? #9a9384 : #ece7db;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    del-ta := TouchArea {
+                        width: 28px;
+                        Text {
+                            width: 100%;
+                            height: 100%;
+                            text: "🗑";
+                            font-size: 13px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            opacity: del-ta.has-hover ? 1 : 0.4;
+                        }
+                        clicked => { root.delete-memo(item.id); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 스티커 창: 메모 하나 = 창 하나. 무프레임.
+//  - 제목 바 드래그 → 이동 (Rust 가 처리; X11 에선 자석 스냅까지)
+//  - 제목 바 더블클릭 → 얇은 바 접기/펴기
+//  - 🎨 색 팔레트, ＋ 새 메모, ✕ 창 닫기(삭제 아님)
+// ---------------------------------------------------------------------------
+export component StickyWindow inherits Window {
+    title: root.memo-title == "" ? "메모" : root.memo-title;
+    no-frame: true;
+    always-on-top: true;
+    background: #0000;
+    preferred-width: 260px;
+    preferred-height: 240px;
+    min-width: 160px;
+    min-height: 36px;
+    resize-border-width: 4px;
+
+    in property <string> memo-title;
+    in-out property <string> memo-text;
+    in property <string> sticky-color: "yellow";
+    in property <bool> collapsed: false;
+    callback edited(string);
+    callback close-requested();
+    callback new-memo();
+    callback set-color(string);
+    callback start-drag();
+    callback toggle-collapse();
+
+    private property <bool> show-palette: false;
+
+    public function focus-body() { body.focus(); }
+
+    Rectangle {
+        background: Palette.bg(root.sticky-color);
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: Palette.bar(root.sticky-color).darker(0.15);
+        clip: true;
+
+        VerticalLayout {
+            // ---- 제목 바 (드래그 핸들 + 접기 토글) ----
+            Rectangle {
+                height: 36px;
+                background: Palette.bar(root.sticky-color);
+
+                bar-ta := TouchArea {
+                    moved => {
+                        if (self.mouse-x > self.pressed-x + 4px || self.mouse-x < self.pressed-x - 4px
+                            || self.mouse-y > self.pressed-y + 4px || self.mouse-y < self.pressed-y - 4px) {
+                            root.start-drag();
+                        }
+                    }
+                    double-clicked => { root.toggle-collapse(); }
+                }
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 6px;
+                    spacing: 2px;
+                    Text {
+                        text: root.memo-title == "" ? "새 메모" : root.memo-title;
+                        font-size: 13px;
+                        font-weight: 700;
+                        color: Palette.ink(root.sticky-color);
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    palette-ta := TouchArea {
+                        width: 26px;
+                        Text {
+                            width: 100%;
+                            height: 100%;
+                            text: "🎨";
+                            font-size: 13px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            opacity: palette-ta.has-hover ? 1 : 0.6;
+                        }
+                        clicked => { root.show-palette = !root.show-palette; }
+                    }
+                    plus-ta := TouchArea {
+                        width: 26px;
+                        Text {
+                            width: 100%;
+                            height: 100%;
+                            text: "＋";
+                            font-size: 14px;
+                            font-weight: 700;
+                            color: Palette.ink(root.sticky-color);
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            opacity: plus-ta.has-hover ? 1 : 0.55;
+                        }
+                        clicked => { root.new-memo(); }
+                    }
+                    close-ta := TouchArea {
+                        width: 26px;
+                        Text {
+                            width: 100%;
+                            height: 100%;
+                            text: "✕";
+                            font-size: 13px;
+                            font-weight: 700;
+                            color: Palette.ink(root.sticky-color);
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            opacity: close-ta.has-hover ? 1 : 0.55;
+                        }
+                        clicked => { root.close-requested(); }
                     }
                 }
             }
 
-            // ---- 메모 입력 줄 (unlock 후) ----
-            if !root.locked && !root.show-sync: HorizontalLayout {
-                spacing: 6px;
-                input := LineEdit {
-                    placeholder-text: "새 메모 입력...";
-                    accepted => {
-                        root.add-memo(self.text);
-                        self.text = "";
+            // ---- 색 팔레트 (🎨 로 토글) ----
+            if root.show-palette: Rectangle {
+                height: 34px;
+                background: Palette.bar(root.sticky-color).darker(0.06);
+                HorizontalLayout {
+                    padding: 6px;
+                    spacing: 8px;
+                    alignment: center;
+                    for key in ["yellow", "pink", "green", "blue", "purple"]: Rectangle {
+                        width: 22px;
+                        height: 22px;
+                        border-radius: 11px;
+                        background: Palette.swatch(key);
+                        border-width: root.sticky-color == key ? 3px : 1px;
+                        border-color: root.sticky-color == key ? #ffffff : #00000040;
+                        chip := TouchArea {
+                            clicked => {
+                                root.set-color(key);
+                                root.show-palette = false;
+                            }
+                        }
                     }
                 }
-                Button {
-                    text: "추가";
-                    clicked => {
-                        root.add-memo(input.text);
-                        input.text = "";
-                    }
-                }
+            }
+
+            // ---- 본문 (접힌 동안엔 창 높이가 36px 라 안 보인다) ----
+            body := TextEdit {
+                visible: !root.collapsed;
+                min-height: 0;
+                vertical-stretch: 1;
+                font-size: 13px;
+                wrap: word-wrap;
+                text <=> root.memo-text;
+                edited => { root.edited(self.text); }
             }
         }
     }

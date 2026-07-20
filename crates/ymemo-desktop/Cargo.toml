@@ -9,9 +9,17 @@ repository.workspace = true
 [dependencies]
 ymemo-core.workspace = true
 slint.workspace = true
+i-slint-backend-winit.workspace = true
 qrcode.workspace = true
 directories.workspace = true
 anyhow.workspace = true
+
+# 트레이 백엔드는 플랫폼별로 갈린다 (src/tray.rs 의 cfg 분기와 짝).
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+tray-icon.workspace = true
 
 [build-dependencies]
 slint-build.workspace = true

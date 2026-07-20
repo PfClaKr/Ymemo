@@ -14,9 +14,16 @@ authors = ["PfClaKr"]
 ymemo-core = { path = "crates/ymemo-core" }
 
 # GUI (데스크탑)
-slint = "1"
-slint-build = "1"
+# slint 와 i-slint-backend-winit 은 반드시 같은 버전이어야 한다 (내부 크레이트 공유).
+slint = "1.17"
+slint-build = "1.17"
+i-slint-backend-winit = "1.17" # 무프레임 창의 네이티브 드래그(drag_window) 접근용
 qrcode = { version = "0.14", default-features = false } # 페어링 QR (렌더링은 slint 이미지로 직접)
+# 트레이 아이콘 (플랫폼별, ymemo-desktop 에서 cfg 로 갈라 쓴다)
+#  - Linux: ksni — StatusNotifierItem (zbus 기반 순수 Rust, libdbus/gtk 불필요)
+#  - Windows: tray-icon — Shell_NotifyIcon. default-features off 로 gtk/libxdo(리눅스 C 의존) 제외
+ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
+tray-icon = { version = "0.24", default-features = false }
 
 # 저장소 / 데이터
 rusqlite = { version = "0.32", features = ["bundled"] } # bundled: 시스템 libsqlite3 불필요, 소스에서 컴파일
