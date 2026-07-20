@@ -11,7 +11,7 @@
 use std::sync::Mutex;
 
 use anyhow::{anyhow, Result};
-use ymemo_core::{now_millis, pairing::PairingCode, vault::Vault, Memo, Store};
+use ymemo_core::{now_millis, pairing::PairingCode, vault::Vault, Group, Memo, Store};
 
 /// 열린 vault (앱 프로세스당 하나).
 static VAULT: Mutex<Option<Vault>> = Mutex::new(None);
@@ -29,6 +29,7 @@ pub struct FfiMemo {
     pub body: String,
     pub color: String,
     pub opacity: i64,
+    pub group_id: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -41,8 +42,30 @@ impl From<Memo> for FfiMemo {
             body: m.body,
             color: m.color,
             opacity: m.opacity,
+            group_id: m.group_id,
             created_at: m.created_at,
             updated_at: m.updated_at,
+        }
+    }
+}
+
+/// Dart 로 넘기는 그룹(폴더) 표현.
+pub struct FfiGroup {
+    pub id: String,
+    pub name: String,
+    pub parent_id: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl From<Group> for FfiGroup {
+    fn from(g: Group) -> Self {
+        Self {
+            id: g.id,
+            name: g.name,
+            parent_id: g.parent_id,
+            created_at: g.created_at,
+            updated_at: g.updated_at,
         }
     }
 }
@@ -117,6 +140,69 @@ pub fn memo_set_opacity(id: String, opacity: i64) -> Result<()> {
         memo.updated_at = now_millis();
         v.upsert(&memo)
     })
+}
+
+/// 메모를 그룹으로 옮긴다. `group_id` 가 빈 문자열이면 최상위로 뺀다.
+pub fn memo_set_group(id: String, group_id: String) -> Result<()> {
+    with_vault(|v| {
+        let mut memo = v
+            .store()
+            .get(&id)?
+            .ok_or_else(|| anyhow!("메모 없음: {id}"))?;
+        memo.group_id = group_id;
+        memo.updated_at = now_millis();
+        v.upsert(&memo)
+    })
+}
+
+/// 전체 그룹 목록 (이름순).
+pub fn group_list() -> Result<Vec<FfiGroup>> {
+    with_vault(|v| Ok(v.store().list_groups()?.into_iter().map(FfiGroup::from).collect()))
+}
+
+/// 그룹 생성. 만들어진 그룹 id 를 돌려준다.
+pub fn group_create(name: String, parent_id: String) -> Result<String> {
+    with_vault(|v| {
+        let mut group = Group::new(name);
+        group.parent_id = parent_id;
+        v.upsert_group(&group)?;
+        Ok(group.id)
+    })
+}
+
+/// 그룹 이름 변경.
+pub fn group_rename(id: String, name: String) -> Result<()> {
+    with_vault(|v| {
+        let mut group = v
+            .store()
+            .get_group(&id)?
+            .ok_or_else(|| anyhow!("그룹 없음: {id}"))?;
+        group.name = name;
+        group.updated_at = now_millis();
+        v.upsert_group(&group)
+    })
+}
+
+/// 그룹을 다른 그룹 밑으로 옮긴다. 자기 자손 밑으로는 옮길 수 없다(순환 방지).
+pub fn group_move(id: String, parent_id: String) -> Result<()> {
+    with_vault(|v| {
+        let groups = v.store().list_groups()?;
+        if !parent_id.is_empty() && ymemo_core::is_descendant(&groups, &parent_id, &id) {
+            return Err(anyhow!("그룹을 자기 자신이나 자손 밑으로 옮길 수 없습니다"));
+        }
+        let mut group = v
+            .store()
+            .get_group(&id)?
+            .ok_or_else(|| anyhow!("그룹 없음: {id}"))?;
+        group.parent_id = parent_id;
+        group.updated_at = now_millis();
+        v.upsert_group(&group)
+    })
+}
+
+/// 그룹 삭제. 안의 메모/하위 그룹은 지워지지 않고 상위로 올라온다.
+pub fn group_delete(id: String) -> Result<()> {
+    with_vault(|v| v.delete_group(&id))
 }
 
 /// 다른 기기의 로그를 병합해 로컬 상태를 갱신한다.

@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 use crate::changelog::ChangeLog;
 use crate::crypto::{generate_salt, MasterKey, Salt, SALT_LEN};
-use crate::{Memo, Store};
+use crate::{Group, Memo, Store};
 
 const HEADER_FILE: &str = "vault.json";
 const LOGS_DIR: &str = "logs";
@@ -137,11 +137,70 @@ impl Vault {
         put_str_if_changed(&mut self.doc, &obj, "body", &memo.body)?;
         put_str_if_changed(&mut self.doc, &obj, "color", &memo.color)?;
         put_i64_if_changed(&mut self.doc, &obj, "opacity", crate::clamp_opacity(memo.opacity))?;
+        put_str_if_changed(&mut self.doc, &obj, "group_id", &memo.group_id)?;
         put_i64_if_changed(&mut self.doc, &obj, "created_at", memo.created_at)?;
         put_i64_if_changed(&mut self.doc, &obj, "updated_at", memo.updated_at)?;
 
         self.append_local_change()?;
         self.store.upsert(memo)
+    }
+
+    /// 그룹 삽입/갱신 (이름 변경·부모 변경 모두 이 경로).
+    pub fn upsert_group(&mut self, group: &Group) -> Result<()> {
+        let groups = self.groups_obj()?;
+        let obj = match self.doc.get(&groups, &group.id)? {
+            Some((Value::Object(ObjType::Map), id)) => id,
+            _ => self.doc.put_object(&groups, &group.id, ObjType::Map)?,
+        };
+        put_str_if_changed(&mut self.doc, &obj, "name", &group.name)?;
+        put_str_if_changed(&mut self.doc, &obj, "parent_id", &group.parent_id)?;
+        put_i64_if_changed(&mut self.doc, &obj, "created_at", group.created_at)?;
+        put_i64_if_changed(&mut self.doc, &obj, "updated_at", group.updated_at)?;
+
+        self.append_local_change()?;
+        self.store.upsert_group(group)
+    }
+
+    /// 그룹 삭제. 안에 있던 그룹/메모는 지우지 않고 **상위로 끌어올린다**
+    /// (폴더를 지웠다고 메모가 사라지면 곤란하므로).
+    pub fn delete_group(&mut self, id: &str) -> Result<()> {
+        let parent = self
+            .store
+            .get_group(id)?
+            .map(|g| g.parent_id)
+            .unwrap_or_default();
+
+        // 자식 그룹을 상위로.
+        let children: Vec<Group> = self
+            .store
+            .list_groups()?
+            .into_iter()
+            .filter(|g| g.parent_id == id)
+            .collect();
+        for mut child in children {
+            child.parent_id = parent.clone();
+            child.updated_at = crate::now_millis();
+            self.upsert_group(&child)?;
+        }
+        // 속해 있던 메모를 상위로.
+        let memos: Vec<Memo> = self
+            .store
+            .list()?
+            .into_iter()
+            .filter(|m| m.group_id == id)
+            .collect();
+        for mut memo in memos {
+            memo.group_id = parent.clone();
+            memo.updated_at = crate::now_millis();
+            self.upsert(&memo)?;
+        }
+
+        let groups = self.groups_obj()?;
+        if self.doc.get(&groups, id)?.is_some() {
+            self.doc.delete(&groups, id)?;
+        }
+        self.append_local_change()?;
+        self.store.delete_group(id)
     }
 
     /// 메모 삭제.
@@ -239,10 +298,33 @@ impl Vault {
                     "opacity",
                     crate::DEFAULT_OPACITY,
                 )),
+                group_id: get_str_or(&self.doc, &obj, "group_id", ""),
                 created_at: get_i64(&self.doc, &obj, "created_at")?,
                 updated_at: get_i64(&self.doc, &obj, "updated_at")?,
             };
             self.store.upsert(&memo)?;
+        }
+        self.materialize_groups()
+    }
+
+    /// `ROOT.groups` 를 SQLite 캐시로 실체화한다.
+    fn materialize_groups(&mut self) -> Result<()> {
+        let Some((Value::Object(ObjType::Map), groups)) = self.doc.get(ROOT, "groups")? else {
+            return Ok(()); // 아직 그룹 없음
+        };
+        let ids: Vec<String> = self.doc.keys(&groups).collect();
+        for id in ids {
+            let Some((Value::Object(ObjType::Map), obj)) = self.doc.get(&groups, &id)? else {
+                continue;
+            };
+            let group = Group {
+                id: id.clone(),
+                name: get_str_or(&self.doc, &obj, "name", ""),
+                parent_id: get_str_or(&self.doc, &obj, "parent_id", ""),
+                created_at: get_i64_or(&self.doc, &obj, "created_at", 0),
+                updated_at: get_i64_or(&self.doc, &obj, "updated_at", 0),
+            };
+            self.store.upsert_group(&group)?;
         }
         Ok(())
     }
@@ -252,6 +334,14 @@ impl Vault {
         Ok(match self.doc.get(ROOT, "memos")? {
             Some((Value::Object(ObjType::Map), id)) => id,
             _ => self.doc.put_object(ROOT, "memos", ObjType::Map)?,
+        })
+    }
+
+    /// `ROOT.groups` 맵을 얻는다 (없으면 생성).
+    fn groups_obj(&mut self) -> Result<ObjId> {
+        Ok(match self.doc.get(ROOT, "groups")? {
+            Some((Value::Object(ObjType::Map), id)) => id,
+            _ => self.doc.put_object(ROOT, "groups", ObjType::Map)?,
         })
     }
 }
@@ -425,6 +515,63 @@ mod tests {
 
         // 로그 파일은 기기당 하나씩 두 개.
         assert_eq!(fs::read_dir(dir.join(LOGS_DIR)).unwrap().count(), 2);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 그룹도 로그를 통해 다른 기기로 전파되고, 메모의 소속도 함께 넘어가야 한다.
+    #[test]
+    fn groups_sync_across_devices() {
+        let dir = temp_dir();
+
+        let group;
+        let memo;
+        {
+            let mut a = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+            group = Group::new("업무");
+            a.upsert_group(&group).unwrap();
+            memo = {
+                let mut m = Memo::new("보고서", "");
+                m.group_id = group.id.clone();
+                m
+            };
+            a.upsert(&memo).unwrap();
+        }
+
+        // 다른 기기(빈 캐시)에서 로그만으로 복원.
+        let b = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let groups = b.store().list_groups().unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, "업무");
+        assert_eq!(b.store().get(&memo.id).unwrap().unwrap().group_id, group.id);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 그룹을 지워도 안에 있던 메모/하위 그룹은 사라지지 않고 상위로 올라와야 한다.
+    #[test]
+    fn deleting_group_lifts_children_instead_of_destroying() {
+        let dir = temp_dir();
+        let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+
+        let outer = Group::new("상위");
+        v.upsert_group(&outer).unwrap();
+        let mut inner = Group::new("하위");
+        inner.parent_id = outer.id.clone();
+        v.upsert_group(&inner).unwrap();
+        let mut memo = Memo::new("안에 있던 메모", "");
+        memo.group_id = outer.id.clone();
+        v.upsert(&memo).unwrap();
+
+        v.delete_group(&outer.id).unwrap();
+
+        // 상위 그룹만 사라지고, 하위 그룹과 메모는 최상위로.
+        let groups = v.store().list_groups().unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].id, inner.id);
+        assert_eq!(groups[0].parent_id, "");
+        let survived = v.store().get(&memo.id).unwrap().unwrap();
+        assert_eq!(survived.group_id, "");
 
         fs::remove_dir_all(&dir).ok();
     }
