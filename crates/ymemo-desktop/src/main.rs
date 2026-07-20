@@ -11,7 +11,7 @@
 //! 종료는 트레이 메뉴의 "종료" 로만 한다.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -59,8 +59,11 @@ type Stickies = Rc<RefCell<HashMap<String, StickyEntry>>>;
 #[derive(Clone)]
 struct Ctx {
     vault: SharedVault,
-    model: Rc<VecModel<MemoItem>>,
+    model: Rc<VecModel<ListRow>>,
     stickies: Stickies,
+    /// 접어 둔 그룹 id. **기기 로컬 보기 상태**라 동기화하지 않는다
+    /// (없으면 펼침 — 새 기기에서도 내용이 바로 보이도록).
+    collapsed: Rc<RefCell<HashSet<String>>>,
 }
 
 // 트레이 콜백(별도 스레드)이 invoke_from_event_loop 로 넘어온 뒤 UI 에 닿기 위한 통로.
@@ -127,10 +130,11 @@ fn main() -> Result<()> {
 
     let ctx = Ctx {
         vault: Rc::new(RefCell::new(None)),
-        model: Rc::new(VecModel::from(Vec::<MemoItem>::new())),
+        model: Rc::new(VecModel::from(Vec::<ListRow>::new())),
         stickies: Rc::new(RefCell::new(HashMap::new())),
+        collapsed: Rc::new(RefCell::new(HashSet::new())),
     };
-    list.set_memos(ModelRc::from(ctx.model.clone()));
+    list.set_rows(ModelRc::from(ctx.model.clone()));
     let unlocked = Rc::new(Cell::new(false));
 
     // ---- 잠금 창: 마스터 암호로 vault 열기 ----
@@ -157,7 +161,7 @@ fn main() -> Result<()> {
             // Argon2id 유도가 잠깐(수백 ms) UI 를 막지만 잠금 화면에서만 일어난다.
             match Vault::open_or_create(dir.join("vault"), password.as_bytes(), store) {
                 Ok(v) => {
-                    refresh_list(&v, &ctx.model);
+                    refresh_list(&v, &ctx.model, &ctx.collapsed.borrow());
                     *ctx.vault.borrow_mut() = Some(v);
                     unlocked.set(true);
                     let _ = lock.hide();
@@ -193,19 +197,81 @@ fn main() -> Result<()> {
     }
     {
         let ctx = ctx.clone();
-        list.on_delete_memo(move |id| {
+        list.on_delete_row(move |id, is_group| {
             {
                 let mut guard = ctx.vault.borrow_mut();
                 let Some(v) = guard.as_mut() else { return };
-                if let Err(e) = v.delete(&id) {
-                    eprintln!("메모 삭제 실패: {e}");
+                // 그룹 삭제는 안의 내용을 지우지 않고 상위로 올린다 (코어가 처리).
+                let res = if is_group { v.delete_group(&id) } else { v.delete(&id) };
+                if let Err(e) = res {
+                    eprintln!("삭제 실패: {e}");
                     return;
                 }
-                refresh_list(v, &ctx.model);
+                refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
             }
-            // 열려 있던 스티커 창도 정리한다.
-            close_sticky(&ctx.stickies, id.as_str());
+            if !is_group {
+                close_sticky(&ctx.stickies, id.as_str()); // 열려 있던 스티커 창 정리
+            }
         });
+    }
+
+    // ---- 그룹: 생성 / 펼침 토글 / 이름 변경 / 드래그 이동 ----
+    {
+        let ctx = ctx.clone();
+        let list_weak = list.as_weak();
+        list.on_new_group(move || {
+            let group = ymemo_core::Group::new("새 그룹");
+            {
+                let mut guard = ctx.vault.borrow_mut();
+                let Some(v) = guard.as_mut() else { return };
+                if let Err(e) = v.upsert_group(&group) {
+                    eprintln!("그룹 생성 실패: {e}");
+                    return;
+                }
+                refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+            }
+            // 만들자마자 이름 편집 상태로 — 바로 타이핑할 수 있게.
+            if let Some(w) = list_weak.upgrade() {
+                w.set_editing_text(SharedString::from(group.name.clone()));
+                w.set_editing_id(SharedString::from(group.id));
+            }
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        list.on_toggle_group(move |id| {
+            {
+                let mut collapsed = ctx.collapsed.borrow_mut();
+                if !collapsed.remove(id.as_str()) {
+                    collapsed.insert(id.to_string());
+                }
+            }
+            let guard = ctx.vault.borrow();
+            let Some(v) = guard.as_ref() else { return };
+            refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        list.on_rename_group(move |id, name| {
+            let mut guard = ctx.vault.borrow_mut();
+            let Some(v) = guard.as_mut() else { return };
+            let Ok(Some(mut g)) = v.store().get_group(&id) else { return };
+            if g.name == name.as_str() {
+                return;
+            }
+            g.name = name.to_string();
+            g.updated_at = now_millis();
+            if let Err(e) = v.upsert_group(&g) {
+                eprintln!("그룹 이름 변경 실패: {e}");
+                return;
+            }
+            refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        list.on_move_row(move |src, dst| move_row(&ctx, src, dst));
     }
 
     // ---- 페어링 (잠금/목록 창 공용) ----
@@ -231,7 +297,7 @@ fn main() -> Result<()> {
             let Some(v) = guard.as_mut() else { return };
             match v.rebuild() {
                 Ok(()) => {
-                    refresh_list(v, &ctx.model);
+                    refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
                     // 열린 스티커에 원격 변경 반영. 편집 중(dirty)이면 덮어쓰지 않는다.
                     for (id, entry) in ctx.stickies.borrow().iter() {
                         if entry.dirty.get() {
@@ -326,7 +392,7 @@ fn save_memo(ctx: &Ctx, id: &str, text: &str) {
         eprintln!("메모 저장 실패: {e}");
         return;
     }
-    refresh_list(v, &ctx.model);
+    refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
     // 제목 바에도 새 제목 반영.
     if let Some(entry) = ctx.stickies.borrow().get(id) {
         entry.window.set_memo_title(SharedString::from(memo.title));
@@ -343,7 +409,7 @@ fn new_memo(ctx: &Ctx) {
             eprintln!("메모 생성 실패: {e}");
             return;
         }
-        refresh_list(v, &ctx.model);
+        refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
     }
     if let Err(e) = open_sticky(ctx, &memo, true) {
         eprintln!("스티커 창 열기 실패: {e}");
@@ -445,7 +511,7 @@ fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
                     eprintln!("색 변경 실패: {e}");
                     return;
                 }
-                refresh_list(v, &ctx.model);
+                refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
             }
             if let Some(w) = weak.upgrade() {
                 w.set_sticky_color(key);
@@ -634,21 +700,136 @@ fn nearest(cands: &[i32], v: i32, threshold: i32) -> i32 {
 // 목록 / 페어링
 // ---------------------------------------------------------------------------
 
-/// vault 캐시의 메모들을 목록 모델에 반영한다.
-fn refresh_list(vault: &Vault, model: &VecModel<MemoItem>) {
-    match vault.store().list() {
-        Ok(memos) => {
-            let items: Vec<MemoItem> = memos
-                .into_iter()
-                .map(|m| MemoItem {
-                    id: SharedString::from(m.id),
-                    title: SharedString::from(m.title),
-                    color: SharedString::from(m.color),
-                })
-                .collect();
-            model.set_vec(items);
+/// vault 캐시의 그룹 트리 + 메모를 평탄화해 목록 모델에 반영한다.
+///
+/// Slint 에 트리 뷰가 없으므로 여기서 깊이 우선으로 펼쳐 `depth` 를 붙인 행 목록을
+/// 만든다. 접힌 그룹의 내용은 아예 행으로 내보내지 않는다.
+fn refresh_list(vault: &Vault, model: &VecModel<ListRow>, collapsed: &HashSet<String>) {
+    let (groups, memos) = match (vault.store().list_groups(), vault.store().list()) {
+        (Ok(g), Ok(m)) => (g, m),
+        (Err(e), _) | (_, Err(e)) => {
+            eprintln!("목록 조회 실패: {e}");
+            return;
         }
-        Err(e) => eprintln!("메모 목록 조회 실패: {e}"),
+    };
+    // 순환/유실 부모는 코어가 최상위로 끌어올려 준다.
+    let children = ymemo_core::group_children(&groups);
+    let valid: HashSet<&str> = groups.iter().map(|g| g.id.as_str()).collect();
+
+    let mut rows = Vec::new();
+    push_group_rows("", 0, &children, &memos, collapsed, &mut rows);
+    // 그룹에 속하지 않은(또는 그룹이 사라진) 메모는 최상위에 둔다.
+    for m in memos.iter().filter(|m| !valid.contains(m.group_id.as_str())) {
+        rows.push(memo_row(m, 0));
+    }
+    model.set_vec(rows);
+}
+
+/// 드래그로 행을 옮긴다: `src` 행을 `dst` 행이 가리키는 그룹 안으로 넣는다.
+///
+/// - 그룹 행에 놓으면 그 그룹 안으로.
+/// - 메모 행에 놓으면 그 메모와 같은 그룹으로 (옆에 두는 느낌).
+/// - 목록 위/아래로 벗어나게 놓으면 최상위로 뺀다.
+fn move_row(ctx: &Ctx, src: i32, dst: i32) {
+    use slint::Model;
+    let rows = &ctx.model;
+    let Some(source) = usize::try_from(src).ok().and_then(|i| rows.row_data(i)) else {
+        return;
+    };
+
+    let mut guard = ctx.vault.borrow_mut();
+    let Some(v) = guard.as_mut() else { return };
+
+    // 놓은 자리에서 새 부모 그룹 id 를 정한다 (범위 밖 = 최상위).
+    let target_parent = match usize::try_from(dst).ok().and_then(|i| rows.row_data(i)) {
+        Some(t) if t.is_group => t.id.to_string(),
+        Some(t) => match v.store().get(t.id.as_str()) {
+            Ok(Some(m)) => m.group_id,
+            _ => String::new(),
+        },
+        None => String::new(), // 위/아래로 벗어남 → 최상위
+    };
+
+    let res = if source.is_group {
+        let id = source.id.to_string();
+        // 자기 자신이나 자손 밑으로는 못 넣는다 (넣으면 트리가 순환한다).
+        let groups = match v.store().list_groups() {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("그룹 조회 실패: {e}");
+                return;
+            }
+        };
+        if ymemo_core::is_descendant(&groups, &target_parent, &id) {
+            return; // 조용히 무시 — 드롭이 안 먹은 것처럼 보인다
+        }
+        match v.store().get_group(&id) {
+            Ok(Some(mut g)) if g.parent_id != target_parent => {
+                g.parent_id = target_parent;
+                g.updated_at = now_millis();
+                v.upsert_group(&g)
+            }
+            _ => return,
+        }
+    } else {
+        match v.store().get(source.id.as_str()) {
+            Ok(Some(mut m)) if m.group_id != target_parent => {
+                m.group_id = target_parent;
+                m.updated_at = now_millis();
+                v.upsert(&m)
+            }
+            _ => return,
+        }
+    };
+    if let Err(e) = res {
+        eprintln!("이동 실패: {e}");
+        return;
+    }
+    refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+}
+
+/// `parent` 밑의 그룹들을 재귀적으로 행에 담는다 (그룹 먼저, 그 다음 그 그룹의 메모).
+fn push_group_rows(
+    parent: &str,
+    depth: i32,
+    children: &HashMap<String, Vec<ymemo_core::Group>>,
+    memos: &[Memo],
+    collapsed: &HashSet<String>,
+    out: &mut Vec<ListRow>,
+) {
+    let Some(groups) = children.get(parent) else { return };
+    for g in groups {
+        let child_groups = children.get(&g.id).map_or(0, |v| v.len());
+        let child_memos = memos.iter().filter(|m| m.group_id == g.id).count();
+        let is_collapsed = collapsed.contains(&g.id);
+        out.push(ListRow {
+            id: SharedString::from(g.id.clone()),
+            title: SharedString::from(g.name.clone()),
+            color: SharedString::new(),
+            depth,
+            is_group: true,
+            expanded: !is_collapsed,
+            child_count: (child_groups + child_memos) as i32,
+        });
+        if is_collapsed {
+            continue;
+        }
+        push_group_rows(&g.id, depth + 1, children, memos, collapsed, out);
+        for m in memos.iter().filter(|m| m.group_id == g.id) {
+            out.push(memo_row(m, depth + 1));
+        }
+    }
+}
+
+fn memo_row(memo: &Memo, depth: i32) -> ListRow {
+    ListRow {
+        id: SharedString::from(memo.id.clone()),
+        title: SharedString::from(memo.title.clone()),
+        color: SharedString::from(memo.color.clone()),
+        depth,
+        is_group: false,
+        expanded: false,
+        child_count: 0,
     }
 }
 
@@ -805,6 +986,68 @@ mod tests {
         let other = (900, 900, 200, 200);
         let start = (500, 500, 260, 240);
         assert_eq!(snap_position(start, &[other], mon, T), (500, 500));
+    }
+
+    fn group(id: &str, name: &str, parent: &str) -> ymemo_core::Group {
+        ymemo_core::Group {
+            id: id.into(),
+            name: name.into(),
+            parent_id: parent.into(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn memo_in(id: &str, group_id: &str) -> Memo {
+        let mut m = Memo::new(id, "");
+        m.id = id.into();
+        m.group_id = group_id.into();
+        m
+    }
+
+    /// 트리가 깊이 우선으로 평탄화되고, 중첩 그룹이 들여쓰기를 갖는지.
+    #[test]
+    fn flattens_nested_groups_depth_first() {
+        let groups = vec![group("outer", "바깥", ""), group("inner", "안쪽", "outer")];
+        let memos = vec![memo_in("m-in", "inner"), memo_in("m-out", "outer")];
+        let children = ymemo_core::group_children(&groups);
+
+        let mut rows = Vec::new();
+        push_group_rows("", 0, &children, &memos, &HashSet::new(), &mut rows);
+
+        let got: Vec<(&str, i32, bool)> = rows
+            .iter()
+            .map(|r| (r.id.as_str(), r.depth, r.is_group))
+            .collect();
+        // 그룹 먼저, 자식 그룹 재귀, 그 다음 그 그룹의 메모.
+        assert_eq!(
+            got,
+            vec![
+                ("outer", 0, true),
+                ("inner", 1, true),
+                ("m-in", 2, false),
+                ("m-out", 1, false),
+            ]
+        );
+        // 바깥 그룹의 자식 수 = 하위 그룹 1 + 메모 1
+        assert_eq!(rows[0].child_count, 2);
+    }
+
+    /// 접은 그룹은 내용이 아예 행으로 나오지 않아야 한다.
+    #[test]
+    fn collapsed_group_hides_its_contents() {
+        let groups = vec![group("outer", "바깥", ""), group("inner", "안쪽", "outer")];
+        let memos = vec![memo_in("m-out", "outer")];
+        let children = ymemo_core::group_children(&groups);
+        let collapsed = HashSet::from(["outer".to_string()]);
+
+        let mut rows = Vec::new();
+        push_group_rows("", 0, &children, &memos, &collapsed, &mut rows);
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id.as_str(), "outer");
+        assert!(!rows[0].expanded);
+        assert_eq!(rows[0].child_count, 2); // 접혀 있어도 개수는 보여준다
     }
 
     #[test]
