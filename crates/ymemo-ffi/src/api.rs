@@ -28,6 +28,7 @@ pub struct FfiMemo {
     pub title: String,
     pub body: String,
     pub color: String,
+    pub opacity: i64,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -39,6 +40,7 @@ impl From<Memo> for FfiMemo {
             title: m.title,
             body: m.body,
             color: m.color,
+            opacity: m.opacity,
             created_at: m.created_at,
             updated_at: m.updated_at,
         }
@@ -99,6 +101,19 @@ pub fn memo_set_color(id: String, color: String) -> Result<()> {
             .get(&id)?
             .ok_or_else(|| anyhow!("메모 없음: {id}"))?;
         memo.color = color;
+        memo.updated_at = now_millis();
+        v.upsert(&memo)
+    })
+}
+
+/// 스티커 불투명도(%) 변경. 범위를 벗어나면 코어가 잘라낸다.
+pub fn memo_set_opacity(id: String, opacity: i64) -> Result<()> {
+    with_vault(|v| {
+        let mut memo = v
+            .store()
+            .get(&id)?
+            .ok_or_else(|| anyhow!("메모 없음: {id}"))?;
+        memo.opacity = opacity;
         memo.updated_at = now_millis();
         v.upsert(&memo)
     })

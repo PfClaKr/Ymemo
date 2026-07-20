@@ -137,6 +137,7 @@ impl Vault {
         put_str_if_changed(&mut self.doc, &obj, "title", &memo.title)?;
         put_str_if_changed(&mut self.doc, &obj, "body", &memo.body)?;
         put_str_if_changed(&mut self.doc, &obj, "color", &memo.color)?;
+        put_i64_if_changed(&mut self.doc, &obj, "opacity", crate::clamp_opacity(memo.opacity))?;
         put_i64_if_changed(&mut self.doc, &obj, "created_at", memo.created_at)?;
         put_i64_if_changed(&mut self.doc, &obj, "updated_at", memo.updated_at)?;
 
@@ -231,8 +232,14 @@ impl Vault {
                 id: id.clone(),
                 title: get_str(&self.doc, &obj, "title")?,
                 body: get_str(&self.doc, &obj, "body")?,
-                // color 는 이후에 추가된 필드라 옛 change 엔 없을 수 있다 → 기본값.
+                // color/opacity 는 이후에 추가된 필드라 옛 change 엔 없을 수 있다 → 기본값.
                 color: get_str_or(&self.doc, &obj, "color", crate::DEFAULT_COLOR),
+                opacity: crate::clamp_opacity(get_i64_or(
+                    &self.doc,
+                    &obj,
+                    "opacity",
+                    crate::DEFAULT_OPACITY,
+                )),
                 created_at: get_i64(&self.doc, &obj, "created_at")?,
                 updated_at: get_i64(&self.doc, &obj, "updated_at")?,
             };
@@ -290,6 +297,17 @@ fn get_str_or(doc: &AutoCommit, obj: &ObjId, key: &str, default: &str) -> String
             _ => default.to_string(),
         },
         _ => default.to_string(),
+    }
+}
+
+/// 정수 필드를 읽되, 없거나 정수가 아니면 기본값을 돌려준다.
+fn get_i64_or(doc: &AutoCommit, obj: &ObjId, key: &str, default: i64) -> i64 {
+    match doc.get(obj, key) {
+        Ok(Some((Value::Scalar(s), _))) => match s.as_ref() {
+            ScalarValue::Int(v) => *v,
+            _ => default,
+        },
+        _ => default,
     }
 }
 
