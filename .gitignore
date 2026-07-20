@@ -18,6 +18,17 @@ apps/mobile/pubspec.lock
 apps/mobile/lib/src/rust/
 crates/ymemo-ffi/src/frb_generated.rs
 
+# 패키징 빌드 산출물 (에셋 packaging/assets/* 는 커밋, 아래 결과물은 제외)
+/dist/
+/packaging/windows/Output/
+/packaging/windows/Ymemo.exe
+/packaging/windows/ymemo-sync.exe
+# CI 에서 내려받는 syncthing 아카이브/전개물
+/st/
+/st.zip
+/st.tar.gz
+/syncthing-*/
+
 # OS / 에디터 잡동사니
 .DS_Store
 *.swp

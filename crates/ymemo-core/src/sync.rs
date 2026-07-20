@@ -24,25 +24,38 @@ pub struct Syncthing {
 }
 
 impl Syncthing {
-    /// syncthing 바이너리 탐색: `YMEMO_SYNCTHING_BIN` 환경변수 → 실행파일 옆(번들) → PATH 순.
+    /// syncthing 바이너리 탐색: `YMEMO_SYNCTHING_BIN` → 실행파일 옆(번들) → PATH 순.
+    ///
+    /// 번들본은 사용자가 syncthing 사용 사실을 눈치채지 못하도록 `ymemo-sync`
+    /// (Windows: `ymemo-sync.exe`) 라는 이름으로 배포한다 — ps/작업관리자에도 이 이름으로
+    /// 뜬다. 원래 이름(`syncthing`)은 개발 환경(PATH 설치본) 폴백으로만 남긴다.
     pub fn find_binary() -> Option<PathBuf> {
-        let exe = if cfg!(windows) { "syncthing.exe" } else { "syncthing" };
+        let bundled = if cfg!(windows) { "ymemo-sync.exe" } else { "ymemo-sync" };
+        let plain = if cfg!(windows) { "syncthing.exe" } else { "syncthing" };
+
         if let Ok(p) = std::env::var("YMEMO_SYNCTHING_BIN") {
             let p = PathBuf::from(p);
             if p.is_file() {
                 return Some(p);
             }
         }
-        // 릴리스 패키지는 syncthing 을 앱 실행파일 옆에 번들한다.
+        // 릴리스 패키지는 리네임한 바이너리를 앱 실행파일 옆(또는 같은 설치 폴더)에 둔다.
         if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)) {
-            let bundled = dir.join(exe);
-            if bundled.is_file() {
-                return Some(bundled);
+            for name in [bundled, plain] {
+                let cand = dir.join(name);
+                if cand.is_file() {
+                    return Some(cand);
+                }
             }
         }
-        std::env::split_paths(&std::env::var_os("PATH")?)
-            .map(|d| d.join(exe))
-            .find(|p| p.is_file())
+        // 마지막으로 PATH (개발 환경에서 시스템 설치본 사용).
+        let paths = std::env::var_os("PATH")?;
+        for name in [bundled, plain] {
+            if let Some(hit) = std::env::split_paths(&paths).map(|d| d.join(name)).find(|p| p.is_file()) {
+                return Some(hit);
+            }
+        }
+        None
     }
 
     /// 데몬 기동: 전용 home 디렉터리, 임의의 로컬 포트, 브라우저/기본폴더 없이.

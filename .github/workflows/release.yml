@@ -1,10 +1,13 @@
 # 릴리스 태그(v*)가 올라오면 데스크탑/모바일 바이너리를 빌드해 GitHub Release 에 첨부한다.
 #
 # 산출물:
-#  - ymemo-desktop-linux-x86_64.tar.gz   (앱 + syncthing 번들)
-#  - ymemo-desktop-windows-x86_64.zip    (앱 + syncthing 번들)
+#  - ymemo_<ver>_amd64.deb               (Linux 인스톨러 — syncthing 포함, 제거 시 함께 삭제)
+#  - ymemo-setup-x86_64.exe              (Windows 인스톨러 — syncthing 포함, 제거 시 함께 삭제)
 #  - ymemo-ffi-android-jniLibs.zip       (arm64-v8a / armeabi-v7a / x86_64 .so)
 #  - ymemo-ffi-ios.zip                   (aarch64 기기·시뮬레이터 .a)
+#
+# 데스크탑은 syncthing 을 인스톨러 안에 번들해 `ymemo-sync`(.exe) 로 리네임 설치한다.
+# 사용자는 syncthing 을 별도로 받지 않고, 앱 제거 시 함께 지워진다 (packaging/ 참조).
 #
 # 모바일은 현재 Rust FFI 라이브러리까지만 빌드한다. APK/IPA 패키징은
 # flutter_rust_bridge codegen + flutter create + 서명 설정이 갖춰지면 추가한다
@@ -42,19 +45,20 @@ jobs:
       - name: Install slint deps
         run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
       - run: cargo build --release -p ymemo-desktop
-      - name: Bundle syncthing + package
+      - name: Build .deb (bundles hidden syncthing)
         run: |
+          VERSION="${GITHUB_REF_NAME#v}"
           curl -sL -o st.tar.gz "https://github.com/syncthing/syncthing/releases/download/${SYNCTHING_VERSION}/syncthing-linux-amd64-${SYNCTHING_VERSION}.tar.gz"
           tar xzf st.tar.gz
-          mkdir -p pkg/ymemo
-          cp target/release/ymemo-desktop pkg/ymemo/
-          cp "syncthing-linux-amd64-${SYNCTHING_VERSION}/syncthing" pkg/ymemo/
-          cp LICENSE pkg/ymemo/
-          tar czf ymemo-desktop-linux-x86_64.tar.gz -C pkg ymemo
+          # build-deb.sh 가 syncthing 을 ymemo-sync 로 리네임해 /usr/lib/ymemo 에 넣는다.
+          bash packaging/linux/build-deb.sh \
+            --app target/release/ymemo-desktop \
+            --sync "syncthing-linux-amd64-${SYNCTHING_VERSION}/syncthing" \
+            --version "$VERSION" --outdir dist
       - uses: actions/upload-artifact@v4
         with:
           name: linux-desktop
-          path: ymemo-desktop-linux-x86_64.tar.gz
+          path: dist/*.deb
 
   windows-desktop:
     needs: test
@@ -63,20 +67,23 @@ jobs:
       - uses: actions/checkout@v4
       - run: rustup update stable
       - run: cargo build --release -p ymemo-desktop
-      - name: Bundle syncthing + package
+      - name: Build installer (bundles hidden syncthing)
         shell: pwsh
         run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
           curl.exe -sL -o st.zip "https://github.com/syncthing/syncthing/releases/download/$env:SYNCTHING_VERSION/syncthing-windows-amd64-$env:SYNCTHING_VERSION.zip"
-          Expand-Archive st.zip -DestinationPath st
-          New-Item -ItemType Directory -Force -Path pkg/ymemo | Out-Null
-          Copy-Item target/release/ymemo-desktop.exe pkg/ymemo/
-          Copy-Item "st/syncthing-windows-amd64-$env:SYNCTHING_VERSION/syncthing.exe" pkg/ymemo/
-          Copy-Item LICENSE pkg/ymemo/
-          Compress-Archive -Path pkg/ymemo -DestinationPath ymemo-desktop-windows-x86_64.zip
+          Expand-Archive st.zip -DestinationPath st -Force
+          # 인스톨러(.iss)가 참조하는 이름으로 리네임해 .iss 옆에 둔다.
+          Copy-Item target/release/ymemo-desktop.exe packaging/windows/Ymemo.exe -Force
+          Copy-Item "st/syncthing-windows-amd64-$env:SYNCTHING_VERSION/syncthing.exe" packaging/windows/ymemo-sync.exe -Force
+          choco install innosetup --no-progress -y
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" packaging/windows/ymemo.iss
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item packaging/windows/Output/ymemo-setup-x86_64.exe dist/
       - uses: actions/upload-artifact@v4
         with:
           name: windows-desktop
-          path: ymemo-desktop-windows-x86_64.zip
+          path: dist/ymemo-setup-x86_64.exe
 
   android-libs:
     needs: test
@@ -136,7 +143,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" --generate-notes || true
           gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
-            ymemo-desktop-linux-x86_64.tar.gz \
-            ymemo-desktop-windows-x86_64.zip \
+            ymemo_*_amd64.deb \
+            ymemo-setup-x86_64.exe \
             ymemo-ffi-android-jniLibs.zip \
             ymemo-ffi-ios.zip

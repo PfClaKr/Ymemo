@@ -75,6 +75,26 @@ cargo test -p ymemo-core     # 코어 테스트
 cargo run -p ymemo-desktop   # 데스크탑 앱 실행
 ```
 
+개발 중에는 PATH 에 설치된 `syncthing` 을 그대로 쓴다. 릴리스에서는 syncthing 을
+`ymemo-sync` 로 리네임해 인스톨러에 함께 넣는다 (아래 참조).
+
+### 패키징 (인스톨러)
+
+syncthing 을 인스톨러 안에 번들해 **사용자가 별도로 설치하지 않고**, 앱을 제거하면
+syncthing 도 함께 지워진다. 사용자는 syncthing 사용 사실을 알 필요가 없다
+(GUI 를 열지 않고, 프로세스도 `ymemo-sync` 로 뜬다).
+
+```bash
+# Linux .deb (로컬 테스트). syncthing 바이너리 경로를 넘긴다.
+packaging/linux/build-deb.sh \
+  --app target/release/ymemo-desktop --sync /path/to/syncthing \
+  --version 0.1.0 --outdir dist
+# → dist/ymemo_0.1.0_amd64.deb  (syncthing 은 /usr/lib/ymemo/ymemo-sync 로 설치)
+```
+
+Windows 는 Inno Setup(`packaging/windows/ymemo.iss`)으로 `ymemo-setup-x86_64.exe` 를
+만든다. 둘 다 릴리스 태그(`v*`)에서 CI 가 자동 생성한다 (`.github/workflows/release.yml`).
+
 ## 현재 상태 (로드맵)
 
 - [x] **Phase 0** — 워크스페이스 스캐폴딩, `ymemo-core` SQLite CRUD, Slint 스티커 창 연결
