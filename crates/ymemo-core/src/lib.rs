@@ -14,12 +14,18 @@ use anyhow::Result;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
+/// 스티커 기본 색상 키. 팔레트 키는 UI 가 실제 색으로 매핑한다(코어는 문자열만 저장).
+pub const DEFAULT_COLOR: &str = "yellow";
+
 /// 메모 한 건. (사진 첨부 등은 이후 단계에서 확장)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Memo {
     pub id: String,
     pub title: String,
     pub body: String,
+    /// 스티커 색상 팔레트 키 ("yellow"/"pink"/"green"/"blue"/"purple").
+    /// 값 해석은 UI 몫이고 코어는 불투명 문자열로 저장·동기화만 한다.
+    pub color: String,
     /// 생성 시각 (Unix epoch millis)
     pub created_at: i64,
     /// 마지막 수정 시각 (Unix epoch millis)
@@ -27,13 +33,14 @@ pub struct Memo {
 }
 
 impl Memo {
-    /// 새 메모 생성 (UUID v4 id 부여, 생성/수정 시각 = 현재).
+    /// 새 메모 생성 (UUID v4 id 부여, 생성/수정 시각 = 현재, 기본 색상).
     pub fn new(title: impl Into<String>, body: impl Into<String>) -> Self {
         let now = now_millis();
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             title: title.into(),
             body: body.into(),
+            color: DEFAULT_COLOR.to_string(),
             created_at: now,
             updated_at: now,
         }
@@ -73,6 +80,7 @@ impl Store {
                 id         TEXT PRIMARY KEY,
                 title      TEXT NOT NULL,
                 body       TEXT NOT NULL,
+                color      TEXT NOT NULL DEFAULT 'yellow',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
@@ -82,6 +90,16 @@ impl Store {
                 value TEXT NOT NULL
             );",
         )?;
+        // 마이그레이션: color 없이 만들어진 기존 캐시에 컬럼을 더한다.
+        // (캐시는 로그에서 재구성 가능하지만, 재빌드 없이도 열리도록 무해하게 보강)
+        let has_color = self
+            .conn
+            .prepare("SELECT 1 FROM pragma_table_info('memos') WHERE name = 'color'")?
+            .exists([])?;
+        if !has_color {
+            self.conn
+                .execute("ALTER TABLE memos ADD COLUMN color TEXT NOT NULL DEFAULT 'yellow'", [])?;
+        }
         Ok(())
     }
 
@@ -123,10 +141,10 @@ impl Store {
     /// 삽입 또는 갱신 (id 기준).
     pub fn upsert(&self, memo: &Memo) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO memos (id, title, body, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(id) DO UPDATE SET title = ?2, body = ?3, updated_at = ?5",
-            params![memo.id, memo.title, memo.body, memo.created_at, memo.updated_at],
+            "INSERT INTO memos (id, title, body, color, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(id) DO UPDATE SET title = ?2, body = ?3, color = ?4, updated_at = ?6",
+            params![memo.id, memo.title, memo.body, memo.color, memo.created_at, memo.updated_at],
         )?;
         Ok(())
     }
@@ -134,35 +152,19 @@ impl Store {
     /// 최근 수정순 전체 목록.
     pub fn list(&self) -> Result<Vec<Memo>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, body, created_at, updated_at
+            "SELECT id, title, body, color, created_at, updated_at
              FROM memos ORDER BY updated_at DESC",
         )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(Memo {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                body: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
-            })
-        })?;
+        let rows = stmt.query_map([], row_to_memo)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /// id 로 한 건 조회.
     pub fn get(&self, id: &str) -> Result<Option<Memo>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, body, created_at, updated_at FROM memos WHERE id = ?1",
+            "SELECT id, title, body, color, created_at, updated_at FROM memos WHERE id = ?1",
         )?;
-        let mut rows = stmt.query_map([id], |row| {
-            Ok(Memo {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                body: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
-            })
-        })?;
+        let mut rows = stmt.query_map([id], row_to_memo)?;
         Ok(rows.next().transpose()?)
     }
 
@@ -171,6 +173,18 @@ impl Store {
         self.conn.execute("DELETE FROM memos WHERE id = ?1", [id])?;
         Ok(())
     }
+}
+
+/// memos 테이블 한 행 → Memo. (list/get 공용)
+fn row_to_memo(row: &rusqlite::Row) -> rusqlite::Result<Memo> {
+    Ok(Memo {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        body: row.get(2)?,
+        color: row.get(3)?,
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
+    })
 }
 
 /// 현재 시각 (Unix epoch millis). FFI 등 코어 밖에서도 같은 시계를 쓰도록 공개.
@@ -215,5 +229,36 @@ mod tests {
         let all = store.list().unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].title, "v2");
+    }
+
+    /// color 없이 만들어진 구버전 캐시를 열면 컬럼이 추가되고 기존 행은 기본색을 갖는다.
+    #[test]
+    fn migrates_pre_color_cache() {
+        let path = std::env::temp_dir().join(format!("ymemo-mig-{}.db", uuid::Uuid::new_v4()));
+        // 구버전 스키마(color 없음)로 직접 만들고 한 행을 넣는다.
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE memos (
+                    id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL,
+                    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+                );
+                INSERT INTO memos VALUES ('old1', '옛 메모', '본문', 1, 2);",
+            )
+            .unwrap();
+        }
+        // 새 Store 로 열면 init() 마이그레이션이 color 컬럼을 더한다.
+        let store = Store::open(&path).unwrap();
+        let m = store.get("old1").unwrap().unwrap();
+        assert_eq!(m.title, "옛 메모");
+        assert_eq!(m.color, DEFAULT_COLOR);
+
+        // 색 갱신도 정상 저장된다.
+        let mut m2 = m.clone();
+        m2.color = "blue".into();
+        store.upsert(&m2).unwrap();
+        assert_eq!(store.get("old1").unwrap().unwrap().color, "blue");
+
+        std::fs::remove_file(&path).ok();
     }
 }

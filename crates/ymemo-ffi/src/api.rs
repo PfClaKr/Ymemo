@@ -27,6 +27,7 @@ pub struct FfiMemo {
     pub id: String,
     pub title: String,
     pub body: String,
+    pub color: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -37,6 +38,7 @@ impl From<Memo> for FfiMemo {
             id: m.id,
             title: m.title,
             body: m.body,
+            color: m.color,
             created_at: m.created_at,
             updated_at: m.updated_at,
         }
@@ -87,6 +89,19 @@ pub fn memo_upsert(id: Option<String>, title: String, body: String) -> Result<St
 /// 메모 삭제.
 pub fn memo_delete(id: String) -> Result<()> {
     with_vault(|v| v.delete(&id))
+}
+
+/// 스티커 색상 팔레트 키 변경.
+pub fn memo_set_color(id: String, color: String) -> Result<()> {
+    with_vault(|v| {
+        let mut memo = v
+            .store()
+            .get(&id)?
+            .ok_or_else(|| anyhow!("메모 없음: {id}"))?;
+        memo.color = color;
+        memo.updated_at = now_millis();
+        v.upsert(&memo)
+    })
 }
 
 /// 다른 기기의 로그를 병합해 로컬 상태를 갱신한다.
