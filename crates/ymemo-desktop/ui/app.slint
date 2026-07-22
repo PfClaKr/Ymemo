@@ -1,4 +1,4 @@
-import { LineEdit, Button, TextEdit, ListView, Slider } from "std-widgets.slint";
+import { LineEdit, Button, TextEdit, ListView, Slider, ScrollView } from "std-widgets.slint";
 
 // 스티커 팔레트: 색상 키("yellow"/"pink"/"green"/"blue"/"purple") → 실제 색.
 // 코어(Memo.color)는 키 문자열만 저장·동기화하고, 실제 색 해석은 여기 한곳에 모은다.
@@ -73,9 +73,9 @@ component PairingPanel inherits VerticalLayout {
         // 이 기기의 6자리 코드 (크게).
         Text {
             text: root.lan-code == "" ? "------" : root.lan-code;
-            font-size: 30px;
+            font-size: 26px;
             font-weight: 800;
-            letter-spacing: 4px;
+            letter-spacing: 3px;
             color: root.ink;
             horizontal-alignment: center;
         }
@@ -170,7 +170,8 @@ export struct ListRow {
 export component LockWindow inherits Window {
     title: "Ymemo — 잠금";
     preferred-width: 320px;
-    preferred-height: 180px;
+    preferred-height: 300px;
+    min-height: 200px;
     background: #2e2b27;
 
     in property <string> lock-message;
@@ -206,16 +207,21 @@ export component LockWindow inherits Window {
             }
         }
 
-        if root.show-sync: PairingPanel {
-            available: root.sync-available;
-            my-code: root.my-pairing-code;
-            qr: root.qr-image;
-            message: root.peer-message;
-            lan-code: root.lan-pair-code;
-            lan-message: root.lan-message;
-            ink: #d8d2c2;
-            add-peer(code) => { root.add-peer(code); }
-            lan-join(code) => { root.lan-join(code); }
+        if root.show-sync: ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                PairingPanel {
+                    available: root.sync-available;
+                    my-code: root.my-pairing-code;
+                    qr: root.qr-image;
+                    message: root.peer-message;
+                    lan-code: root.lan-pair-code;
+                    lan-message: root.lan-message;
+                    ink: #d8d2c2;
+                    add-peer(code) => { root.add-peer(code); }
+                    lan-join(code) => { root.lan-join(code); }
+                }
+            }
         }
 
         if !root.show-sync: VerticalLayout {
@@ -320,16 +326,21 @@ export component ListWindow inherits Window {
             }
         }
 
-        if root.show-sync: PairingPanel {
-            available: root.sync-available;
-            my-code: root.my-pairing-code;
-            qr: root.qr-image;
-            message: root.peer-message;
-            lan-code: root.lan-pair-code;
-            lan-message: root.lan-message;
-            ink: #d8d2c2;
-            add-peer(code) => { root.add-peer(code); }
-            lan-join(code) => { root.lan-join(code); }
+        if root.show-sync: ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                PairingPanel {
+                    available: root.sync-available;
+                    my-code: root.my-pairing-code;
+                    qr: root.qr-image;
+                    message: root.peer-message;
+                    lan-code: root.lan-pair-code;
+                    lan-message: root.lan-message;
+                    ink: #d8d2c2;
+                    add-peer(code) => { root.add-peer(code); }
+                    lan-join(code) => { root.lan-join(code); }
+                }
+            }
         }
 
         if !root.show-sync && root.rows.length == 0: Text {
