@@ -15,7 +15,9 @@ ymemo-core = { path = "crates/ymemo-core" }
 
 # GUI (데스크탑)
 # slint 와 i-slint-backend-winit 은 반드시 같은 버전이어야 한다 (내부 크레이트 공유).
-slint = "1.17"
+# renderer-software: OpenGL 없이 CPU 로 그리는 폴백 렌더러. GL 드라이버가 부실한
+# 환경(특히 Windows VM/RDP/구형 드라이버)에서 femtovg 대신 쓴다.
+slint = { version = "1.17", features = ["renderer-software"] }
 slint-build = "1.17"
 i-slint-backend-winit = "1.17" # 무프레임 창의 네이티브 드래그(drag_window) 접근용
 qrcode = { version = "0.14", default-features = false } # 페어링 QR (렌더링은 slint 이미지로 직접)

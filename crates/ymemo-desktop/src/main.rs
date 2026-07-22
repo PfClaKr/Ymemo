@@ -78,6 +78,31 @@ struct AppUi {
     unlocked: Rc<Cell<bool>>,
 }
 
+/// Slint 렌더러 선택. 창을 만들기 전에 한 번 호출한다.
+///
+/// 기본 렌더러(femtovg)는 OpenGL 2.0+ 를 요구하는데, Windows 는 GPU 드라이버가 없거나
+/// VM/RDP 라 legacy GL 1.1 만 있는 경우가 흔해 `glCreateShader` 조차 못 찾고 죽는다.
+/// 그래서 Windows 는 CPU 소프트웨어 렌더러를 기본으로 쓴다(이 앱은 그래픽이 가벼워 충분).
+/// `YMEMO_RENDERER=femtovg|software|skia` 로 강제할 수 있다. Linux/macOS 는 기본 유지.
+fn select_renderer() {
+    let name = match std::env::var("YMEMO_RENDERER") {
+        Ok(n) if !n.is_empty() => n,
+        _ if cfg!(windows) => "software".to_string(),
+        _ => return, // 기본 렌더러 유지 (GL 이 정상인 환경)
+    };
+    match i_slint_backend_winit::Backend::builder()
+        .with_renderer_name(name.as_str())
+        .build()
+    {
+        Ok(backend) => {
+            if let Err(e) = slint::platform::set_platform(Box::new(backend)) {
+                eprintln!("렌더러 '{name}' 설정 실패, 기본값으로 계속: {e:?}");
+            }
+        }
+        Err(e) => eprintln!("렌더러 '{name}' 백엔드 생성 실패, 기본값으로 계속: {e}"),
+    }
+}
+
 /// 플랫폼별 데이터 디렉터리. (예: Linux ~/.local/share/Ymemo)
 fn data_dir() -> std::path::PathBuf {
     if let Some(dirs) = directories::ProjectDirs::from("dev", "ymemo", "Ymemo") {
@@ -96,6 +121,8 @@ fn main() -> Result<()> {
     if std::env::var_os("YMEMO_FORCE_WAYLAND").is_none() && std::env::var_os("DISPLAY").is_some() {
         std::env::remove_var("WAYLAND_DISPLAY");
     }
+
+    select_renderer();
 
     let lock = LockWindow::new()?;
     let list = ListWindow::new()?;
