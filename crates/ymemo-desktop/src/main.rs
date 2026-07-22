@@ -1,3 +1,8 @@
+// Windows 릴리스 빌드는 콘솔 없이 GUI 서브시스템으로 뜬다. 이게 없으면 앱과 함께
+// cmd 창이 뜨고, 그 콘솔 창을 닫으면 앱이 통째로 종료된다. (디버그 빌드는 println
+// 확인을 위해 콘솔을 유지한다. Linux/macOS 에선 아무 영향 없다.)
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 //! Ymemo 데스크탑 앱 (Slint) — 트레이 상주 + 스티커 메모 창.
 //!
 //! 창 구조:

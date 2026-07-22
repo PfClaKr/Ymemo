@@ -66,8 +66,8 @@ impl Syncthing {
         let port = free_port()?;
         let gui = format!("127.0.0.1:{port}");
 
-        let child = Command::new(binary)
-            .arg("serve")
+        let mut cmd = Command::new(binary);
+        cmd.arg("serve")
             .arg("--home")
             .arg(home_dir)
             .args(["--gui-address", &gui, "--no-browser", "--no-restart"])
@@ -75,7 +75,16 @@ impl Syncthing {
             // v1 은 --no-default-folder 플래그도 있지만 v2 에서 제거됨 → 환경변수로 통일
             .env("STNODEFAULTFOLDER", "1")
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::null());
+        // Windows: 콘솔 서브시스템인 syncthing 자식이 자기 콘솔 창을 띄우지 않게 한다.
+        // (앱을 GUI 서브시스템으로 바꾸면 자식이 새 콘솔을 만들어 창이 깜빡이거나 떠 있는다)
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        let child = cmd
             .spawn()
             .with_context(|| format!("syncthing 실행 실패: {}", binary.display()))?;
 
