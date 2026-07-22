@@ -417,12 +417,18 @@ fn main() -> Result<()> {
     let merge_timer = slint::Timer::default();
     {
         let ctx = ctx.clone();
+        let list_weak = list.as_weak();
         merge_timer.start(TimerMode::Repeated, MERGE_INTERVAL, move || {
             let mut guard = ctx.vault.borrow_mut();
             let Some(v) = guard.as_mut() else { return };
             match v.rebuild() {
                 Ok(()) => {
                     refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+                    // 목록 창을 강제로 다시 그린다 (Windows 소프트웨어 렌더러가 모델 변경만으론
+                    // 리페인트를 안 해, 병합돼도 화면이 그대로여서 "동기화 안 됨"처럼 보인다).
+                    if let Some(w) = list_weak.upgrade() {
+                        w.window().request_redraw();
+                    }
                     // 열린 스티커에 원격 변경 반영. 편집 중(dirty)이면 덮어쓰지 않는다.
                     for (id, entry) in ctx.stickies.borrow().iter() {
                         if entry.dirty.get() {
@@ -437,6 +443,7 @@ fn main() -> Result<()> {
                                 entry.window.set_memo_title(m.title.into());
                                 entry.window.set_sticky_color(m.color.into());
                                 entry.window.set_sticky_opacity(m.opacity as f32);
+                                entry.window.window().request_redraw();
                             }
                             // 다른 기기에서 삭제됨 → 창만 숨긴다 (제거는 다음 닫기에서).
                             Ok(None) => {
@@ -1042,10 +1049,14 @@ pub(crate) fn request_toggle() {
             let Some(app) = borrow.as_ref() else { return };
             if !app.unlocked.get() {
                 let _ = app.lock.show();
+                app.lock.window().request_redraw();
             } else if app.list.window().is_visible() {
                 let _ = app.list.hide();
             } else {
                 let _ = app.list.show();
+                // Windows 소프트웨어 렌더러는 다시 띄운 창을 바로 안 그려서 리프레시 전까지
+                // 하얗게 남는다 → 표시 직후 강제로 다시 그린다.
+                app.list.window().request_redraw();
             }
         });
     });
