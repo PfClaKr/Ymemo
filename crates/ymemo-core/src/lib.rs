@@ -6,6 +6,7 @@
 
 pub mod changelog;
 pub mod crypto;
+pub mod lan_pair;
 pub mod pairing;
 pub mod sync;
 pub mod vault;
