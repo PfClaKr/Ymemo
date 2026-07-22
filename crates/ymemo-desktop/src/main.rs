@@ -24,7 +24,9 @@ use anyhow::Result;
 use i_slint_backend_winit::winit::dpi::PhysicalPosition;
 use i_slint_backend_winit::WinitWindowAccessor;
 use slint::{ComponentHandle, LogicalSize, ModelRc, SharedString, TimerMode, VecModel};
-use ymemo_core::{now_millis, pairing::PairingCode, sync::Syncthing, vault::Vault, Memo, Store};
+use ymemo_core::{
+    lan_pair, now_millis, pairing::PairingCode, sync::Syncthing, vault::Vault, Memo, Store,
+};
 
 slint::include_modules!();
 
@@ -139,10 +141,11 @@ fn main() -> Result<()> {
     let vault_dir = dir.join("vault");
     let _ = std::fs::create_dir_all(&vault_dir);
     let st = start_syncthing(&dir, &vault_dir);
+    let mut my_device_id: Option<String> = None;
     if let Some(st) = &st {
         match st.device_id() {
             Ok(id) => {
-                let code = PairingCode::new(id).encode();
+                let code = PairingCode::new(&id).encode();
                 if let Some(img) = qr_image(&code) {
                     lock.set_qr_image(img);
                 }
@@ -153,12 +156,25 @@ fn main() -> Result<()> {
                 list.set_my_pairing_code(SharedString::from(code));
                 lock.set_sync_available(true);
                 list.set_sync_available(true);
+                my_device_id = Some(id);
             }
             Err(e) => eprintln!("기기 ID 조회 실패: {e}"),
         }
     }
     // 앱 종료 시 Drop 으로 데몬도 함께 종료된다.
     let syncthing: Rc<RefCell<Option<Syncthing>>> = Rc::new(RefCell::new(st));
+
+    // LAN 페어링 리스너: 같은 네트워크에서 6자리 코드로 device-id 를 주고받는다.
+    // (device-id 를 알 때만 — 그래야 상대에게 응답할 수 있다)
+    let lan = my_device_id
+        .as_ref()
+        .and_then(|id| match lan_pair::PairListener::start(id.clone()) {
+            Ok(l) => Some(Rc::new(l)),
+            Err(e) => {
+                eprintln!("LAN 페어링 시작 실패 (LAN 연결 없이 계속): {e}");
+                None
+            }
+        });
 
     let ctx = Ctx {
         vault: Rc::new(RefCell::new(None)),
@@ -306,7 +322,7 @@ fn main() -> Result<()> {
         list.on_move_row(move |src, dst| move_row(&ctx, src, dst));
     }
 
-    // ---- 페어링 (잠금/목록 창 공용) ----
+    // ---- 페어링: 긴 device-id 직접 등록 (잠금/목록 창 공용, 폴백 경로) ----
     {
         let w = lock.as_weak();
         lock.on_add_peer(pairing_handler(syncthing.clone(), move |m| {
@@ -318,6 +334,83 @@ fn main() -> Result<()> {
         list.on_add_peer(pairing_handler(syncthing.clone(), move |m| {
             w.unwrap().set_peer_message(m)
         }));
+    }
+
+    // ---- LAN 페어링: 6자리 코드로 연결 ----
+    // join 은 몇 초 블로킹하므로 스레드에서 돌리고, 결과는 채널로 UI 스레드에 넘겨
+    // 아래 pair_timer 가 받아 등록한다.
+    let (join_tx, join_rx) = std::sync::mpsc::channel::<Result<Option<String>, String>>();
+    {
+        let lan_join = {
+            let id = my_device_id.clone();
+            let lock_w = lock.as_weak();
+            let list_w = list.as_weak();
+            let join_tx = join_tx.clone();
+            move |code: SharedString| {
+                let Some(my_id) = id.clone() else { return };
+                let set_msg = |m: &str| {
+                    if let Some(w) = lock_w.upgrade() {
+                        w.set_lan_message(SharedString::from(m));
+                    }
+                    if let Some(w) = list_w.upgrade() {
+                        w.set_lan_message(SharedString::from(m));
+                    }
+                };
+                let code = code.trim().to_string();
+                if code.len() != 6 || !code.bytes().all(|b| b.is_ascii_digit()) {
+                    set_msg("6자리 숫자를 입력하세요");
+                    return;
+                }
+                set_msg("연결 중...");
+                let join_tx = join_tx.clone();
+                std::thread::spawn(move || {
+                    let res = lan_pair::join(&code, &my_id, Duration::from_secs(6))
+                        .map_err(|e| e.to_string());
+                    let _ = join_tx.send(res);
+                });
+            }
+        };
+        lock.on_lan_join(lan_join.clone());
+        list.on_lan_join(lan_join);
+    }
+
+    // 코드 표시 갱신 + 페어링된 상대 등록을 주기적으로 처리.
+    let pair_timer = slint::Timer::default();
+    if let Some(lan) = lan.clone() {
+        let lock_w = lock.as_weak();
+        let list_w = list.as_weak();
+        let syncthing = syncthing.clone();
+        pair_timer.start(TimerMode::Repeated, Duration::from_millis(800), move || {
+            // 이 기기의 현재 6자리 코드를 양쪽 창에 반영.
+            let code = SharedString::from(lan.code());
+            if let Some(w) = lock_w.upgrade() {
+                w.set_lan_pair_code(code.clone());
+            }
+            if let Some(w) = list_w.upgrade() {
+                w.set_lan_pair_code(code.clone());
+            }
+            let set_msg = |m: String| {
+                let m = SharedString::from(m);
+                if let Some(w) = lock_w.upgrade() {
+                    w.set_lan_message(m.clone());
+                }
+                if let Some(w) = list_w.upgrade() {
+                    w.set_lan_message(m);
+                }
+            };
+            // 우리 코드로 붙어 온 상대(호스트 역할)를 등록.
+            while let Some(peer) = lan.next_paired_peer() {
+                set_msg(register_peer(&syncthing, &peer));
+            }
+            // 우리가 상대 코드로 붙은 결과(조인 역할)를 등록.
+            while let Ok(res) = join_rx.try_recv() {
+                match res {
+                    Ok(Some(peer)) => set_msg(register_peer(&syncthing, &peer)),
+                    Ok(None) => set_msg("주변에서 그 코드를 쓰는 기기를 못 찾았습니다".into()),
+                    Err(e) => set_msg(e),
+                }
+            }
+        });
     }
 
     // ---- 주기적 병합: 다른 기기의 로그를 목록/스티커에 반영 ----
@@ -882,6 +975,18 @@ fn pairing_handler(
             Err(e) => format!("{e}"),
         };
         set_msg(SharedString::from(msg));
+    }
+}
+
+/// 페어링된 상대 device-id 를 공유 폴더에 등록한다. (LAN 페어링 결과 처리 공용)
+fn register_peer(syncthing: &Rc<RefCell<Option<Syncthing>>>, peer_id: &str) -> String {
+    let guard = syncthing.borrow();
+    let Some(st) = guard.as_ref() else {
+        return "동기화가 꺼져 있어 등록할 수 없습니다".to_string();
+    };
+    match st.share_folder_with(SYNC_FOLDER_ID, peer_id) {
+        Ok(()) => "기기를 연결했습니다.".to_string(),
+        Err(e) => format!("등록 실패: {e}"),
     }
 }
 

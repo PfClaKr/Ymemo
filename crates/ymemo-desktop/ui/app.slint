@@ -37,54 +37,111 @@ export global Palette {
     }
 }
 
-// 기기 페어링 패널: 자기 QR/코드 표시 + 상대 코드 등록.
+// 기기 페어링 패널.
+//  - 기본: 같은 네트워크에서 6자리 코드로 연결 (이 기기 코드 표시 + 상대 코드 입력).
+//  - 접이식 폴백: QR / 긴 device-id 직접 등록 (다른 네트워크용).
 component PairingPanel inherits VerticalLayout {
     in property <bool> available;
-    in property <string> my-code;
+    in property <string> my-code;          // 이 기기의 긴 device-id 코드 (폴백)
     in property <image> qr;
-    in property <string> message;
+    in property <string> message;          // 수동 등록 결과
+    in property <string> lan-code;         // 이 기기의 현재 6자리 코드
+    in property <string> lan-message;      // LAN 연결 결과
     in property <color> ink: #5c5c25;
     callback add-peer(string);
+    callback lan-join(string);
+
+    private property <bool> show-manual: false;
 
     spacing: 6px;
 
     if root.available: VerticalLayout {
         spacing: 6px;
         Text {
-            text: "기기 페어링";
+            text: "기기 연결";
             font-size: 13px;
             font-weight: 700;
             color: root.ink;
         }
-        Image {
-            source: root.qr;
-            width: 150px;
-            height: 150px;
-            image-rendering: pixelated;
-        }
         Text {
-            text: root.my-code;
-            font-size: 9px;
+            text: "같은 Wi-Fi에서 아래 6자리를 상대 기기에 입력하세요";
+            font-size: 10px;
             color: root.ink;
-            opacity: 0.75;
-            wrap: char-wrap;
+            opacity: 0.8;
+            wrap: word-wrap;
         }
+        // 이 기기의 6자리 코드 (크게).
+        Text {
+            text: root.lan-code == "" ? "------" : root.lan-code;
+            font-size: 30px;
+            font-weight: 800;
+            letter-spacing: 4px;
+            color: root.ink;
+            horizontal-alignment: center;
+        }
+        // 상대 코드 입력 → LAN 연결.
         HorizontalLayout {
             spacing: 6px;
-            peer := LineEdit {
-                placeholder-text: "상대 페어링 코드...";
-                accepted => { root.add-peer(self.text); }
+            lan := LineEdit {
+                placeholder-text: "상대 6자리 코드";
+                input-type: InputType.number;
+                accepted => { root.lan-join(self.text); self.text = ""; }
             }
             Button {
-                text: "등록";
-                clicked => { root.add-peer(peer.text); }
+                text: "연결";
+                clicked => { root.lan-join(lan.text); lan.text = ""; }
             }
         }
-        Text {
-            text: root.message;
+        if root.lan-message != "": Text {
+            text: root.lan-message;
             font-size: 11px;
             color: root.ink;
             wrap: word-wrap;
+        }
+
+        // ---- 폴백: 다른 네트워크면 QR / 긴 코드 ----
+        TouchArea {
+            height: 20px;
+            Text {
+                text: root.show-manual ? "▾ 다른 네트워크 (QR·코드)" : "▸ 다른 네트워크 (QR·코드)";
+                font-size: 10px;
+                color: root.ink;
+                opacity: 0.8;
+            }
+            clicked => { root.show-manual = !root.show-manual; }
+        }
+        if root.show-manual: VerticalLayout {
+            spacing: 6px;
+            Image {
+                source: root.qr;
+                width: 130px;
+                height: 130px;
+                image-rendering: pixelated;
+            }
+            Text {
+                text: root.my-code;
+                font-size: 9px;
+                color: root.ink;
+                opacity: 0.75;
+                wrap: char-wrap;
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                peer := LineEdit {
+                    placeholder-text: "상대 device-id...";
+                    accepted => { root.add-peer(self.text); }
+                }
+                Button {
+                    text: "등록";
+                    clicked => { root.add-peer(peer.text); }
+                }
+            }
+            if root.message != "": Text {
+                text: root.message;
+                font-size: 11px;
+                color: root.ink;
+                wrap: word-wrap;
+            }
         }
     }
     if !root.available: Text {
@@ -121,8 +178,11 @@ export component LockWindow inherits Window {
     in property <string> my-pairing-code;
     in property <image> qr-image;
     in property <string> peer-message;
+    in property <string> lan-pair-code;
+    in property <string> lan-message;
     callback unlock(string);
     callback add-peer(string);
+    callback lan-join(string);
 
     private property <bool> show-sync: false;
 
@@ -151,8 +211,11 @@ export component LockWindow inherits Window {
             my-code: root.my-pairing-code;
             qr: root.qr-image;
             message: root.peer-message;
+            lan-code: root.lan-pair-code;
+            lan-message: root.lan-message;
             ink: #d8d2c2;
             add-peer(code) => { root.add-peer(code); }
+            lan-join(code) => { root.lan-join(code); }
         }
 
         if !root.show-sync: VerticalLayout {
@@ -196,6 +259,9 @@ export component ListWindow inherits Window {
     in property <string> my-pairing-code;
     in property <image> qr-image;
     in property <string> peer-message;
+    in property <string> lan-pair-code;
+    in property <string> lan-message;
+    callback lan-join(string);
     // 이름 편집 중인 그룹 id. Rust 가 그룹을 새로 만들면 바로 편집 상태로 넣는다.
     in-out property <string> editing-id: "";
     in-out property <string> editing-text: "";
@@ -259,8 +325,11 @@ export component ListWindow inherits Window {
             my-code: root.my-pairing-code;
             qr: root.qr-image;
             message: root.peer-message;
+            lan-code: root.lan-pair-code;
+            lan-message: root.lan-message;
             ink: #d8d2c2;
             add-peer(code) => { root.add-peer(code); }
+            lan-join(code) => { root.lan-join(code); }
         }
 
         if !root.show-sync && root.rows.length == 0: Text {
