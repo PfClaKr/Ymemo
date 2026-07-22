@@ -243,19 +243,33 @@ impl Vault {
     }
 
     /// 모든 `.ymlog` 를 복호화해 automerge change 로 파싱한다.
+    ///
+    /// **한 로그가 실패해도 전체 병합을 막지 않는다** — 그 파일만 건너뛴다.
+    /// 실패 원인: 다른 키로 쓰인 로그(기기별 vault 가 갈라진 경우)나 Syncthing 이
+    /// 아직 다 옮기지 못한 부분 파일. 이런 게 하나 있다고 다른 기기의 정상 로그까지
+    /// 못 읽으면 "동기화가 통째로 멈춘 것처럼" 보인다(특히 콘솔 없는 Windows 릴리스).
     fn read_all_changes(&self) -> Result<Vec<Change>> {
         let logs_dir = self.dir.join(LOGS_DIR);
         let mut changes = Vec::new();
-        if logs_dir.exists() {
-            for entry in fs::read_dir(&logs_dir)? {
-                let path = entry?.path();
-                if path.extension().and_then(|e| e.to_str()) == Some(LOG_EXT) {
-                    for record in ChangeLog::open(&path, self.key.clone()).read_all()? {
-                        changes.push(
-                            Change::from_bytes(record)
-                                .with_context(|| format!("automerge change 파싱 실패: {}", path.display()))?,
-                        );
-                    }
+        if !logs_dir.exists() {
+            return Ok(changes);
+        }
+        for entry in fs::read_dir(&logs_dir)? {
+            let path = entry?.path();
+            if path.extension().and_then(|e| e.to_str()) != Some(LOG_EXT) {
+                continue;
+            }
+            let records = match ChangeLog::open(&path, self.key.clone()).read_all() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("로그 건너뜀(복호화 실패) {}: {e}", path.display());
+                    continue;
+                }
+            };
+            for record in records {
+                match Change::from_bytes(record) {
+                    Ok(c) => changes.push(c),
+                    Err(e) => eprintln!("change 건너뜀(파싱 실패) {}: {e}", path.display()),
                 }
             }
         }
@@ -433,6 +447,29 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ymemo-vault-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// 다른 키로 쓰인(=기기 vault 가 갈라진) 로그가 섞여 있어도, rebuild 는 실패하지
+    /// 않고 복호화되는 로그만 반영해야 한다.
+    #[test]
+    fn rebuild_skips_undecryptable_foreign_log() {
+        let dir = temp_dir();
+        let mut a = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let memo = Memo::new("내 메모", "");
+        a.upsert(&memo).unwrap();
+
+        // logs/ 에 다른 키로 암호화된 이질 로그를 심는다.
+        let foreign = ChangeLog::open(
+            dir.join(LOGS_DIR).join("ffffffff.ymlog"),
+            MasterKey::derive("다른 암호".as_bytes(), &generate_salt()).unwrap(),
+        );
+        foreign.append("automerge change 가 아닌 쓰레기".as_bytes()).unwrap();
+
+        // 이질 로그가 있어도 병합은 성공하고 내 메모는 살아 있어야 한다.
+        a.rebuild().unwrap();
+        assert_eq!(a.store().get(&memo.id).unwrap().unwrap().title, "내 메모");
+
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
