@@ -85,15 +85,22 @@ syncthing 도 함께 지워진다. 사용자는 syncthing 사용 사실을 알 �
 (GUI 를 열지 않고, 프로세스도 `ymemo-sync` 로 뜬다).
 
 ```bash
-# Linux .deb (로컬 테스트). syncthing 바이너리 경로를 넘긴다.
+# Debian/Ubuntu .deb (로컬 테스트). syncthing 바이너리 경로를 넘긴다.
 packaging/linux/build-deb.sh \
   --app target/release/ymemo-desktop --sync /path/to/syncthing \
   --version 0.1.0 --outdir dist
 # → dist/ymemo_0.1.0_amd64.deb  (syncthing 은 /usr/lib/ymemo/ymemo-sync 로 설치)
+
+# Fedora .rpm — rpmbuild 가 필요하므로 Fedora 컨테이너에서 빌드한다.
+packaging/linux/build-rpm.sh \
+  --app target/release/ymemo-desktop --sync /path/to/syncthing \
+  --version 0.1.0 --outdir dist
+# → dist/ymemo-0.1.0-1.fc*.x86_64.rpm
 ```
 
 Windows 는 Inno Setup(`packaging/windows/ymemo.iss`)으로 `ymemo-setup-x86_64.exe` 를
-만든다. 둘 다 릴리스 태그(`v*`)에서 CI 가 자동 생성한다 (`.github/workflows/release.yml`).
+만든다. 셋 다 릴리스 태그(`v*`)에서 CI 가 자동 생성한다 (`.github/workflows/release.yml`).
+Fedora 잡은 Fedora 컨테이너 안에서 데스크탑을 빌드해 라이브러리 호환을 맞춘다.
 
 ## 현재 상태 (로드맵)
 

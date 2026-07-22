@@ -1,7 +1,8 @@
 # 릴리스 태그(v*)가 올라오면 데스크탑/모바일 바이너리를 빌드해 GitHub Release 에 첨부한다.
 #
 # 산출물:
-#  - ymemo_<ver>_amd64.deb               (Linux 인스톨러 — syncthing 포함, 제거 시 함께 삭제)
+#  - ymemo_<ver>_amd64.deb               (Debian/Ubuntu 패키지 — syncthing 포함, 제거 시 함께 삭제)
+#  - ymemo-<ver>-1.fc*.x86_64.rpm        (Fedora 패키지 — syncthing 포함, 제거 시 함께 삭제)
 #  - ymemo-setup-x86_64.exe              (Windows 인스톨러 — syncthing 포함, 제거 시 함께 삭제)
 #  - ymemo-ffi-android-jniLibs.zip       (arm64-v8a / armeabi-v7a / x86_64 .so)
 #  - ymemo-ffi-ios.zip                   (aarch64 기기·시뮬레이터 .a)
@@ -59,6 +60,38 @@ jobs:
         with:
           name: linux-desktop
           path: dist/*.deb
+
+  # Fedora .rpm — 데스크탑을 Fedora 컨테이너 안에서 빌드해 glibc/라이브러리를
+  # 그 배포판에 맞춘다. (ubuntu 러너 위의 container: 는 GitHub 내장 기능이라 액션 정책과 무관)
+  fedora-desktop:
+    needs: test
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      # checkout 이 제대로 되도록 git/tar 를 먼저 깐다.
+      - run: dnf install -y git tar curl >/dev/null
+      - uses: actions/checkout@v4
+      - name: Install build deps
+        run: dnf install -y rustup gcc fontconfig-devel rpm-build >/dev/null
+      - name: Set up Rust (stable ≥ 1.85)
+        run: |
+          rustup-init -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - run: cargo build --release -p ymemo-desktop
+      - name: Build .rpm (bundles hidden syncthing)
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          curl -sL -o st.tar.gz "https://github.com/syncthing/syncthing/releases/download/${SYNCTHING_VERSION}/syncthing-linux-amd64-${SYNCTHING_VERSION}.tar.gz"
+          tar xzf st.tar.gz
+          # build-rpm.sh 도 syncthing 을 ymemo-sync 로 리네임해 /usr/lib/ymemo 에 넣는다.
+          bash packaging/linux/build-rpm.sh \
+            --app target/release/ymemo-desktop \
+            --sync "syncthing-linux-amd64-${SYNCTHING_VERSION}/syncthing" \
+            --version "$VERSION" --outdir dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fedora-desktop
+          path: dist/*.rpm
 
   windows-desktop:
     needs: test
@@ -128,7 +161,7 @@ jobs:
           path: ymemo-ffi-ios.zip
 
   release:
-    needs: [linux-desktop, windows-desktop, android-libs, ios-lib]
+    needs: [linux-desktop, fedora-desktop, windows-desktop, android-libs, ios-lib]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -144,6 +177,7 @@ jobs:
             --title "$GITHUB_REF_NAME" --generate-notes || true
           gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
             ymemo_*_amd64.deb \
+            ymemo-*.rpm \
             ymemo-setup-x86_64.exe \
             ymemo-ffi-android-jniLibs.zip \
             ymemo-ffi-ios.zip
