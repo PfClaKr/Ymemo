@@ -25,7 +25,8 @@ use i_slint_backend_winit::winit::dpi::PhysicalPosition;
 use i_slint_backend_winit::WinitWindowAccessor;
 use slint::{ComponentHandle, LogicalSize, ModelRc, SharedString, TimerMode, VecModel};
 use ymemo_core::{
-    lan_pair, now_millis, pairing::PairingCode, sync::Syncthing, vault::Vault, Memo, Store,
+    lan_pair, now_millis, pairing::PairingCode, sync::SharedDevice, sync::Syncthing, vault::Vault,
+    Memo, Store,
 };
 
 slint::include_modules!();
@@ -456,6 +457,60 @@ fn main() -> Result<()> {
         });
     }
 
+    // ---- 공유 중인 기기 목록: 주기적 갱신 + 해제 ----
+    // 두 창이 같은 모델을 공유하므로 모델만 갱신하면 양쪽에 반영된다.
+    let devices_model: Rc<VecModel<SharedDeviceRow>> = Rc::new(VecModel::from(Vec::new()));
+    lock.set_shared_devices(ModelRc::from(devices_model.clone()));
+    list.set_shared_devices(ModelRc::from(devices_model.clone()));
+
+    let refresh_devices = {
+        let syncthing = syncthing.clone();
+        let devices_model = devices_model.clone();
+        move || {
+            let guard = syncthing.borrow();
+            let Some(st) = guard.as_ref() else { return };
+            match st.shared_devices(SYNC_FOLDER_ID) {
+                Ok(list) => devices_model.set_vec(
+                    list.into_iter().map(to_shared_row).collect::<Vec<_>>(),
+                ),
+                Err(e) => eprintln!("공유 기기 목록 조회 실패: {e}"),
+            }
+        }
+    };
+
+    let devices_timer = slint::Timer::default();
+    {
+        let refresh = refresh_devices.clone();
+        devices_timer.start(TimerMode::Repeated, Duration::from_secs(4), move || refresh());
+    }
+    refresh_devices(); // 시작 시 한 번
+
+    {
+        let syncthing = syncthing.clone();
+        let refresh = refresh_devices.clone();
+        let lock_w = lock.as_weak();
+        let list_w = list.as_weak();
+        let unshare = move |id: SharedString| {
+            let msg = match syncthing.borrow().as_ref() {
+                Some(st) => match st.unshare_folder_with(SYNC_FOLDER_ID, id.as_str()) {
+                    Ok(()) => "공유를 해제했습니다".to_string(),
+                    Err(e) => format!("해제 실패: {e}"),
+                },
+                None => "동기화가 꺼져 있습니다".to_string(),
+            };
+            let msg = SharedString::from(msg);
+            if let Some(w) = lock_w.upgrade() {
+                w.set_lan_message(msg.clone());
+            }
+            if let Some(w) = list_w.upgrade() {
+                w.set_lan_message(msg);
+            }
+            refresh(); // 목록 즉시 갱신
+        };
+        lock.on_unshare(unshare.clone());
+        list.on_unshare(unshare);
+    }
+
     // ---- 주기적 병합: 다른 기기의 로그를 목록/스티커에 반영 ----
     let merge_timer = slint::Timer::default();
     {
@@ -874,6 +929,21 @@ fn nearest(cands: &[i32], v: i32, threshold: i32) -> i32 {
 // ---------------------------------------------------------------------------
 // 목록 / 페어링
 // ---------------------------------------------------------------------------
+
+/// core 의 공유 기기 정보를 Slint 행으로 변환.
+/// 표시 이름이 없으면 device-id 앞 7자로 대체한다(Slint 엔 문자열 슬라이스가 없음).
+fn to_shared_row(d: SharedDevice) -> SharedDeviceRow {
+    let name = if d.name.is_empty() {
+        format!("{}…", d.id.chars().take(7).collect::<String>())
+    } else {
+        d.name.clone()
+    };
+    SharedDeviceRow {
+        id: d.id.into(),
+        name: name.into(),
+        connected: d.connected,
+    }
+}
 
 /// vault 를 연 뒤 공통 마무리: 목록 채우기 → ctx 에 보관 → 잠금 창 숨기고 목록 창 표시.
 /// (unlock/create-vault 두 경로가 공유한다.)
