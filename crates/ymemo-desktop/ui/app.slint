@@ -181,11 +181,18 @@ export component LockWindow inherits Window {
     in property <string> peer-message;
     in property <string> lan-pair-code;
     in property <string> lan-message;
+    // vault.json 존재 여부. true = 기존 vault(잠금 해제), false = 새 기기(선택 화면).
+    // Rust 가 페어링으로 vault.json 이 도착하면 true 로 바꿔 잠금 해제로 전환한다.
+    in property <bool> vault-exists: false;
     callback unlock(string);
+    callback create-vault(string);
     callback add-peer(string);
     callback lan-join(string);
 
-    private property <bool> show-sync: false;
+    // Rust 가 vault 도착 시 닫을 수 있도록 in-out.
+    in-out property <bool> show-sync: false;
+    // 새 기기에서 "새로 만들기"를 골라 암호 설정 단계로 들어갔는가.
+    private property <bool> creating: false;
 
     VerticalLayout {
         padding: 16px;
@@ -232,7 +239,9 @@ export component LockWindow inherits Window {
                 color: #e79a9a;
                 wrap: word-wrap;
             }
-            HorizontalLayout {
+
+            // 기존 vault: 마스터 암호로 잠금 해제.
+            if root.vault-exists: HorizontalLayout {
                 spacing: 6px;
                 pw := LineEdit {
                     placeholder-text: "마스터 암호...";
@@ -242,6 +251,54 @@ export component LockWindow inherits Window {
                 Button {
                     text: "열기";
                     clicked => { root.unlock(pw.text); }
+                }
+            }
+
+            // 새 기기 첫 실행: 어떻게 시작할지 선택.
+            if !root.vault-exists && !root.creating: VerticalLayout {
+                spacing: 8px;
+                Text {
+                    text: "이 기기를 어떻게 시작할까요?";
+                    font-size: 13px;
+                    color: #f0ead6;
+                    wrap: word-wrap;
+                }
+                Button {
+                    text: "＋ 새 메모장 만들기";
+                    clicked => { root.creating = true; }
+                }
+                Button {
+                    text: "🔗 다른 기기와 연결";
+                    enabled: root.sync-available;
+                    clicked => { root.show-sync = true; }
+                }
+                Text {
+                    text: "다른 기기의 메모를 함께 쓰려면 '연결'을 고르고 페어링하세요. "
+                        + "먼저 '새 메모장'을 만들면 서로 다른 키가 생겨 동기화되지 않습니다.";
+                    font-size: 11px;
+                    color: #b8b2a2;
+                    wrap: word-wrap;
+                }
+            }
+
+            // 새 기기 + "새로 만들기" 선택: 새 마스터 암호 설정.
+            if !root.vault-exists && root.creating: VerticalLayout {
+                spacing: 6px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    npw := LineEdit {
+                        placeholder-text: "새 마스터 암호...";
+                        input-type: InputType.password;
+                        accepted => { root.create-vault(self.text); }
+                    }
+                    Button {
+                        text: "만들기";
+                        clicked => { root.create-vault(npw.text); }
+                    }
+                }
+                Button {
+                    text: "← 뒤로";
+                    clicked => { root.creating = false; }
                 }
             }
         }

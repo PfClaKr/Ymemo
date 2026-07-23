@@ -100,6 +100,13 @@ impl Vault {
 
         let device_id = store.device_id()?;
         fs::create_dir_all(dir.join(LOGS_DIR))?;
+
+        // 갈라진 키 자가 치유: 과거에 두 기기가 각자 vault.json(다른 salt)을 만들어
+        // 키가 갈라졌다가, Syncthing 충돌 해소로 vault.json 이 하나(정본)로 수렴한
+        // 상황을 복구한다. 내 로그가 정본 키로 열리지 않으면 sync-conflict 헤더의
+        // salt 에서 옛 키를 찾아 로그를 정본 키로 재암호화한다.
+        heal_divergent_log(&dir, &device_id, password, &key)?;
+
         let own_log = ChangeLog::open(
             dir.join(LOGS_DIR).join(format!("{device_id}.{LOG_EXT}")),
             key.clone(),
@@ -360,6 +367,87 @@ impl Vault {
     }
 }
 
+/// 갈라진 vault 키 자가 치유.
+///
+/// 배경: 예전엔 새 기기가 페어링으로 vault.json 을 받기 전에 암호를 입력하면 각자
+/// 다른 salt 로 vault.json 을 만들어 키가 갈라졌다. Syncthing 은 두 vault.json 을
+/// 충돌로 보고 하나를 정본(vault.json)으로 남기고 진 쪽을 `vault.sync-conflict-*.json`
+/// 으로 이름을 바꾼다 → 모든 기기가 같은 정본 salt 로 수렴한다.
+///
+/// 이 함수는 정본 키(`canonical_key`, 이미 vault.json 의 key_check 로 검증됨)로 내
+/// 로그가 열리는지 보고, 안 열리면 conflict 헤더들의 salt 로 옛 키를 찾아 내 로그를
+/// 정본 키로 재암호화한다. 남의 로그는 건드리지 않는다(각 기기가 스스로 치유).
+///
+/// conflict 파일은 지우지 않는다 — 아직 치유하지 못한 다른 기기가 자기 옛 salt 를
+/// 찾는 데 필요할 수 있고, 지우면 그 삭제가 동기화로 퍼져 복구를 막는다. 일단
+/// 치유되면 내 로그가 정본 키로 바로 열리므로 이 탐색은 다시 돌지 않는다.
+fn heal_divergent_log(
+    dir: &Path,
+    device_id: &str,
+    password: &[u8],
+    canonical_key: &MasterKey,
+) -> Result<()> {
+    let own_path = dir.join(LOGS_DIR).join(format!("{device_id}.{LOG_EXT}"));
+    if !own_path.exists() {
+        return Ok(()); // 로컬 로그 없음 → 치유할 것 없음
+    }
+    // 정본 키로 이미 열리면 정상(또는 이미 치유됨).
+    if ChangeLog::open(&own_path, canonical_key.clone()).read_all().is_ok() {
+        return Ok(());
+    }
+    // 내 로그를 여는 옛 키를 conflict 헤더들의 salt 에서 찾는다.
+    for salt in conflict_salts(dir) {
+        let old_key = MasterKey::derive(password, &salt)?;
+        if ChangeLog::open(&own_path, old_key.clone()).read_all().is_ok() {
+            reencrypt_log(&own_path, &old_key, canonical_key)?;
+            eprintln!("갈라진 vault 키 감지 → 내 로그를 정본 키로 재암호화 완료");
+            return Ok(());
+        }
+    }
+    // 못 찾음: 그대로 두면 rebuild 가 이 로그만 건너뛴다(다른 기기 로그는 정상 병합).
+    eprintln!(
+        "경고: 내 로그를 여는 키를 찾지 못함 ({}) — vault.json 이 예기치 않게 바뀌었을 수 있음",
+        own_path.display()
+    );
+    Ok(())
+}
+
+/// `vault.sync-conflict-*.json` 들에서 salt 를 파싱해 반환. 읽기/파싱 실패는 조용히 건너뛴다.
+fn conflict_salts(dir: &Path) -> Vec<Salt> {
+    let mut salts = Vec::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return salts;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if !(name.starts_with("vault.sync-conflict-") && name.ends_with(".json")) {
+            continue;
+        }
+        let Ok(bytes) = fs::read(&path) else { continue };
+        let Ok(header) = serde_json::from_slice::<VaultHeader>(&bytes) else { continue };
+        let Ok(salt_vec) = from_hex(&header.salt) else { continue };
+        if let Ok(salt) = <Salt>::try_from(salt_vec) {
+            salts.push(salt);
+        }
+    }
+    salts
+}
+
+/// 로그를 `old_key` 로 복호화해 `new_key` 로 다시 쓰고 원자적으로 교체한다.
+/// (레코드 순서는 유지되지만 automerge change 는 순서 무관이라 무해하다.)
+fn reencrypt_log(path: &Path, old_key: &MasterKey, new_key: &MasterKey) -> Result<()> {
+    let records = ChangeLog::open(path, old_key.clone()).read_all()?;
+    let tmp = path.with_extension("ymlog.tmp");
+    let _ = fs::remove_file(&tmp);
+    let new_log = ChangeLog::open(&tmp, new_key.clone());
+    for r in &records {
+        new_log.append(r)?;
+    }
+    fs::rename(&tmp, path)?;
+    Ok(())
+}
+
 fn put_str_if_changed(doc: &mut AutoCommit, obj: &ObjId, key: &str, val: &str) -> Result<()> {
     let same = matches!(
         doc.get(obj, key)?,
@@ -502,6 +590,68 @@ mod tests {
             vault.store().list().unwrap().into_iter().map(|m| m.title).collect();
         titles.sort();
         assert_eq!(titles, vec!["두 번째 세션", "살아남을 메모"]);
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db).ok();
+    }
+
+    /// 정본 salt 로 vault.json 을 덮어쓴다(테스트에서 Syncthing 충돌 해소를 흉내). 진
+    /// 헤더는 `vault.sync-conflict-*.json` 으로 남겨, 옛 salt 를 찾을 수 있게 한다.
+    fn write_header(dir: &Path, name: &str, password: &[u8], salt: &Salt) {
+        let key = MasterKey::derive(password, salt).unwrap();
+        let header = VaultHeader {
+            version: 1,
+            salt: to_hex(salt),
+            key_check: to_hex(&key.encrypt(KEY_CHECK).unwrap()),
+        };
+        fs::write(dir.join(name), serde_json::to_vec_pretty(&header).unwrap()).unwrap();
+    }
+
+    /// 갈라진 키 자가 치유: 내 로그가 옛 salt 로 암호화돼 있고 vault.json 이 정본
+    /// salt 로 수렴하면, open 이 내 로그를 정본 키로 재암호화해 메모를 되살려야 한다.
+    #[test]
+    fn heals_divergent_vault_key_on_open() {
+        let dir = temp_dir();
+        let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
+
+        // 이 기기가 옛(진) salt 로 vault 를 만들고 메모를 쓴다.
+        let memo;
+        {
+            let mut v = Vault::create(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+            memo = Memo::new("살아남아야 할 메모", "본문");
+            v.upsert(&memo).unwrap();
+        }
+        let old_salt: Salt = from_hex(
+            &serde_json::from_slice::<VaultHeader>(&fs::read(dir.join(HEADER_FILE)).unwrap())
+                .unwrap()
+                .salt,
+        )
+        .unwrap()
+        .try_into()
+        .unwrap();
+
+        // Syncthing 충돌 해소 흉내: 진 헤더는 conflict 로, vault.json 은 정본 salt 로.
+        fs::rename(
+            dir.join(HEADER_FILE),
+            dir.join("vault.sync-conflict-20260101-120000-AAAAAAA.json"),
+        )
+        .unwrap();
+        let canonical_salt = generate_salt();
+        assert_ne!(canonical_salt, old_salt);
+        write_header(&dir, HEADER_FILE, b"pw", &canonical_salt);
+
+        // 같은 암호로 재오픈 → 치유 후 메모가 살아 있어야 한다.
+        let v = Vault::open(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+        assert_eq!(v.store().get(&memo.id).unwrap().unwrap().title, "살아남아야 할 메모");
+
+        // 내 로그가 이제 정본 키로 직접 열려야 한다(재암호화 확인).
+        let device_id = Store::open(&db).unwrap().device_id().unwrap();
+        let canonical_key = MasterKey::derive(b"pw", &canonical_salt).unwrap();
+        let own_log = ChangeLog::open(
+            dir.join(LOGS_DIR).join(format!("{device_id}.{LOG_EXT}")),
+            canonical_key,
+        );
+        assert!(own_log.read_all().is_ok());
 
         fs::remove_dir_all(&dir).ok();
         fs::remove_file(&db).ok();
