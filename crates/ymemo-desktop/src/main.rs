@@ -185,20 +185,26 @@ fn main() -> Result<()> {
     list.set_rows(ModelRc::from(ctx.model.clone()));
     let unlocked = Rc::new(Cell::new(false));
 
-    // ---- 잠금 창: 마스터 암호로 vault 열기 ----
+    // 첫 실행 판별: vault.json 이 있으면 기존 vault(→ 잠금 해제), 없으면 새 기기
+    // (→ "새로 만들기" / "기존 기기 연결" 선택). 이 분기가 없으면 새 기기가 페어링으로
+    // vault.json 을 받기 전에 암호를 입력해 제 salt 로 vault 를 만들어버려 키가 갈라진다.
+    lock.set_vault_exists(vault_dir.join("vault.json").exists());
+
+    // ---- 잠금 창: 기존 vault 열기 / 새 vault 생성 ----
     {
         let ctx = ctx.clone();
         let lock_weak = lock.as_weak();
         let list_weak = list.as_weak();
         let unlocked = unlocked.clone();
         let dir = dir.clone();
+        // 기존 vault 열기: vault.json 의 salt 로 키를 유도한다. 갈라진 키는 open 안에서
+        // 자가 치유된다. **create 로 폴백하지 않는다** — 그게 키 분기의 원인이었다.
         lock.on_unlock(move |password| {
             let lock = lock_weak.unwrap();
             if password.is_empty() {
                 lock.set_lock_message("암호를 입력하세요".into());
                 return;
             }
-            // 캐시 DB 는 로컬 전용, vault/ 는 Syncthing 공유 폴더가 된다.
             let store = match Store::open(dir.join("ymemo.db")) {
                 Ok(s) => s,
                 Err(e) => {
@@ -207,17 +213,35 @@ fn main() -> Result<()> {
                 }
             };
             // Argon2id 유도가 잠깐(수백 ms) UI 를 막지만 잠금 화면에서만 일어난다.
-            match Vault::open_or_create(dir.join("vault"), password.as_bytes(), store) {
-                Ok(v) => {
-                    refresh_list(&v, &ctx.model, &ctx.collapsed.borrow());
-                    *ctx.vault.borrow_mut() = Some(v);
-                    unlocked.set(true);
-                    let _ = lock.hide();
-                    let _ = list_weak.unwrap().show();
-                }
+            match Vault::open(dir.join("vault"), password.as_bytes(), store) {
+                Ok(v) => apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked),
+                Err(e) => lock.set_lock_message(SharedString::from(format!("{e}"))),
+            }
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        let lock_weak = lock.as_weak();
+        let list_weak = list.as_weak();
+        let unlocked = unlocked.clone();
+        let dir = dir.clone();
+        // 새 vault 생성: 이 기기에서 처음 시작할 때만. salt 는 여기서 단 한 번 생긴다.
+        lock.on_create_vault(move |password| {
+            let lock = lock_weak.unwrap();
+            if password.is_empty() {
+                lock.set_lock_message("새 마스터 암호를 입력하세요".into());
+                return;
+            }
+            let store = match Store::open(dir.join("ymemo.db")) {
+                Ok(s) => s,
                 Err(e) => {
-                    lock.set_lock_message(SharedString::from(format!("{e}")));
+                    lock.set_lock_message(SharedString::from(format!("캐시 열기 실패: {e}")));
+                    return;
                 }
+            };
+            match Vault::open_or_create(dir.join("vault"), password.as_bytes(), store) {
+                Ok(v) => apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked),
+                Err(e) => lock.set_lock_message(SharedString::from(format!("{e}"))),
             }
         });
     }
@@ -409,6 +433,25 @@ fn main() -> Result<()> {
                     Ok(None) => set_msg("주변에서 그 코드를 쓰는 기기를 못 찾았습니다".into()),
                     Err(e) => set_msg(e),
                 }
+            }
+        });
+    }
+
+    // ---- vault.json 도착 감시: 새 기기가 "기존 기기 연결"을 고른 뒤, 페어링으로
+    // vault.json 이 동기화돼 오면 잠금 화면을 암호 입력 모드로 전환한다. 이 감시가
+    // 없으면 도착 전에 암호를 입력해 제 salt 로 vault 를 만들어 키가 갈라진다.
+    let vault_watch_timer = slint::Timer::default();
+    if !vault_dir.join("vault.json").exists() {
+        let lock_weak = lock.as_weak();
+        let vault_json = vault_dir.join("vault.json");
+        vault_watch_timer.start(TimerMode::Repeated, Duration::from_millis(800), move || {
+            if !vault_json.exists() {
+                return;
+            }
+            if let Some(lock) = lock_weak.upgrade() {
+                lock.set_vault_exists(true);
+                lock.set_show_sync(false);
+                lock.set_lock_message("다른 기기와 연결됨 — 마스터 암호를 입력하세요".into());
             }
         });
     }
@@ -831,6 +874,24 @@ fn nearest(cands: &[i32], v: i32, threshold: i32) -> i32 {
 // ---------------------------------------------------------------------------
 // 목록 / 페어링
 // ---------------------------------------------------------------------------
+
+/// vault 를 연 뒤 공통 마무리: 목록 채우기 → ctx 에 보관 → 잠금 창 숨기고 목록 창 표시.
+/// (unlock/create-vault 두 경로가 공유한다.)
+fn apply_opened_vault(
+    v: Vault,
+    ctx: &Ctx,
+    lock: &LockWindow,
+    list_weak: &slint::Weak<ListWindow>,
+    unlocked: &Rc<Cell<bool>>,
+) {
+    refresh_list(&v, &ctx.model, &ctx.collapsed.borrow());
+    *ctx.vault.borrow_mut() = Some(v);
+    unlocked.set(true);
+    let _ = lock.hide();
+    if let Some(list) = list_weak.upgrade() {
+        let _ = list.show();
+    }
+}
 
 /// vault 캐시의 그룹 트리 + 메모를 평탄화해 목록 모델에 반영한다.
 ///
