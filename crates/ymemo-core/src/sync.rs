@@ -23,6 +23,17 @@ pub struct Syncthing {
     api_key: String,
 }
 
+/// 이 vault 를 공유 중인 다른 기기 하나. (`shared_devices` 가 돌려준다.)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SharedDevice {
+    /// syncthing device-id (공유 해제 시 식별자).
+    pub id: String,
+    /// 사람이 읽을 이름 (설정에 없으면 빈 문자열).
+    pub name: String,
+    /// 지금 연결돼 있는지.
+    pub connected: bool,
+}
+
 impl Syncthing {
     /// syncthing 바이너리 탐색: `YMEMO_SYNCTHING_BIN` → 실행파일 옆(번들) → PATH 순.
     ///
@@ -182,6 +193,82 @@ impl Syncthing {
             devices.push(serde_json::json!({ "deviceID": peer_device_id }));
             ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
         }
+        Ok(())
+    }
+
+    /// 이 폴더를 공유 중인 다른 기기 목록 (자기 자신은 제외).
+    ///
+    /// 폴더의 devices 목록에 기기 이름(설정)과 현재 연결 상태(연결 정보)를 합쳐 준다.
+    pub fn shared_devices(&self, folder_id: &str) -> Result<Vec<SharedDevice>> {
+        let my_id = self.device_id()?;
+
+        // 이 폴더에 붙어 있는 기기 ID 들.
+        let mut res = ureq::get(format!("{}/rest/config/folders/{folder_id}", self.base_url))
+            .header("X-API-Key", &self.api_key)
+            .call()?;
+        let folder: serde_json::Value = res.body_mut().read_json()?;
+        let ids: Vec<String> = folder["devices"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|d| d["deviceID"].as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // 기기 이름 맵 (사용자가 붙인 라벨; 없을 수 있음).
+        let mut res = ureq::get(format!("{}/rest/config/devices", self.base_url))
+            .header("X-API-Key", &self.api_key)
+            .call()?;
+        let devices: serde_json::Value = res.body_mut().read_json()?;
+        let name_of = |id: &str| -> String {
+            devices
+                .as_array()
+                .and_then(|a| a.iter().find(|d| d["deviceID"] == id))
+                .and_then(|d| d["name"].as_str())
+                .unwrap_or("")
+                .to_string()
+        };
+
+        // 현재 연결 상태.
+        let mut res = ureq::get(format!("{}/rest/system/connections", self.base_url))
+            .header("X-API-Key", &self.api_key)
+            .call()?;
+        let conns: serde_json::Value = res.body_mut().read_json()?;
+
+        let mut out = Vec::new();
+        for id in ids {
+            if id == my_id {
+                continue; // 자기 자신은 목록에 넣지 않는다
+            }
+            let connected = conns["connections"][&id]["connected"].as_bool().unwrap_or(false);
+            let name = name_of(&id);
+            out.push(SharedDevice { id, name, connected });
+        }
+        Ok(out)
+    }
+
+    /// 상대 기기를 이 폴더 공유에서 제거하고 기기 설정도 지운다(연결 완전 차단).
+    ///
+    /// 자기 자신은 지울 수 없다. 상대 기기가 자기 쪽에서도 지워야 완전히 끊긴다 —
+    /// 여기서 지우면 이 기기는 더 이상 상대에게 로그를 보내거나 받지 않는다.
+    pub fn unshare_folder_with(&self, folder_id: &str, peer_device_id: &str) -> Result<()> {
+        if peer_device_id == self.device_id()? {
+            bail!("자기 자신은 공유 해제할 수 없습니다");
+        }
+        // 1. 폴더 devices 목록에서 제거.
+        let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
+        let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
+        let mut folder: serde_json::Value = res.body_mut().read_json()?;
+        if let Some(devices) = folder["devices"].as_array_mut() {
+            devices.retain(|d| d["deviceID"] != peer_device_id);
+        }
+        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
+
+        // 2. 기기 설정 자체도 제거 (없어도 무해).
+        let _ = ureq::delete(format!("{}/rest/config/devices/{peer_device_id}", self.base_url))
+            .header("X-API-Key", &self.api_key)
+            .call();
         Ok(())
     }
 
