@@ -574,6 +574,23 @@ fn main() -> Result<()> {
     });
     let _tray = tray::start(); // 핸들이 살아 있는 동안만 트레이가 유지된다
 
+    // 창 아이콘은 이벤트 루프가 돌기 시작해 winit 창이 생긴 뒤에야 적용된다.
+    // 시작 직후 한 번(단발 타이머) 잠금·목록 창에 심고, 이후 새로 뜨는 창은 각 show
+    // 지점에서 직접 심는다(open_sticky / 트레이 토글).
+    let icon_timer = slint::Timer::default();
+    {
+        let lock_w = lock.as_weak();
+        let list_w = list.as_weak();
+        icon_timer.start(TimerMode::SingleShot, Duration::from_millis(100), move || {
+            if let Some(w) = lock_w.upgrade() {
+                set_window_icon(&w.window());
+            }
+            if let Some(w) = list_w.upgrade() {
+                set_window_icon(&w.window());
+            }
+        });
+    }
+
     lock.show()?;
     slint::run_event_loop_until_quit()?;
     Ok(())
@@ -664,6 +681,7 @@ fn close_sticky(stickies: &Stickies, id: &str) {
 fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     if let Some(entry) = ctx.stickies.borrow().get(&memo.id) {
         entry.window.show()?;
+        set_window_icon(&entry.window.window());
         return Ok(());
     }
 
@@ -803,6 +821,7 @@ fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     }
 
     window.show()?;
+    set_window_icon(&window.window());
     if focus {
         window.invoke_focus_body();
     }
@@ -960,6 +979,7 @@ fn apply_opened_vault(
     let _ = lock.hide();
     if let Some(list) = list_weak.upgrade() {
         let _ = list.show();
+        set_window_icon(&list.window());
     }
 }
 
@@ -1180,11 +1200,13 @@ pub(crate) fn request_toggle() {
             let Some(app) = borrow.as_ref() else { return };
             if !app.unlocked.get() {
                 let _ = app.lock.show();
+                set_window_icon(&app.lock.window());
                 app.lock.window().request_redraw();
             } else if app.list.window().is_visible() {
                 let _ = app.list.hide();
             } else {
                 let _ = app.list.show();
+                set_window_icon(&app.list.window());
                 // Windows 소프트웨어 렌더러는 다시 띄운 창을 바로 안 그려서 리프레시 전까지
                 // 하얗게 남는다 → 표시 직후 강제로 다시 그린다.
                 app.list.window().request_redraw();
@@ -1203,37 +1225,57 @@ pub(crate) fn request_quit() {
 /// 22x22 스티커 모양 트레이 아이콘의 RGBA 픽셀 (외부 에셋 없이 직접 그린다).
 /// 반환: (rgba flat bytes, width, height). 백엔드가 요구 포맷으로 변환해 쓴다.
 pub(crate) fn tray_icon_rgba() -> (Vec<u8>, u32, u32) {
-    const S: usize = 22; // 아이콘 한 변
-    const M: usize = 2; // 여백
-    const F: usize = 7; // 오른쪽 위 접힌 귀퉁이 크기
-    let mut data = vec![0u8; S * S * 4]; // RGBA, 기본 투명
-    for y in 0..S {
-        for x in 0..S {
-            let in_note = (M..S - M).contains(&x) && (M..S - M).contains(&y);
+    note_icon_rgba(22)
+}
+
+/// 접힌 귀퉁이 스티커 아이콘을 `size`×`size` RGBA 로 직접 그린다(에셋·디코더 불필요).
+/// 트레이(22px)와 창 아이콘(64px)이 같은 그림을 쓰도록 크기만 매개변수화했다.
+/// 여백·테두리·접힘은 크기에 비례하므로 22px 는 기존 트레이 아이콘과 동일하게 나온다.
+pub(crate) fn note_icon_rgba(size: usize) -> (Vec<u8>, u32, u32) {
+    let s = size;
+    let m = (size / 10).max(2); // 여백 ~10%
+    let f = (size * 7 / 22).max(7); // 오른쪽 위 접힌 귀퉁이 (22px 기준 7)
+    let border = (size / 22).max(1); // 테두리/빗변 두께
+    let mut data = vec![0u8; s * s * 4]; // RGBA, 기본 투명
+    for y in 0..s {
+        for x in 0..s {
+            let in_note = (m..s - m).contains(&x) && (m..s - m).contains(&y);
             if !in_note {
                 continue;
             }
-            let from_right = S - M - 1 - x;
-            let from_top = y - M;
-            let (r, g, b) = if from_right + from_top < F {
-                if from_right + from_top == F - 1 {
+            let from_right = s - m - 1 - x;
+            let from_top = y - m;
+            let (r, g, b) = if from_right + from_top < f {
+                if from_right + from_top >= f - border {
                     (0xb8u8, 0xa6u8, 0x3au8) // 접힌 귀퉁이 빗변
                 } else {
                     continue; // 삼각형 바깥 → 투명
                 }
-            } else if x == M || x == S - M - 1 || y == M || y == S - M - 1 {
+            } else if x < m + border || x >= s - m - border || y < m + border || y >= s - m - border
+            {
                 (0xb8, 0xa6, 0x3a) // 테두리
             } else {
                 (0xf7, 0xe9, 0x8c) // 스티커 본체
             };
-            let i = (y * S + x) * 4;
+            let i = (y * s + x) * 4;
             data[i] = r;
             data[i + 1] = g;
             data[i + 2] = b;
             data[i + 3] = 0xff; // A
         }
     }
-    (data, S as u32, S as u32)
+    (data, s as u32, s as u32)
+}
+
+/// winit 창에 앱 아이콘을 심는다 (X11 `_NET_WM_ICON` / Windows 창 아이콘 → 작업표시줄·
+/// alt-tab 에 반영). 이벤트 루프가 도는 중 창이 떠 있을 때만 적용되고, 그 외엔 조용히
+/// 무시된다(네이티브 Wayland 는 창 아이콘 프로토콜이 없어 no-op — 스냅과 같은 제약).
+fn set_window_icon(win: &slint::Window) {
+    let (rgba, w, h) = note_icon_rgba(64);
+    let Ok(icon) = i_slint_backend_winit::winit::window::Icon::from_rgba(rgba, w, h) else {
+        return;
+    };
+    win.with_winit_window(|ww| ww.set_window_icon(Some(icon)));
 }
 
 #[cfg(test)]
@@ -1241,6 +1283,19 @@ mod tests {
     use super::*;
 
     const T: i32 = 12; // threshold
+
+    #[test]
+    fn note_icon_buffer_is_well_formed() {
+        // winit::Icon::from_rgba 는 len == 4*w*h 를 요구한다 → 각 크기마다 지켜져야 한다.
+        for size in [16usize, 22, 32, 64] {
+            let (rgba, w, h) = note_icon_rgba(size);
+            assert_eq!(w, size as u32);
+            assert_eq!(h, size as u32);
+            assert_eq!(rgba.len(), size * size * 4);
+            // 최소한 스티커 본체 색 픽셀이 하나는 있어야 한다(빈 아이콘이 아님).
+            assert!(rgba.chunks(4).any(|p| p == [0xf7, 0xe9, 0x8c, 0xff]));
+        }
+    }
 
     #[test]
     fn snaps_to_screen_left_edge_when_near() {

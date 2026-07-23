@@ -102,6 +102,12 @@ jobs:
       - run: cargo build --release -p ymemo-desktop
       - name: Build installer (bundles hidden syncthing)
         shell: pwsh
+        env:
+          # 선택: 이 시크릿들이 있으면 바이너리·인스톨러를 코드 서명한다. 없으면 미서명 빌드.
+          #   WINDOWS_CERT_PFX_BASE64 : PFX 인증서를 base64 로 인코딩한 값
+          #   WINDOWS_CERT_PASSWORD   : PFX 암호
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
           curl.exe -sL -o st.zip "https://github.com/syncthing/syncthing/releases/download/$env:SYNCTHING_VERSION/syncthing-windows-amd64-$env:SYNCTHING_VERSION.zip"
@@ -109,8 +115,30 @@ jobs:
           # 인스톨러(.iss)가 참조하는 이름으로 리네임해 .iss 옆에 둔다.
           Copy-Item target/release/ymemo-desktop.exe packaging/windows/Ymemo.exe -Force
           Copy-Item "st/syncthing-windows-amd64-$env:SYNCTHING_VERSION/syncthing.exe" packaging/windows/ymemo-sync.exe -Force
+
+          # ---- 코드 서명 (인증서 시크릿이 있을 때만) ----
+          $signArgs = @()
+          if ($env:WINDOWS_CERT_PFX_BASE64) {
+            Write-Host "인증서 발견 → 바이너리·인스톨러 서명."
+            [IO.File]::WriteAllBytes("$PWD/cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+            $signtool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+                         Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1).FullName
+            $ts = "http://timestamp.digicert.com"
+            # 앱·sync 바이너리 먼저 서명 (인스톨러 안에 들어가기 전에).
+            & $signtool sign /fd sha256 /f "$PWD/cert.pfx" /p $env:WINDOWS_CERT_PASSWORD /tr $ts /td sha256 `
+              packaging/windows/Ymemo.exe packaging/windows/ymemo-sync.exe
+            if ($LASTEXITCODE -ne 0) { throw "바이너리 서명 실패" }
+            # 인스톨러/언인스톨러 서명은 ISCC 에 위임 ($f = 서명할 파일 자리표시자).
+            $signCmd = "`"$signtool`" sign /fd sha256 /f `"$PWD/cert.pfx`" /p $env:WINDOWS_CERT_PASSWORD /tr $ts /td sha256 `$f"
+            $signArgs = @("/DSign", "/Symemosign=$signCmd")
+          } else {
+            Write-Host "인증서 시크릿 없음 → 미서명 빌드 (SmartScreen 경고가 뜰 수 있음)."
+          }
+
           choco install innosetup --no-progress -y
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" packaging/windows/ymemo.iss
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" @signArgs packaging/windows/ymemo.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC 실패" }
+          Remove-Item -Force "$PWD/cert.pfx" -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item packaging/windows/Output/ymemo-setup-x86_64.exe dist/
       - uses: actions/upload-artifact@v4

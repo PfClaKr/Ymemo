@@ -43,6 +43,16 @@ for s in 16 32 48 64 128 256; do
 done
 install -Dm644 %{license_file} %{buildroot}/usr/share/licenses/ymemo/LICENSE
 
+# 아이콘/데스크탑 DB 갱신. 최신 Fedora 는 hicolor-icon-theme·desktop-file-utils 의
+# file trigger 로 자동 처리하지만, 구버전/최소설치 대비로 명시해 둔다(있을 때만 실행).
+%post
+command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -qtf /usr/share/icons/hicolor >/dev/null 2>&1 || :
+command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q /usr/share/applications >/dev/null 2>&1 || :
+
+%postun
+command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -qtf /usr/share/icons/hicolor >/dev/null 2>&1 || :
+command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q /usr/share/applications >/dev/null 2>&1 || :
+
 %files
 %license /usr/share/licenses/ymemo/LICENSE
 /usr/lib/ymemo/ymemo

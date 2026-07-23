@@ -35,6 +35,14 @@ PrivilegesRequired=admin
 SetupIconFile=..\assets\ymemo.ico
 WizardStyle=modern
 
+; 코드 서명: ISCC 에 /DSign 과 /Symemosign="<signtool 명령> $f" 를 넘기면 인스톨러와
+; 언인스톨러가 서명된다. 인증서가 없으면 이 블록은 건너뛰고 미서명으로 빌드된다.
+; (CI 의 windows-desktop 잡이 시크릿이 있을 때만 이 플래그를 붙인다.)
+#ifdef Sign
+SignTool=ymemosign
+SignedUninstaller=yes
+#endif
+
 [Languages]
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
