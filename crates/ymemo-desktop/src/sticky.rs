@@ -14,11 +14,16 @@ use i_slint_backend_winit::winit::dpi::PhysicalPosition;
 use i_slint_backend_winit::WinitWindowAccessor;
 use slint::{ComponentHandle, LogicalSize, SharedString, TimerMode};
 use ymemo_core::{now_millis, Memo};
+use ymemo_i18n::t;
 
 use crate::icon::set_window_icon;
 use crate::list::refresh_list;
 use crate::state::{touch, Ctx, StickyEntry, Stickies};
-use crate::{apply_strings, StickyWindow, Strings};
+use crate::{apply_strings, PhotoRow, StickyWindow, Strings};
+
+/// 사진 표시 크기(em)의 기준이 되는 본문 폰트 크기(논리 px).
+/// **`ui/sticky.slint` 의 본문 `font-size` 와 같아야 한다** — 이 값으로 em 을 픽셀로 바꾼다.
+const BODY_FONT_PX: f64 = 13.0;
 
 /// 본문 편집 후 자동 저장까지의 디바운스.
 pub(crate) const SAVE_DEBOUNCE: Duration = Duration::from_millis(800);
@@ -113,6 +118,60 @@ pub(crate) fn close_sticky(stickies: &Stickies, id: &str) {
     });
 }
 
+/// 이 메모의 첨부 사진을 읽어 Slint 모델로 만든다.
+///
+/// 사진은 vault 안에서 암호문이라 **메모리에서 복호화·디코딩해** 넘긴다(평문을 임시 파일로
+/// 흘리지 않는다). 아직 동기화되지 않았거나 디코딩할 수 없는 형식이면 `missing` 으로 두고
+/// UI 가 그 사실을 알린다 — 빈 자리로 두면 사용자는 사진이 사라진 줄 안다.
+pub(crate) fn photo_rows(ctx: &Ctx, memo_id: &str) -> Vec<PhotoRow> {
+    let guard = ctx.vault.borrow();
+    let Some(v) = guard.as_ref() else { return Vec::new() };
+    let list = match v.store().attachments_of(memo_id) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("첨부 조회 실패: {e}");
+            return Vec::new();
+        }
+    };
+
+    list.into_iter()
+        .map(|a| {
+            let (w, h) = a.display_size(BODY_FONT_PX);
+            let image = v
+                .has_blob(&a.hash)
+                .then(|| v.attachment_bytes(&a.hash).ok())
+                .flatten()
+                .and_then(|bytes| decode_image(&bytes));
+            PhotoRow {
+                id: a.id.into(),
+                missing: image.is_none(),
+                image: image.unwrap_or_default(),
+                width_px: w as f32,
+                height_px: h as f32,
+            }
+        })
+        .collect()
+}
+
+/// 사진 바이트 → Slint 이미지 (RGBA8). 지원하지 않는 포맷이면 None.
+fn decode_image(bytes: &[u8]) -> Option<slint::Image> {
+    let decoded = image::load_from_memory(bytes).ok()?.into_rgba8();
+    let (w, h) = decoded.dimensions();
+    let buffer =
+        slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(decoded.as_raw(), w, h);
+    Some(slint::Image::from_rgba8(buffer))
+}
+
+/// 열려 있는 스티커의 사진 목록을 다시 채운다 (첨부 추가·크기 변경·원격 병합 후).
+pub(crate) fn refresh_photos(ctx: &Ctx, memo_id: &str) {
+    let rows = photo_rows(ctx, memo_id);
+    if let Some(entry) = ctx.stickies.borrow().get(memo_id) {
+        entry
+            .window
+            .set_photos(slint::ModelRc::new(slint::VecModel::from(rows)));
+    }
+}
+
 /// 메모의 스티커 창을 연다 (이미 열려 있으면 앞으로 가져오기만).
 pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     if let Some(entry) = ctx.stickies.borrow().get(&memo.id) {
@@ -128,6 +187,68 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     window.set_memo_text(SharedString::from(sticky_text(memo)));
     window.set_sticky_color(SharedString::from(memo.color.clone()));
     window.set_sticky_opacity(memo.opacity as f32);
+    window.set_photos(slint::ModelRc::new(slint::VecModel::from(photo_rows(ctx, &memo.id))));
+
+    // 📎 → 파일 대화상자에서 사진을 골라 붙인다.
+    {
+        let ctx = ctx.clone();
+        let id = memo.id.clone();
+        window.on_add_photo(move || {
+            touch(&ctx);
+            let Some(path) = rfd::FileDialog::new()
+                .add_filter("image", &["png", "jpg", "jpeg"])
+                .set_title(t!("ui.sticky_pick_photo"))
+                .pick_file()
+            else {
+                return; // 사용자가 취소
+            };
+            let bytes = match std::fs::read(&path) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("사진 읽기 실패: {e}");
+                    return;
+                }
+            };
+            // 원본 픽셀 크기는 여기서 재서 코어에 넘긴다(코어엔 디코더가 없다).
+            let (w, h) = image::load_from_memory(&bytes)
+                .map(|img| (img.width() as i64, img.height() as i64))
+                .unwrap_or((0, 0));
+            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let mime = match path.extension().and_then(|e| e.to_str()) {
+                Some("png") => "image/png",
+                Some("jpg") | Some("jpeg") => "image/jpeg",
+                _ => "",
+            };
+            {
+                let mut guard = ctx.vault.borrow_mut();
+                let Some(v) = guard.as_mut() else { return };
+                if let Err(e) = v.attach(&id, &bytes, &name, mime, w, h) {
+                    eprintln!("사진 붙이기 실패: {e}");
+                    return;
+                }
+            }
+            refresh_photos(&ctx, &id);
+        });
+    }
+
+    // ＋/− 로 사진 표시 크기 변경. 값은 em 이라 모바일에도 같은 비율로 반영된다.
+    {
+        let ctx = ctx.clone();
+        let id = memo.id.clone();
+        window.on_resize_photo(move |photo_id, delta_em| {
+            touch(&ctx);
+            {
+                let mut guard = ctx.vault.borrow_mut();
+                let Some(v) = guard.as_mut() else { return };
+                let Ok(Some(a)) = v.store().get_attachment(photo_id.as_str()) else { return };
+                let next = a.width_em_milli + (delta_em * 1000.0) as i64;
+                if let Err(e) = v.set_attachment_width(photo_id.as_str(), next) {
+                    eprintln!("사진 크기 변경 실패: {e}");
+                }
+            }
+            refresh_photos(&ctx, &id);
+        });
+    }
 
     let dirty = Rc::new(Cell::new(false));
     let expanded_height = Rc::new(Cell::new(0.0f32));

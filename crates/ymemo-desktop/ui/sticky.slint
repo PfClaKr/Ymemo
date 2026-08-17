@@ -8,6 +8,19 @@ import { Palette } from "theme.slint";
 //  - 제목 바 더블클릭 → 얇은 바 접기/펴기
 //  - 🎨 색 팔레트, ＋ 새 메모, ✕ 창 닫기(삭제 아님)
 // ---------------------------------------------------------------------------
+/// 스티커에 붙은 사진 한 장 (Rust 가 채운다).
+///
+/// 표시 크기는 코어가 em(폰트 배수)으로 동기화하고, Rust 가 이 창의 본문 폰트 크기로
+/// 환산해 여기엔 이미 픽셀로 들어온다 — Slint 는 그대로 그리기만 한다.
+export struct PhotoRow {
+    id: string,
+    image: image,
+    width-px: length,
+    height-px: length,
+    // 아직 이 기기로 동기화되지 않았거나 디코딩할 수 없는 사진.
+    missing: bool,
+}
+
 export component StickyWindow inherits Window {
     title: root.memo-title == "" ? Strings.ui_sticky_window_title : root.memo-title;
     no-frame: true;
@@ -25,7 +38,12 @@ export component StickyWindow inherits Window {
     // 창 불투명도(%). 슬라이더를 끄는 동안엔 UI 가 직접 갱신(미리보기)하므로 in-out.
     in-out property <float> sticky-opacity: 100;
     in property <bool> collapsed: false;
+    in property <[PhotoRow]> photos: [];
     callback edited(string);
+    // 사진 붙이기 (Rust 가 파일 대화상자를 연다).
+    callback add-photo();
+    // 사진 표시 크기 조절 (변화량, em). 코어가 em 으로 동기화하므로 모바일에도 반영된다.
+    callback resize-photo(string, float);
     callback close-requested();
     callback new-memo();
     callback set-color(string);
@@ -97,6 +115,19 @@ export component StickyWindow inherits Window {
                         vertical-alignment: center;
                         overflow: elide;
                         horizontal-stretch: 1;
+                    }
+                    photo-ta := TouchArea {
+                        width: 26px;
+                        Text {
+                            width: 100%;
+                            height: 100%;
+                            text: "📎";
+                            font-size: 13px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            opacity: photo-ta.has-hover ? 1 : 0.6;
+                        }
+                        clicked => { root.add-photo(); }
                     }
                     palette-ta := TouchArea {
                         width: 26px;
@@ -207,6 +238,63 @@ export component StickyWindow inherits Window {
                 wrap: word-wrap;
                 text <=> root.memo-text;
                 edited => { root.edited(self.text); }
+            }
+
+            // ---- 첨부 사진 ----
+            // 스티커는 작으므로 사진이 있을 때만 자리를 준다. −/＋ 로 조절한 크기(em)는
+            // 코어를 통해 모바일과 공유된다.
+            if !root.collapsed && root.photos.length > 0: Flickable {
+                max-height: 240px;
+                viewport-height: photo-box.preferred-height;
+                photo-box := VerticalLayout {
+                    padding: 6px;
+                    spacing: 6px;
+                    for photo in root.photos: VerticalLayout {
+                        spacing: 2px;
+                        if photo.missing: Text {
+                            text: Strings.ui_sticky_photo_missing;
+                            font-size: 11px;
+                            color: Palette.ink(root.sticky-color);
+                            wrap: word-wrap;
+                        }
+                        if !photo.missing: Image {
+                            source: photo.image;
+                            width: photo.width-px;
+                            height: photo.height-px;
+                            image-fit: contain;
+                        }
+                        HorizontalLayout {
+                            spacing: 4px;
+                            minus-btn := Rectangle {
+                                width: 22px;
+                                height: 18px;
+                                background: Palette.bar(root.sticky-color);
+                                Text {
+                                    text: "−";
+                                    font-size: 12px;
+                                    color: Palette.ink(root.sticky-color);
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                TouchArea { clicked => { root.resize-photo(photo.id, -4); } }
+                            }
+                            plus-btn := Rectangle {
+                                width: 22px;
+                                height: 18px;
+                                background: Palette.bar(root.sticky-color);
+                                Text {
+                                    text: "＋";
+                                    font-size: 12px;
+                                    color: Palette.ink(root.sticky-color);
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                TouchArea { clicked => { root.resize-photo(photo.id, 4); } }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                    }
+                }
             }
         }
     }

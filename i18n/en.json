@@ -117,5 +117,7 @@
   "ui.settings_window_title": "Ymemo Settings",
   "ui.sticky_default_title": "New memo",
   "ui.sticky_opacity": "Opacity",
+  "ui.sticky_photo_missing": "This photo has not arrived on this device yet",
+  "ui.sticky_pick_photo": "Choose a photo to attach",
   "ui.sticky_window_title": "Memo"
 }
