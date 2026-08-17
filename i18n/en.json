@@ -1,5 +1,6 @@
 {
   "core.argon2_failed": "Argon2id key derivation failed: {error}",
+  "core.attachment_not_found": "Attachment not found: {id}",
   "core.bad_lan_code": "Not a 6-digit numeric code",
   "core.bad_pairing_code": "Not a valid pairing code",
   "core.cannot_unshare_self": "You cannot unshare this device from itself",

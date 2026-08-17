@@ -84,6 +84,26 @@ impl MasterKey {
         Ok(out)
     }
 
+    /// nonce 를 호출자가 정해 암호화한다 (형식은 [`Self::encrypt`] 와 같다).
+    ///
+    /// **일반 데이터에 쓰지 말 것.** 같은 키로 같은 nonce 를 다른 평문에 재사용하면
+    /// XChaCha20 의 키스트림이 겹쳐 치명적이다. 내용해시 blob([`crate::blob`])처럼
+    /// "nonce 를 평문에서 유도해 평문이 다르면 nonce 도 다른" 경우에만 쓴다.
+    /// 그 대가로 같은 평문이 항상 같은 암호문이 되어(convergent), 여러 기기가 같은
+    /// 사진을 붙여도 파일 내용이 똑같아 동기화 충돌이 생기지 않는다.
+    pub fn encrypt_with_nonce(&self, plaintext: &[u8], nonce_bytes: &[u8; NONCE_LEN]) -> Result<Vec<u8>> {
+        let nonce = XNonce::from_slice(nonce_bytes);
+        let ciphertext = self
+            .cipher
+            .encrypt(nonce, plaintext)
+            .map_err(|e| anyhow!(t!("core.encrypt_failed", error = e)))?;
+
+        let mut out = Vec::with_capacity(NONCE_LEN + ciphertext.len());
+        out.extend_from_slice(nonce_bytes);
+        out.extend_from_slice(&ciphertext);
+        Ok(out)
+    }
+
     /// `encrypt` 가 만든 `nonce || ciphertext` 를 복호화.
     ///
     /// 키가 다르거나 데이터가 변조되면 Poly1305 인증이 실패해 에러가 난다.

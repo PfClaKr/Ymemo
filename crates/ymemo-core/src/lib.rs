@@ -7,6 +7,7 @@
 //! [`vault`] (automerge 병합 + 캐시 재구축), [`sync`] (Syncthing 제어),
 //! [`pairing`]·[`lan_pair`] (기기 연결).
 
+pub mod blob;
 pub mod changelog;
 pub mod crypto;
 pub mod lan_pair;
@@ -27,7 +28,13 @@ pub const DEFAULT_OPACITY: i64 = 100;
 /// 불투명도 하한(%). 너무 투명해져 창을 못 찾는 일이 없도록 막는다.
 pub const MIN_OPACITY: i64 = 20;
 
-/// 메모 한 건. (사진 첨부 등은 이후 단계에서 확장)
+/// 첨부 사진의 기본 표시 너비 (em 의 1/1000 단위). 20em = 폰트 20글자 폭.
+pub const DEFAULT_WIDTH_EM_MILLI: i64 = 20_000;
+/// 표시 너비 하한/상한 (em 의 1/1000). 너무 작으면 안 보이고, 너무 크면 창을 넘는다.
+pub const MIN_WIDTH_EM_MILLI: i64 = 4_000;
+pub const MAX_WIDTH_EM_MILLI: i64 = 80_000;
+
+/// 메모 한 건. 첨부 사진은 [`Attachment`] 로 따로 매달린다.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Memo {
     pub id: String,
@@ -61,6 +68,69 @@ impl Memo {
             updated_at: now,
         }
     }
+}
+
+/// 메모에 붙은 사진 한 장.
+///
+/// 바이트 자체는 [`blob`](crate::blob) 에 내용해시로 저장되고, 여기엔 그 해시와
+/// **표시 방법**만 담는다.
+///
+/// 표시 크기를 픽셀로 두지 않는 것이 요점이다. 폰이 300px 로 보이게 맞춰 놓으면
+/// 데스크탑에서는 우표만 해지고, 반대도 마찬가지다. 그래서 **그 플랫폼 기본 폰트 크기의
+/// 배수(em)** 로 저장한다 — "본문 글자 20자 폭" 은 어느 기기에서나 같은 느낌으로 보인다.
+/// 실제 픽셀은 각 UI 가 `width_em * 자기 기본 폰트 px` 로 환산하고, 높이는 원본 비율
+/// (`height_px / width_px`)로 따라간다.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Attachment {
+    pub id: String,
+    /// 어느 메모에 붙었는가.
+    pub memo_id: String,
+    /// blob 내용해시(hex) = 파일 이름.
+    pub hash: String,
+    /// 원래 파일 이름 (표시·내려받기용).
+    pub name: String,
+    /// `image/jpeg` 등. 모르면 빈 문자열.
+    pub mime: String,
+    /// 원본 픽셀 크기. 비율 계산에만 쓰고 표시 크기와는 무관하다. 모르면 0.
+    pub width_px: i64,
+    pub height_px: i64,
+    /// 표시 너비 (em 의 1/1000). [`clamp_width_em_milli`] 로 범위를 지킨다.
+    pub width_em_milli: i64,
+    pub created_at: i64,
+}
+
+impl Attachment {
+    /// 새 첨부 (기본 표시 크기).
+    pub fn new(memo_id: impl Into<String>, hash: impl Into<String>) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            memo_id: memo_id.into(),
+            hash: hash.into(),
+            name: String::new(),
+            mime: String::new(),
+            width_px: 0,
+            height_px: 0,
+            width_em_milli: DEFAULT_WIDTH_EM_MILLI,
+            created_at: now_millis(),
+        }
+    }
+
+    /// 이 플랫폼에서의 표시 크기(논리 px). `base_font_px` 는 그 UI 의 기본 본문 폰트 크기.
+    /// 원본 비율을 모르면(0) 높이는 너비와 같게 둔다 — 정사각 자리표시자.
+    pub fn display_size(&self, base_font_px: f64) -> (f64, f64) {
+        let w = clamp_width_em_milli(self.width_em_milli) as f64 / 1000.0 * base_font_px;
+        let ratio = if self.width_px > 0 && self.height_px > 0 {
+            self.height_px as f64 / self.width_px as f64
+        } else {
+            1.0
+        };
+        (w, w * ratio)
+    }
+}
+
+/// 표시 너비를 유효 범위로 자른다 (다른 기기/버전이 이상한 값을 써도 UI 가 깨지지 않게).
+pub fn clamp_width_em_milli(v: i64) -> i64 {
+    v.clamp(MIN_WIDTH_EM_MILLI, MAX_WIDTH_EM_MILLI)
 }
 
 /// 메모를 담는 그룹(폴더). `parent_id` 로 폴더 안의 폴더를 표현한다.
@@ -144,6 +214,19 @@ impl Store {
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
+            -- 메모에 붙은 사진. 바이트는 vault 의 blobs/ 에 있고 여기엔 참조만 둔다.
+            CREATE TABLE IF NOT EXISTS attachments (
+                id             TEXT PRIMARY KEY,
+                memo_id        TEXT NOT NULL,
+                hash           TEXT NOT NULL,
+                name           TEXT NOT NULL DEFAULT '',
+                mime           TEXT NOT NULL DEFAULT '',
+                width_px       INTEGER NOT NULL DEFAULT 0,
+                height_px      INTEGER NOT NULL DEFAULT 0,
+                width_em_milli INTEGER NOT NULL DEFAULT 20000,
+                created_at     INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS attachments_memo ON attachments(memo_id);
             -- 기기 로컬 메타데이터 (device_id 등). 동기화되지 않는 기기별 값.
             CREATE TABLE IF NOT EXISTS meta (
                 key   TEXT PRIMARY KEY,
@@ -202,6 +285,57 @@ impl Store {
     pub fn clear_memos(&self) -> Result<()> {
         self.conn.execute("DELETE FROM memos", [])?;
         self.conn.execute("DELETE FROM groups", [])?;
+        self.conn.execute("DELETE FROM attachments", [])?;
+        Ok(())
+    }
+
+    /// 첨부 삽입/갱신 (id 기준).
+    pub fn upsert_attachment(&self, a: &Attachment) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO attachments
+                 (id, memo_id, hash, name, mime, width_px, height_px, width_em_milli, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(id) DO UPDATE SET
+                 memo_id = ?2, hash = ?3, name = ?4, mime = ?5,
+                 width_px = ?6, height_px = ?7, width_em_milli = ?8",
+            params![
+                a.id,
+                a.memo_id,
+                a.hash,
+                a.name,
+                a.mime,
+                a.width_px,
+                a.height_px,
+                clamp_width_em_milli(a.width_em_milli),
+                a.created_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// 한 메모의 첨부들 (붙인 순서).
+    pub fn attachments_of(&self, memo_id: &str) -> Result<Vec<Attachment>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, memo_id, hash, name, mime, width_px, height_px, width_em_milli, created_at
+             FROM attachments WHERE memo_id = ?1 ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map([memo_id], row_to_attachment)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// 첨부 하나 조회.
+    pub fn get_attachment(&self, id: &str) -> Result<Option<Attachment>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, memo_id, hash, name, mime, width_px, height_px, width_em_milli, created_at
+             FROM attachments WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map([id], row_to_attachment)?;
+        Ok(rows.next().transpose()?)
+    }
+
+    /// 첨부 레코드 삭제. **blob 파일은 지우지 않는다** (GC 없음 — blob 모듈 문서 참조).
+    pub fn delete_attachment(&self, id: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM attachments WHERE id = ?1", [id])?;
         Ok(())
     }
 
@@ -305,6 +439,20 @@ fn row_to_memo(row: &rusqlite::Row) -> rusqlite::Result<Memo> {
 }
 
 /// groups 테이블 한 행 → Group.
+fn row_to_attachment(row: &rusqlite::Row) -> rusqlite::Result<Attachment> {
+    Ok(Attachment {
+        id: row.get(0)?,
+        memo_id: row.get(1)?,
+        hash: row.get(2)?,
+        name: row.get(3)?,
+        mime: row.get(4)?,
+        width_px: row.get(5)?,
+        height_px: row.get(6)?,
+        width_em_milli: row.get(7)?,
+        created_at: row.get(8)?,
+    })
+}
+
 fn row_to_group(row: &rusqlite::Row) -> rusqlite::Result<Group> {
     Ok(Group {
         id: row.get(0)?,

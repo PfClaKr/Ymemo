@@ -8,7 +8,10 @@
 //! ```
 //!
 //! 로그 레코드 = **automerge change 바이너리** (암호화됨). 문서 구조:
-//! `ROOT.memos: Map<memo_id, {title, body, created_at, updated_at}>`.
+//! `ROOT.memos: Map<memo_id, {title, body, created_at, updated_at}>`,
+//! `ROOT.groups: Map<group_id, {...}>`, `ROOT.attachments: Map<attachment_id, {...}>`.
+//! 사진 바이트 자체는 문서가 아니라 `blobs/<해시>.ymblob` 에 있고
+//! (automerge 문서를 사진으로 부풀리지 않는다), 첨부 항목은 그 해시만 가리킨다.
 //! 병합은 automerge 가 순서 무관으로 처리한다 — 서로 다른 기기가 같은 메모의 다른
 //! 필드를 고치면 둘 다 살아남고(필드 단위), 같은 필드 충돌은 결정론적으로 수렴한다.
 //! actor id = device_id 이므로 자기 로그의 change 만 자기 actor 를 갖는다.
@@ -23,9 +26,10 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::blob::BlobStore;
 use crate::changelog::ChangeLog;
 use crate::crypto::{generate_salt, MasterKey, Salt, SALT_LEN};
-use crate::{Group, Memo, Store};
+use crate::{clamp_width_em_milli, Attachment, Group, Memo, Store};
 
 const HEADER_FILE: &str = "vault.json";
 const LOGS_DIR: &str = "logs";
@@ -51,6 +55,8 @@ pub struct Vault {
     own_log: ChangeLog,
     /// 모든 기기 로그를 병합한 automerge 문서 (진실의 원천의 메모리 표현).
     doc: AutoCommit,
+    /// 첨부 사진 바이트 저장소 (`<vault_dir>/blobs`).
+    blobs: BlobStore,
 }
 
 impl Vault {
@@ -123,6 +129,7 @@ impl Vault {
             key.clone(),
         );
 
+        let blobs = BlobStore::open(&dir, key.clone());
         let mut vault = Self {
             doc: AutoCommit::new(),
             dir,
@@ -130,6 +137,7 @@ impl Vault {
             key,
             device_id,
             own_log,
+            blobs,
         };
         vault.rebuild()?;
         Ok(vault)
@@ -167,6 +175,84 @@ impl Vault {
 
         self.append_local_change()?;
         self.store.upsert(memo)
+    }
+
+    /// 사진을 메모에 붙인다. 바이트는 blob 으로 저장하고 첨부 항목만 동기화한다.
+    ///
+    /// `width_px`/`height_px` 는 **호출자(UI)가 넘긴다** — 코어에 이미지 디코더를 넣지
+    /// 않기 위해서다(데스크탑·모바일 모두 이미 디코더를 갖고 있다). 모르면 0 을 넘기면
+    /// 되고, 그 경우 표시 비율은 1:1 로 취급된다.
+    pub fn attach(
+        &mut self,
+        memo_id: &str,
+        data: &[u8],
+        name: &str,
+        mime: &str,
+        width_px: i64,
+        height_px: i64,
+    ) -> Result<Attachment> {
+        let hash = self.blobs.put(data)?;
+        let mut a = Attachment::new(memo_id, hash);
+        a.name = name.to_string();
+        a.mime = mime.to_string();
+        a.width_px = width_px;
+        a.height_px = height_px;
+        self.upsert_attachment(&a)?;
+        Ok(a)
+    }
+
+    /// 첨부 항목 삽입/갱신 (표시 크기 변경도 이 경로).
+    pub fn upsert_attachment(&mut self, a: &Attachment) -> Result<()> {
+        let attachments = self.attachments_obj()?;
+        let obj = match self.doc.get(&attachments, &a.id)? {
+            Some((Value::Object(ObjType::Map), id)) => id,
+            _ => self.doc.put_object(&attachments, &a.id, ObjType::Map)?,
+        };
+        put_str_if_changed(&mut self.doc, &obj, "memo_id", &a.memo_id)?;
+        put_str_if_changed(&mut self.doc, &obj, "hash", &a.hash)?;
+        put_str_if_changed(&mut self.doc, &obj, "name", &a.name)?;
+        put_str_if_changed(&mut self.doc, &obj, "mime", &a.mime)?;
+        put_i64_if_changed(&mut self.doc, &obj, "width_px", a.width_px)?;
+        put_i64_if_changed(&mut self.doc, &obj, "height_px", a.height_px)?;
+        put_i64_if_changed(
+            &mut self.doc,
+            &obj,
+            "width_em_milli",
+            clamp_width_em_milli(a.width_em_milli),
+        )?;
+        put_i64_if_changed(&mut self.doc, &obj, "created_at", a.created_at)?;
+
+        self.append_local_change()?;
+        self.store.upsert_attachment(a)
+    }
+
+    /// 표시 너비만 바꾼다 (em 의 1/1000). 한 기기에서 줄이면 다른 기기도 같은 비율로 보인다.
+    pub fn set_attachment_width(&mut self, id: &str, width_em_milli: i64) -> Result<()> {
+        let Some(mut a) = self.store.get_attachment(id)? else {
+            bail!(t!("core.attachment_not_found", id = id));
+        };
+        a.width_em_milli = clamp_width_em_milli(width_em_milli);
+        self.upsert_attachment(&a)
+    }
+
+    /// 메모에서 사진을 뗀다. **blob 파일은 남긴다** (GC 없음 — 다른 기기가 아직 볼 수 있다).
+    pub fn detach(&mut self, id: &str) -> Result<()> {
+        let attachments = self.attachments_obj()?;
+        if self.doc.get(&attachments, id)?.is_some() {
+            self.doc.delete(&attachments, id)?;
+            self.append_local_change()?;
+        }
+        self.store.delete_attachment(id)
+    }
+
+    /// 첨부의 사진 바이트(평문). 아직 동기화가 안 됐으면 에러 — UI 는 자리표시자를 보이면 된다.
+    pub fn attachment_bytes(&self, hash: &str) -> Result<Vec<u8>> {
+        self.blobs.get(hash)
+    }
+
+    /// 이 기기에 사진 파일이 이미 도착했는가.
+    pub fn has_blob(&self, hash: &str) -> bool {
+        self.blobs.has(hash)
     }
 
     /// 그룹 삽입/갱신 (이름 변경·부모 변경 모두 이 경로).
@@ -342,7 +428,42 @@ impl Vault {
             };
             self.store.upsert(&memo)?;
         }
-        self.materialize_groups()
+        self.materialize_groups()?;
+        self.materialize_attachments()
+    }
+
+    fn materialize_attachments(&mut self) -> Result<()> {
+        let Some((Value::Object(ObjType::Map), attachments)) = self.doc.get(ROOT, "attachments")?
+        else {
+            return Ok(()); // 아직 첨부 없음
+        };
+        let ids: Vec<String> = self.doc.keys(&attachments).collect();
+        for id in ids {
+            let Some((Value::Object(ObjType::Map), obj)) = self.doc.get(&attachments, &id)? else {
+                continue;
+            };
+            let a = Attachment {
+                id: id.clone(),
+                memo_id: get_str_or(&self.doc, &obj, "memo_id", ""),
+                hash: get_str_or(&self.doc, &obj, "hash", ""),
+                name: get_str_or(&self.doc, &obj, "name", ""),
+                mime: get_str_or(&self.doc, &obj, "mime", ""),
+                width_px: get_i64_or(&self.doc, &obj, "width_px", 0),
+                height_px: get_i64_or(&self.doc, &obj, "height_px", 0),
+                width_em_milli: clamp_width_em_milli(get_i64_or(
+                    &self.doc,
+                    &obj,
+                    "width_em_milli",
+                    crate::DEFAULT_WIDTH_EM_MILLI,
+                )),
+                created_at: get_i64_or(&self.doc, &obj, "created_at", 0),
+            };
+            // hash 가 비면 못 쓰는 항목이다 (옛 버전/손상). 조용히 건너뛴다.
+            if !a.hash.is_empty() {
+                self.store.upsert_attachment(&a)?;
+            }
+        }
+        Ok(())
     }
 
     /// `ROOT.groups` 를 SQLite 캐시로 실체화한다.
@@ -372,6 +493,14 @@ impl Vault {
         Ok(match self.doc.get(ROOT, "memos")? {
             Some((Value::Object(ObjType::Map), id)) => id,
             _ => self.doc.put_object(ROOT, "memos", ObjType::Map)?,
+        })
+    }
+
+    /// `ROOT.attachments` 맵을 얻는다 (없으면 생성).
+    fn attachments_obj(&mut self) -> Result<ObjId> {
+        Ok(match self.doc.get(ROOT, "attachments")? {
+            Some((Value::Object(ObjType::Map), id)) => id,
+            _ => self.doc.put_object(ROOT, "attachments", ObjType::Map)?,
         })
     }
 
@@ -571,6 +700,82 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ymemo-vault-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// 사진 첨부: blob 은 파일로, 항목은 로그로 — 그리고 **로그만으로 복원**돼야 한다.
+    #[test]
+    fn attachment_survives_a_rebuild_from_logs() {
+        let dir = temp_dir();
+        let photo = b"\x89PNG fake bytes".repeat(50);
+        let (memo_id, att_id);
+        {
+            let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+            let memo = Memo::new("사진 있는 메모", "");
+            v.upsert(&memo).unwrap();
+            let a = v.attach(&memo.id, &photo, "photo.png", "image/png", 4000, 3000).unwrap();
+            memo_id = memo.id;
+            att_id = a.id;
+        }
+
+        // 빈 캐시로 재오픈 = 로그 재생만으로 복원.
+        let v = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let list = v.store().attachments_of(&memo_id).unwrap();
+        assert_eq!(list.len(), 1);
+        let a = &list[0];
+        assert_eq!(a.id, att_id);
+        assert_eq!(a.name, "photo.png");
+        assert_eq!((a.width_px, a.height_px), (4000, 3000));
+        assert_eq!(a.width_em_milli, crate::DEFAULT_WIDTH_EM_MILLI);
+        // 바이트도 그대로 돌아와야 한다.
+        assert!(v.has_blob(&a.hash));
+        assert_eq!(v.attachment_bytes(&a.hash).unwrap(), photo);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 한 기기에서 바꾼 표시 크기가 다른 기기에도 그대로 온다 (픽셀이 아니라 em 이라
+    /// 폰트 크기가 다른 기기에서도 같은 "글자 몇 자 폭" 으로 보인다).
+    #[test]
+    fn display_width_syncs_between_devices() {
+        let dir = temp_dir();
+        let mut phone = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let memo = Memo::new("사진", "");
+        phone.upsert(&memo).unwrap();
+        let a = phone.attach(&memo.id, b"jpeg", "p.jpg", "image/jpeg", 1000, 500).unwrap();
+
+        // 폰에서 8em 으로 줄인다.
+        phone.set_attachment_width(&a.id, 8_000).unwrap();
+
+        // 데스크탑(=다른 캐시/기기)이 로그를 병합하면 같은 값을 본다.
+        let desktop = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let got = desktop.store().get_attachment(&a.id).unwrap().unwrap();
+        assert_eq!(got.width_em_milli, 8_000);
+
+        // 같은 8em 이라도 플랫폼 기본 폰트가 다르면 픽셀은 다르게, 비율은 같게 나온다.
+        assert_eq!(got.display_size(16.0), (128.0, 64.0));
+        assert_eq!(got.display_size(20.0), (160.0, 80.0));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 사진을 떼어도 blob 파일은 남는다 (GC 없음 — 다른 기기가 아직 참조할 수 있다).
+    #[test]
+    fn detach_keeps_the_blob_file() {
+        let dir = temp_dir();
+        let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let memo = Memo::new("메모", "");
+        v.upsert(&memo).unwrap();
+        let a = v.attach(&memo.id, b"bytes", "x.png", "image/png", 10, 10).unwrap();
+
+        v.detach(&a.id).unwrap();
+        assert!(v.store().attachments_of(&memo.id).unwrap().is_empty());
+        assert!(v.has_blob(&a.hash), "blob 파일은 남아 있어야 한다");
+
+        // 재생 후에도 떼어진 상태가 유지돼야 한다 (삭제가 로그에 남았는가).
+        let v2 = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        assert!(v2.store().attachments_of(&memo.id).unwrap().is_empty());
+
+        fs::remove_dir_all(&dir).ok();
     }
 
     /// 다른 키로 쓰인(=기기 vault 가 갈라진) 로그가 섞여 있어도, rebuild 는 실패하지

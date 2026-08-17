@@ -1,5 +1,6 @@
 {
   "core.argon2_failed": "Argon2id 키 유도 실패: {error}",
+  "core.attachment_not_found": "첨부 없음: {id}",
   "core.bad_lan_code": "6자리 숫자 코드가 아닙니다",
   "core.bad_pairing_code": "올바른 페어링 코드가 아님",
   "core.cannot_unshare_self": "자기 자신은 공유 해제할 수 없습니다",
