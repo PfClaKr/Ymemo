@@ -600,7 +600,7 @@ export component StickyWindow inherits Window {
     preferred-width: 260px;
     preferred-height: 240px;
     min-width: 160px;
-    min-height: 36px;
+    min-height: 28px;
     resize-border-width: 4px;
 
     in property <string> memo-title;
@@ -623,7 +623,8 @@ export component StickyWindow inherits Window {
 
     Rectangle {
         background: Palette.bg(root.sticky-color);
-        border-radius: 8px;
+        // 각진 창 — 둥근 모서리 없음.
+        border-radius: 0px;
         border-width: 1px;
         border-color: Palette.bar(root.sticky-color).darker(0.15);
         clip: true;
@@ -633,7 +634,8 @@ export component StickyWindow inherits Window {
         VerticalLayout {
             // ---- 제목 바 (드래그 핸들 + 접기 토글) ----
             Rectangle {
-                height: 36px;
+                // 접었을 때 창 높이(main.rs 의 BAR_HEIGHT)와 반드시 같아야 한다.
+                height: 28px;
                 background: Palette.bar(root.sticky-color);
 
                 bar-ta := TouchArea {
@@ -758,7 +760,7 @@ export component StickyWindow inherits Window {
                 }
             }
 
-            // ---- 본문 (접힌 동안엔 창 높이가 36px 라 안 보인다) ----
+            // ---- 본문 (접힌 동안엔 창 높이가 제목 바와 같아 안 보인다) ----
             body := TextEdit {
                 visible: !root.collapsed;
                 min-height: 0;

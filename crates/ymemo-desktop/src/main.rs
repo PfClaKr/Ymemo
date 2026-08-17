@@ -40,7 +40,7 @@ const MERGE_INTERVAL: Duration = Duration::from_secs(15);
 /// 본문 편집 후 자동 저장까지의 디바운스.
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(800);
 /// 스티커 제목 바 높이 (접힌 상태의 창 높이, app.slint 와 일치해야 함).
-const BAR_HEIGHT: f32 = 36.0;
+const BAR_HEIGHT: f32 = 28.0;
 /// 자석 스냅 거리 (논리 px). 이 거리 안이면 화면/다른 스티커 테두리에 달라붙는다.
 const SNAP_DIST: f32 = 12.0;
 /// 스티커 위치 감시(스냅 판정) 주기.
