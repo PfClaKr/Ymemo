@@ -60,7 +60,40 @@ flutter build apk
 > Dart 를 고칠 때마다 `.so` 를 다시 구울 필요는 없지만, **Rust 를 고치면 반드시 다시 구워야
 > 한다** — gradle 은 아직 Rust 를 모른다(cargokit 미적용, 아래 "남은 일").
 
-### WSL2 에서 기기 붙이기
+### 에뮬레이터 (헤드리스, WSL2 에서 검증됨)
+
+창 없이 띄우고 `adb` 로 조작·캡처하는 방식이라 WSLg 없이도 되고 메모리도 덜 먹는다.
+
+```bash
+# 1. 준비 (한 번만). KVM 가속에 /dev/kvm 접근 권한이 필요하다:
+#    sudo usermod -aG kvm $USER   (적용은 WSL 재시작 후. 즉시 쓰려면 sudo chmod 666 /dev/kvm)
+sdkmanager "emulator" "system-images;android-36;google_apis;x86_64"
+avdmanager create avd -n ymemo -k "system-images;android-36;google_apis;x86_64" -d pixel_6
+
+# 2. 기동 → 부팅 대기
+emulator -avd ymemo -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -memory 4096 &
+adb wait-for-device && until [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; do sleep 5; done
+
+# 3. 설치 → 실행 → 화면 확인
+cargo ndk -t x86_64 -o android/app/src/main/jniLibs build -p ymemo-ffi
+flutter build apk --debug --target-platform android-x64
+adb install -r build/app/outputs/flutter-apk/app-debug.apk
+adb shell am start -n dev.ymemo.ymemo_mobile/.MainActivity
+adb exec-out screencap -p > /tmp/shot.png      # 화면 캡처
+adb shell input tap 540 1212                   # 좌표는 1080x2400 기준
+adb shell input text "hunter2"                 # 공백은 %s 로 넣는다
+```
+
+vault 가 실제로 기기에 생겼는지는 앱 전용 디렉터리에서 확인한다(디버그 빌드만 가능):
+
+```bash
+adb shell run-as dev.ymemo.ymemo_mobile ls -l app_flutter/vault app_flutter/vault/logs
+# vault.json (salt + key_check) + logs/<uuid>.ymlog (암호화된 change 로그)
+```
+
+에뮬레이터 종료: `adb emu kill`
+
+### WSL2 에서 실기기 붙이기
 
 - **실기기(권장)** — Android 11+ 의 무선 디버깅으로 `adb pair` → `adb connect`.
   USB 로 하려면 Windows 쪽 `usbipd-win` 으로 장치를 WSL 에 넘겨야 한다.
