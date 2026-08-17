@@ -123,6 +123,29 @@ flutter build ios --no-codesign
 쓰므로 코어 에러와 화면 문구의 언어가 항상 같다. 문구를 늘리려면 두 JSON 에 `mobile.*`
 키를 넣고 `crates/ymemo-ffi` 의 `FfiStrings` 에 필드를 추가한다.
 
+## 릴리스 (CI)
+
+`v*` 태그를 밀면 `.github/workflows/release.yml` 의 `android-app` 잡이 APK 를 만들어
+GitHub Release 에 붙인다. **ABI 별로 나눠서** 올린다:
+
+| 파일 | 대상 | 크기 |
+|---|---|---|
+| `ymemo-<버전>-android-arm64-v8a.apk` | **요즘 폰 대부분** | ~29 MB |
+| `ymemo-<버전>-android-armeabi-v7a.apk` | 구형 32비트 폰 | ~24 MB |
+| `ymemo-<버전>-android-x86_64.apk` | 에뮬레이터 | ~32 MB |
+
+셋을 한 APK 에 담으면 76 MB 라 나눴다. 크기의 상당 부분은 Flutter 엔진(~12 MB)과
+QR 스캔용 ML Kit(`libbarhopper_v3.so`, ~5 MB)이고, 우리 Rust 라이브러리는 ABI 당 3~5 MB 다.
+
+> **서명 주의:** 지금은 `flutter create` 기본값대로 릴리스 APK 가 **디버그 키로 서명**된다.
+> 설치는 되지만(기기에서 "출처를 알 수 없는 앱" 허용 필요) Play 스토어에는 올릴 수 없고,
+> 나중에 정식 키로 바꾸면 **기존 설치본을 덮어 업데이트할 수 없다**(서명이 달라 재설치해야 함).
+> 정식 서명은 keystore 를 secrets 로 받아 `signingConfigs` 를 채우면 된다
+> (windows-desktop 잡의 인증서 처리와 같은 방식).
+
+CI 가 쓰는 Flutter·NDK 버전은 `release.yml` 상단 `env` 에 못 박혀 있다. NDK 는
+`android/app/build.gradle.kts` 의 `ndkVersion` 과 **같은 값이어야** 한다.
+
 ## 남은 일
 
 - [ ] Syncthing 모바일 연동 (gomobile `.aar` 번들 — 결정 사항). **이게 붙기 전까지 모바일은

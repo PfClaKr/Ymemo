@@ -120,6 +120,9 @@ packaging/linux/build-rpm.sh \
 
 Windows 는 Inno Setup(`packaging/windows/ymemo.iss`)으로 `ymemo-setup-x86_64.exe` 를
 만든다. 셋 다 릴리스 태그(`v*`)에서 CI 가 자동 생성한다 (`.github/workflows/release.yml`).
+같은 태그에서 **Android APK** 도 함께 만들어 붙인다 — ABI 별로 나뉘며 요즘 폰은
+`ymemo-<버전>-android-arm64-v8a.apk` 를 받으면 된다. 아직 디버그 키로 서명되므로
+Play 스토어용이 아니다 (`apps/mobile/README.md` 참조).
 Fedora 잡은 Fedora 컨테이너 안에서 데스크탑을 빌드해 라이브러리 호환을 맞춘다.
 
 ## 기능 (데스크탑)
