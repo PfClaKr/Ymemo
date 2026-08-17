@@ -7,6 +7,7 @@
 //! 전송 계층을 신뢰할 필요가 없다.
 
 use anyhow::{anyhow, bail, Context, Result};
+use ymemo_i18n::t;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -97,7 +98,7 @@ impl Syncthing {
         }
         let child = cmd
             .spawn()
-            .with_context(|| format!("syncthing 실행 실패: {}", binary.display()))?;
+            .with_context(|| t!("core.syncthing_spawn_failed", path = binary.display()))?;
 
         let mut st = Self {
             child,
@@ -115,10 +116,10 @@ impl Syncthing {
                 }
             }
             if Instant::now() > deadline {
-                bail!("syncthing config.xml 대기 시간 초과: {}", config_path.display());
+                bail!(t!("core.syncthing_config_timeout", path = config_path.display()));
             }
             if let Some(status) = st.child.try_wait()? {
-                bail!("syncthing 이 조기 종료됨: {status}");
+                bail!(t!("core.syncthing_exited_early", status = status));
             }
             std::thread::sleep(Duration::from_millis(200));
         };
@@ -126,10 +127,10 @@ impl Syncthing {
         // REST 가 응답할 때까지 대기.
         while st.ping().is_err() {
             if Instant::now() > deadline {
-                bail!("syncthing REST 응답 대기 시간 초과 ({})", st.base_url);
+                bail!(t!("core.syncthing_rest_timeout", url = st.base_url));
             }
             if let Some(status) = st.child.try_wait()? {
-                bail!("syncthing 이 조기 종료됨: {status}");
+                bail!(t!("core.syncthing_exited_early", status = status));
             }
             std::thread::sleep(Duration::from_millis(200));
         }
@@ -152,7 +153,7 @@ impl Syncthing {
         status["myID"]
             .as_str()
             .map(String::from)
-            .ok_or_else(|| anyhow!("system/status 응답에 myID 없음"))
+            .ok_or_else(|| anyhow!(t!("core.syncthing_no_my_id")))
     }
 
     /// vault 디렉터리를 공유 폴더로 등록한다. 이미 있으면 손대지 않는다
@@ -188,7 +189,7 @@ impl Syncthing {
         let mut folder: serde_json::Value = res.body_mut().read_json()?;
         let devices = folder["devices"]
             .as_array_mut()
-            .ok_or_else(|| anyhow!("folder 설정에 devices 배열 없음"))?;
+            .ok_or_else(|| anyhow!(t!("core.syncthing_no_devices")))?;
         if !devices.iter().any(|d| d["deviceID"] == peer_device_id) {
             devices.push(serde_json::json!({ "deviceID": peer_device_id }));
             ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
@@ -254,7 +255,7 @@ impl Syncthing {
     /// 여기서 지우면 이 기기는 더 이상 상대에게 로그를 보내거나 받지 않는다.
     pub fn unshare_folder_with(&self, folder_id: &str, peer_device_id: &str) -> Result<()> {
         if peer_device_id == self.device_id()? {
-            bail!("자기 자신은 공유 해제할 수 없습니다");
+            bail!(t!("core.cannot_unshare_self"));
         }
         // 1. 폴더 devices 목록에서 제거.
         let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);

@@ -17,7 +17,8 @@ pub use imp::{start, TrayHandle};
 // ===========================================================================
 #[cfg(target_os = "linux")]
 mod imp {
-    use crate::{request_lock, request_quit, request_toggle, tray_icon_rgba, tray_text};
+    use crate::{request_lock, request_quit, request_toggle, tray_icon_rgba};
+    use ymemo_i18n::t;
 
     struct YmemoTray;
 
@@ -55,20 +56,20 @@ mod imp {
             use ksni::menu::*;
             vec![
                 StandardItem {
-                    label: tray_text("메모 목록", "Memo list"),
+                    label: t!("tray.memo_list"),
                     activate: Box::new(|_| request_toggle()),
                     ..Default::default()
                 }
                 .into(),
                 StandardItem {
-                    label: tray_text("잠금", "Lock"),
+                    label: t!("tray.lock"),
                     activate: Box::new(|_| request_lock()),
                     ..Default::default()
                 }
                 .into(),
                 MenuItem::Separator,
                 StandardItem {
-                    label: tray_text("종료", "Quit"),
+                    label: t!("tray.quit"),
                     activate: Box::new(|_| request_quit()),
                     ..Default::default()
                 }
@@ -111,7 +112,8 @@ mod imp {
     use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
     use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
-    use crate::{request_lock, request_quit, request_toggle, tray_icon_rgba, tray_text};
+    use crate::{request_lock, request_quit, request_toggle, tray_icon_rgba};
+    use ymemo_i18n::t;
 
     /// 트레이 아이콘 + 메뉴/클릭 이벤트를 폴링하는 타이머를 함께 들고 있는 핸들.
     /// (둘 다 살아 있어야 트레이가 유지되고 이벤트가 처리된다)
@@ -125,8 +127,8 @@ mod imp {
     impl TrayHandle {
         /// 메뉴 문구를 현재 언어로 다시 쓴다. 순서는 start() 의 append 순서와 같다.
         pub fn refresh(&self) {
-            let labels = [tray_text("메모 목록", "Memo list"), tray_text("잠금", "Lock"),
-                          tray_text("종료", "Quit")];
+            let labels = [t!("tray.memo_list"), t!("tray.lock"),
+                          t!("tray.quit")];
             for (item, label) in self.items.iter().zip(labels) {
                 item.set_text(label);
             }
@@ -135,9 +137,9 @@ mod imp {
 
     pub fn start() -> TrayHandle {
         // 메뉴: "메모 목록" / "잠금" / --- / "종료". 각 항목 id 로 이벤트를 분기한다.
-        let list_item = MenuItem::new(tray_text("메모 목록", "Memo list"), true, None);
-        let lock_item = MenuItem::new(tray_text("잠금", "Lock"), true, None);
-        let quit_item = MenuItem::new(tray_text("종료", "Quit"), true, None);
+        let list_item = MenuItem::new(t!("tray.memo_list"), true, None);
+        let lock_item = MenuItem::new(t!("tray.lock"), true, None);
+        let quit_item = MenuItem::new(t!("tray.quit"), true, None);
         let list_id: MenuId = list_item.id().clone();
         let lock_id: MenuId = lock_item.id().clone();
         let quit_id: MenuId = quit_item.id().clone();

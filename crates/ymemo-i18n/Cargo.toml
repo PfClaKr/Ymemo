@@ -1,0 +1,10 @@
+[package]
+name = "ymemo-i18n"
+description = "Ymemo 번역 카탈로그. i18n/*.json 을 컴파일 타임에 박아 넣고 런타임에 언어를 고른다."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde_json.workspace = true

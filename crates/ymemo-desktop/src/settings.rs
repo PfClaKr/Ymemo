@@ -15,6 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use ymemo_core::crypto::KEY_LEN;
+use ymemo_i18n::Lang;
 
 const SETTINGS_FILE: &str = "settings.json";
 const SESSION_FILE: &str = "session.json";
@@ -82,7 +83,8 @@ impl Settings {
 
     /// 사용자가 입력한 값을 쓸 수 있는 범위로 다듬는다 (UI 에서 무엇을 넣든 안전하도록).
     pub fn sanitize(&mut self) {
-        if !matches!(self.lang.as_str(), "auto" | "ko" | "en") {
+        // "auto" 이거나 카탈로그가 아는 언어 코드여야 한다.
+        if self.lang != "auto" && Lang::parse(&self.lang).is_none() {
             self.lang = "auto".into();
         }
         self.unlock_days = self.unlock_days.clamp(0, UNLOCK_DAYS_MAX);
@@ -99,24 +101,10 @@ impl Settings {
             .clamp(MERGE_SECONDS_RANGE.0, MERGE_SECONDS_RANGE.1);
     }
 
-    /// `"auto"` 를 시스템 로캘로 풀어 실제로 쓸 언어(`"ko"` / `"en"`)를 정한다.
-    pub fn effective_lang(&self) -> &'static str {
-        match self.lang.as_str() {
-            "ko" => "ko",
-            "en" => "en",
-            _ if system_is_korean() => "ko",
-            _ => "en",
-        }
+    /// `"auto"` 를 시스템 로캘로 풀어 실제로 쓸 언어를 정한다.
+    pub fn effective_lang(&self) -> Lang {
+        Lang::parse(&self.lang).unwrap_or_else(ymemo_i18n::system_lang)
     }
-}
-
-/// 시스템 로캘이 한국어인가. (unix 는 LC_ALL/LC_MESSAGES/LANG, windows 는 GetUserDefaultLocaleName
-/// 대신 동일 환경변수를 쓰는 셸이 드물어 결국 영어로 떨어지는데, 그 편이 안전한 기본값이다.)
-fn system_is_korean() -> bool {
-    ["LC_ALL", "LC_MESSAGES", "LANG"]
-        .iter()
-        .filter_map(|k| std::env::var(k).ok())
-        .any(|v| v.to_ascii_lowercase().starts_with("ko"))
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +257,18 @@ mod tests {
         assert_eq!(s.default_color, "yellow");
         assert!(s.default_opacity >= 20); // 코어의 MIN_OPACITY 로 올라간다
         assert_eq!(s.merge_seconds, MERGE_SECONDS_RANGE.0);
+    }
+
+    #[test]
+    fn explicit_lang_wins_over_system_locale() {
+        let mut s = Settings::default();
+        s.lang = "en".into();
+        assert_eq!(s.effective_lang(), Lang::En);
+        s.lang = "ko".into();
+        assert_eq!(s.effective_lang(), Lang::Ko);
+        // "auto" 는 시스템 로캘로 떨어지므로 값 자체는 환경에 달렸다 — 죽지만 않으면 된다.
+        s.lang = "auto".into();
+        let _ = s.effective_lang();
     }
 
     #[test]

@@ -11,6 +11,7 @@
 //! (설령 잘못 붙어도 vault 는 E2E 암호문이라 마스터 암호 없이는 아무것도 못 읽는다.)
 
 use anyhow::{anyhow, Result};
+use ymemo_i18n::t;
 use rand::Rng;
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -209,7 +210,7 @@ fn join_to(
     targets: &[SocketAddr],
 ) -> Result<Option<String>> {
     if code.len() != 6 || !code.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(anyhow!("6자리 숫자 코드가 아닙니다"));
+        return Err(anyhow!(t!("core.bad_lan_code")));
     }
     let socket = UdpSocket::bind(("0.0.0.0", 0))?;
     socket.set_broadcast(true)?;

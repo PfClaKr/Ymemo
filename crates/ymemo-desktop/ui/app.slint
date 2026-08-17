@@ -1,4 +1,8 @@
 import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox } from "std-widgets.slint";
+// 문구는 저장소 루트 i18n/*.json 에서 build.rs 가 생성한다 (Strings 전역 = 키마다 프로퍼티 하나).
+import { Strings } from "@i18n";
+// Rust 가 문구를 채워 넣으려면 진입 파일에서 다시 내보내야 한다 (전역은 export 된 것만 보인다).
+export { Strings }
 
 // 스티커 팔레트: 색상 키("yellow"/"pink"/"green"/"blue"/"purple") → 실제 색.
 // 코어(Memo.color)는 키 문자열만 저장·동기화하고, 실제 색 해석은 여기 한곳에 모은다.
@@ -37,20 +41,6 @@ export global Palette {
     }
 }
 
-
-// UI 문구. 언어 설정에 따라 두 벌 중 하나를 고른다.
-//
-// Slint 의 gettext(`@tr`) 대신 이 방식을 쓰는 이유: .po 파일과 추출 단계 없이 두 언어가
-// 소스에 나란히 있어 번역 누락이 그 자리에서 보인다. 언어를 늘릴 땐 t() 에 인자를 추가한다.
-//
-// **주의**: Slint 전역은 컴포넌트 인스턴스마다 따로 생긴다. 창을 새로 열 때마다 Rust 가
-// lang 을 넣어 줘야 한다 (main.rs 의 `apply_lang`).
-export global Strings {
-    in-out property <string> lang: "ko";
-    pure public function t(ko: string, en: string) -> string {
-        return root.lang == "en" ? en : ko;
-    }
-}
 
 // 기기 페어링 패널.
 //  - 기본: 같은 네트워크에서 6자리 코드로 연결 (이 기기 코드 표시 + 상대 코드 입력).
@@ -111,7 +101,7 @@ component PairingPanel inherits VerticalLayout {
     if root.available: VerticalLayout {
         spacing: 8px;
         Text {
-            text: Strings.t("기기 연결", "Connect a device");
+            text: Strings.ui_pair_title;
             font-size: 13px;
             font-weight: 700;
             color: root.ink;
@@ -120,13 +110,13 @@ component PairingPanel inherits VerticalLayout {
         // ---- 연결 방식 탭 ----
         HorizontalLayout {
             TabButton {
-                label: Strings.t("같은 Wi-Fi", "Same Wi-Fi");
+                label: Strings.ui_pair_tab_lan;
                 active: !root.remote;
                 ink: root.ink;
                 clicked => { root.remote = false; }
             }
             TabButton {
-                label: Strings.t("다른 네트워크", "Other network");
+                label: Strings.ui_pair_tab_remote;
                 active: root.remote;
                 ink: root.ink;
                 clicked => { root.remote = true; }
@@ -137,7 +127,7 @@ component PairingPanel inherits VerticalLayout {
         if !root.remote: VerticalLayout {
             spacing: 6px;
             Text {
-                text: Strings.t("① 아래 6자리를 상대 기기에 입력하거나,\n② 상대 기기의 6자리를 여기에 입력하세요.", "① Enter the 6 digits below on your other device, or\n② type that device's 6 digits here.");
+                text: Strings.ui_pair_lan_hint;
                 font-size: 10px;
                 color: root.ink;
                 opacity: 0.8;
@@ -156,12 +146,12 @@ component PairingPanel inherits VerticalLayout {
             HorizontalLayout {
                 spacing: 6px;
                 lan := LineEdit {
-                    placeholder-text: Strings.t("상대 6자리 코드", "Their 6-digit code");
+                    placeholder-text: Strings.ui_pair_lan_placeholder;
                     input-type: InputType.number;
                     accepted => { root.lan-join(self.text); self.text = ""; }
                 }
                 Button {
-                    text: Strings.t("연결", "Connect");
+                    text: Strings.ui_pair_lan_connect;
                     clicked => { root.lan-join(lan.text); lan.text = ""; }
                 }
             }
@@ -177,7 +167,7 @@ component PairingPanel inherits VerticalLayout {
         if root.remote: VerticalLayout {
             spacing: 6px;
             Text {
-                text: Strings.t("다른 네트워크라면 QR 또는 아래 코드를 상대에게 전달하고,\n상대의 코드를 입력해 등록하세요.", "On a different network? Share the QR or the code below,\nthen enter their code to register.");
+                text: Strings.ui_pair_remote_hint;
                 font-size: 10px;
                 color: root.ink;
                 opacity: 0.8;
@@ -199,11 +189,11 @@ component PairingPanel inherits VerticalLayout {
             HorizontalLayout {
                 spacing: 6px;
                 peer := LineEdit {
-                    placeholder-text: Strings.t("상대 device-id...", "Their device-id…");
+                    placeholder-text: Strings.ui_pair_remote_placeholder;
                     accepted => { root.add-peer(self.text); }
                 }
                 Button {
-                    text: Strings.t("등록", "Register");
+                    text: Strings.ui_pair_remote_register;
                     clicked => { root.add-peer(peer.text); }
                 }
             }
@@ -218,13 +208,13 @@ component PairingPanel inherits VerticalLayout {
         // ---- 현재 공유 중인 기기 목록 (탭과 무관하게 항상 보인다) ----
         Rectangle { height: 1px; background: root.ink; opacity: 0.25; }
         Text {
-            text: Strings.t("공유 중인 기기", "Shared devices");
+            text: Strings.ui_pair_devices_title;
             font-size: 12px;
             font-weight: 700;
             color: root.ink;
         }
         if root.devices.length == 0: Text {
-            text: Strings.t("아직 연결된 기기가 없습니다.", "No devices connected yet.");
+            text: Strings.ui_pair_devices_empty;
             font-size: 11px;
             color: root.ink;
             opacity: 0.7;
@@ -247,13 +237,13 @@ component PairingPanel inherits VerticalLayout {
                 vertical-alignment: center;
             }
             Button {
-                text: Strings.t("해제", "Unshare");
+                text: Strings.ui_pair_unshare;
                 clicked => { root.unshare(dev.id); }
             }
         }
     }
     if !root.available: Text {
-        text: Strings.t("syncthing 을 찾지 못해 동기화가 꺼져 있습니다.", "Sync is off — syncthing was not found.");
+        text: Strings.ui_pair_unavailable;
         font-size: 12px;
         color: #d98a8a;
         wrap: word-wrap;
@@ -276,7 +266,7 @@ export struct ListRow {
 // 잠금 창: 시작 시 마스터 암호 입력. unlock 성공 후엔 숨겨진다.
 // ---------------------------------------------------------------------------
 export component LockWindow inherits Window {
-    title: Strings.t("Ymemo — 잠금", "Ymemo — Locked");
+    title: Strings.ui_lock_title;
     preferred-width: 320px;
     preferred-height: 300px;
     min-height: 200px;
@@ -364,13 +354,13 @@ export component LockWindow inherits Window {
             if root.vault-exists: HorizontalLayout {
                 spacing: 6px;
                 LineEdit {
-                    placeholder-text: Strings.t("마스터 암호...", "Master password…");
+                    placeholder-text: Strings.ui_lock_password_placeholder;
                     input-type: InputType.password;
                     text <=> root.password-text;
                     accepted => { root.unlock(self.text); }
                 }
                 Button {
-                    text: Strings.t("열기", "Open");
+                    text: Strings.ui_lock_open;
                     clicked => { root.unlock(root.password-text); }
                 }
             }
@@ -379,22 +369,22 @@ export component LockWindow inherits Window {
             if !root.vault-exists && !root.creating: VerticalLayout {
                 spacing: 8px;
                 Text {
-                    text: Strings.t("이 기기를 어떻게 시작할까요?", "How should this device start?");
+                    text: Strings.ui_lock_start_question;
                     font-size: 13px;
                     color: #f0ead6;
                     wrap: word-wrap;
                 }
                 Button {
-                    text: Strings.t("＋ 새 메모장 만들기", "＋ Create a new memo vault");
+                    text: Strings.ui_lock_create_choice;
                     clicked => { root.creating = true; }
                 }
                 Button {
-                    text: Strings.t("🔗 다른 기기와 연결", "🔗 Connect to another device");
+                    text: Strings.ui_lock_connect_choice;
                     enabled: root.sync-available;
                     clicked => { root.show-sync = true; }
                 }
                 Text {
-                    text: Strings.t("다른 기기의 메모를 함께 쓰려면 '연결'을 고르고 페어링하세요. 먼저 '새 메모장'을 만들면 서로 다른 키가 생겨 동기화되지 않습니다.", "To share memos with another device, choose 'Connect' and pair first. Creating a new vault first gives each device a different key, so they will never sync.");
+                    text: Strings.ui_lock_start_hint;
                     font-size: 11px;
                     color: #b8b2a2;
                     wrap: word-wrap;
@@ -407,17 +397,17 @@ export component LockWindow inherits Window {
                 HorizontalLayout {
                     spacing: 6px;
                     npw := LineEdit {
-                        placeholder-text: Strings.t("새 마스터 암호...", "New master password…");
+                        placeholder-text: Strings.ui_lock_new_password_placeholder;
                         input-type: InputType.password;
                         accepted => { root.create-vault(self.text); }
                     }
                     Button {
-                        text: Strings.t("만들기", "Create");
+                        text: Strings.ui_lock_create;
                         clicked => { root.create-vault(npw.text); }
                     }
                 }
                 Button {
-                    text: Strings.t("← 뒤로", "← Back");
+                    text: Strings.ui_lock_back;
                     clicked => { root.creating = false; }
                 }
             }
@@ -538,7 +528,7 @@ export component ListWindow inherits Window {
         }
 
         if !root.show-sync && root.rows.length == 0: Text {
-            text: Strings.t("메모가 없습니다. ＋ 로 메모를, 📁 로 그룹을 만드세요.\n메모를 끌어 그룹 위에 놓으면 그 안으로 들어갑니다.", "No memos yet. ＋ makes a memo, 📁 makes a group.\nDrag a memo onto a group to put it inside.");
+            text: Strings.ui_list_empty;
             font-size: 12px;
             color: #b0a99a;
             wrap: word-wrap;
@@ -637,8 +627,8 @@ export component ListWindow inherits Window {
                     }
                     if root.editing-id != row.id: Text {
                         text: row.is-group
-                            ? (row.title == "" ? Strings.t("(이름 없는 그룹)", "(Untitled group)") : row.title)
-                            : (row.title == "" ? Strings.t("(빈 메모)", "(Empty memo)") : row.title);
+                            ? (row.title == "" ? Strings.ui_list_group_untitled : row.title)
+                            : (row.title == "" ? Strings.ui_list_memo_untitled : row.title);
                         font-size: 14px;
                         font-weight: row.is-group ? 700 : 400;
                         color: row.title == "" ? #9a9384 : #ece7db;
@@ -679,7 +669,7 @@ export component ListWindow inherits Window {
 //  - 🎨 색 팔레트, ＋ 새 메모, ✕ 창 닫기(삭제 아님)
 // ---------------------------------------------------------------------------
 export component StickyWindow inherits Window {
-    title: root.memo-title == "" ? Strings.t("메모", "Memo") : root.memo-title;
+    title: root.memo-title == "" ? Strings.ui_sticky_window_title : root.memo-title;
     no-frame: true;
     always-on-top: true;
     background: #0000;
@@ -760,7 +750,7 @@ export component StickyWindow inherits Window {
                     padding-right: 6px;
                     spacing: 2px;
                     Text {
-                        text: root.memo-title == "" ? Strings.t("새 메모", "New memo") : root.memo-title;
+                        text: root.memo-title == "" ? Strings.ui_sticky_default_title : root.memo-title;
                         font-size: 13px;
                         font-weight: 700;
                         color: Palette.ink(root.sticky-color);
@@ -842,7 +832,7 @@ export component StickyWindow inherits Window {
                     HorizontalLayout {
                         spacing: 6px;
                         Text {
-                            text: Strings.t("투명도", "Opacity");
+                            text: Strings.ui_sticky_opacity;
                             font-size: 11px;
                             color: Palette.ink(root.sticky-color);
                             vertical-alignment: center;
@@ -907,7 +897,7 @@ component SettingRow inherits VerticalLayout {
 }
 
 export component SettingsWindow inherits Window {
-    title: Strings.t("Ymemo 환경설정", "Ymemo Settings");
+    title: Strings.ui_settings_window_title;
     preferred-width: 400px;
     preferred-height: 600px;
     min-width: 340px;
@@ -934,7 +924,7 @@ export component SettingsWindow inherits Window {
         spacing: 12px;
 
         Text {
-            text: Strings.t("환경설정", "Settings");
+            text: Strings.ui_settings_title;
             font-size: 16px;
             font-weight: 700;
             color: #f0ead6;
@@ -942,11 +932,11 @@ export component SettingsWindow inherits Window {
 
         // ---- 언어 ----
         SettingRow {
-            label: Strings.t("언어", "Language");
-            hint: Strings.t("‘자동’은 시스템 로캘을 따릅니다.", "‘Auto’ follows your system locale.");
+            label: Strings.ui_settings_lang;
+            hint: Strings.ui_settings_lang_hint;
             HorizontalLayout {
                 TabButton {
-                    label: Strings.t("자동", "Auto");
+                    label: Strings.ui_settings_lang_auto;
                     active: root.lang-sel == "auto";
                     ink: #d8d2c2;
                     clicked => { root.lang-sel = "auto"; }
@@ -970,8 +960,8 @@ export component SettingsWindow inherits Window {
 
         // ---- 잠금 ----
         SettingRow {
-            label: Strings.t("자동 잠금 해제 기간 (일)", "Stay unlocked for (days)");
-            hint: Strings.t("0 = 실행할 때마다 암호를 묻습니다. 1 이상이면 그 기간 동안 암호 없이 열리는데, 그러려면 이 기기에 키를 저장해 둬야 하므로 그동안은 디스크를 읽을 수 있는 사람도 메모를 볼 수 있습니다.", "0 = ask for the password every launch. Any higher value keeps the vault openable without the password for that long, which requires caching the key on this device — so anyone who can read the disk can read your memos until it expires.");
+            label: Strings.ui_settings_unlock_days;
+            hint: Strings.ui_settings_unlock_days_hint;
             SpinBox {
                 minimum: 0;
                 maximum: 365;
@@ -980,8 +970,8 @@ export component SettingsWindow inherits Window {
         }
 
         SettingRow {
-            label: Strings.t("자리 비움 자동 잠금 (분)", "Auto-lock when idle (minutes)");
-            hint: Strings.t("0 = 끄기. 앱을 이 시간 동안 건드리지 않으면 잠깁니다.", "0 = off. Locks after this long without interacting with the app.");
+            label: Strings.ui_settings_idle_minutes;
+            hint: Strings.ui_settings_idle_minutes_hint;
             SpinBox {
                 minimum: 0;
                 maximum: 1440;
@@ -991,7 +981,7 @@ export component SettingsWindow inherits Window {
 
         // ---- 새 메모 기본값 ----
         SettingRow {
-            label: Strings.t("새 메모 기본 색", "Default color for new memos");
+            label: Strings.ui_settings_default_color;
             HorizontalLayout {
                 spacing: 8px;
                 alignment: start;
@@ -1010,7 +1000,7 @@ export component SettingsWindow inherits Window {
         }
 
         SettingRow {
-            label: Strings.t("새 메모 기본 투명도", "Default opacity for new memos");
+            label: Strings.ui_settings_default_opacity;
             HorizontalLayout {
                 spacing: 6px;
                 Slider {
@@ -1033,8 +1023,8 @@ export component SettingsWindow inherits Window {
 
         // ---- 동기화 ----
         SettingRow {
-            label: Strings.t("동기화 반영 주기 (초)", "Sync refresh interval (seconds)");
-            hint: Strings.t("다른 기기의 변경을 얼마나 자주 가져올지. 짧을수록 빨리 반영되고 디스크를 더 읽습니다.", "How often to pull in changes from other devices. Shorter is faster but reads the disk more.");
+            label: Strings.ui_settings_merge_seconds;
+            hint: Strings.ui_settings_merge_seconds_hint;
             SpinBox {
                 minimum: 3;
                 maximum: 3600;
@@ -1054,17 +1044,17 @@ export component SettingsWindow inherits Window {
         HorizontalLayout {
             spacing: 6px;
             Button {
-                text: Strings.t("🔒 지금 잠그기", "🔒 Lock now");
+                text: Strings.ui_settings_lock_now;
                 enabled: root.unlocked;
                 clicked => { root.lock-now(); }
             }
             Rectangle { horizontal-stretch: 1; }
             Button {
-                text: Strings.t("닫기", "Close");
+                text: Strings.ui_settings_close;
                 clicked => { root.close-requested(); }
             }
             Button {
-                text: Strings.t("저장", "Save");
+                text: Strings.ui_settings_save;
                 primary: true;
                 clicked => { root.apply(); }
             }

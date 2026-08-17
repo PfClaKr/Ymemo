@@ -6581,6 +6581,7 @@ dependencies = [
  "serde_json",
  "ureq",
  "uuid",
+ "ymemo-i18n",
 ]
 
 [[package]]
@@ -6599,6 +6600,7 @@ dependencies = [
  "tray-icon",
  "winresource",
  "ymemo-core",
+ "ymemo-i18n",
 ]
 
 [[package]]
@@ -6607,6 +6609,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ymemo-core",
+ "ymemo-i18n",
+]
+
+[[package]]
+name = "ymemo-i18n"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]

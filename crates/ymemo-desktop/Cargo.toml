@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 ymemo-core.workspace = true
+ymemo-i18n.workspace = true
 slint.workspace = true
 i-slint-backend-winit.workspace = true
 qrcode.workspace = true
@@ -25,6 +26,9 @@ tray-icon.workspace = true
 
 [build-dependencies]
 slint-build.workspace = true
+# build.rs 가 i18n 카탈로그를 읽어 Slint 전역 + setter 를 생성한다.
+serde_json.workspace = true
+ymemo-i18n.workspace = true
 
 # Windows 전용: exe 에 아이콘/버전 리소스를 박는다 (build.rs 의 cfg(windows) 분기와 짝).
 [target.'cfg(windows)'.build-dependencies]

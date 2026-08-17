@@ -7,6 +7,7 @@
 //! salt 는 비밀이 아니며, 마스터 암호에서 같은 키를 재현하려면 반드시 함께 보관해야 한다.
 
 use anyhow::{anyhow, Result};
+use ymemo_i18n::t;
 use argon2::Argon2;
 use chacha20poly1305::{
     aead::Aead, KeyInit, XChaCha20Poly1305, XNonce,
@@ -45,14 +46,14 @@ impl MasterKey {
         let mut key = [0u8; KEY_LEN];
         Argon2::default()
             .hash_password_into(password, salt, &mut key)
-            .map_err(|e| anyhow!("Argon2id 키 유도 실패: {e}"))?;
+            .map_err(|e| anyhow!(t!("core.argon2_failed", error = e)))?;
         Self::from_bytes(&key)
     }
 
     /// 이미 유도해 둔 원시 키로 복원 (암호 없이 여는 경로).
     pub fn from_bytes(key: &[u8; KEY_LEN]) -> Result<Self> {
         let cipher = XChaCha20Poly1305::new_from_slice(key)
-            .map_err(|e| anyhow!("cipher 초기화 실패: {e}"))?;
+            .map_err(|e| anyhow!(t!("core.cipher_init_failed", error = e)))?;
         Ok(Self { raw: *key, cipher })
     }
 
@@ -75,7 +76,7 @@ impl MasterKey {
         let ciphertext = self
             .cipher
             .encrypt(nonce, plaintext)
-            .map_err(|e| anyhow!("암호화 실패: {e}"))?;
+            .map_err(|e| anyhow!(t!("core.encrypt_failed", error = e)))?;
 
         let mut out = Vec::with_capacity(NONCE_LEN + ciphertext.len());
         out.extend_from_slice(&nonce_bytes);
@@ -88,13 +89,13 @@ impl MasterKey {
     /// 키가 다르거나 데이터가 변조되면 Poly1305 인증이 실패해 에러가 난다.
     pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
         if data.len() < NONCE_LEN {
-            return Err(anyhow!("암호문이 너무 짧다 ({}B < {NONCE_LEN}B)", data.len()));
+            return Err(anyhow!(t!("core.ciphertext_too_short", len = data.len(), min = NONCE_LEN)));
         }
         let (nonce_bytes, ciphertext) = data.split_at(NONCE_LEN);
         let nonce = XNonce::from_slice(nonce_bytes);
         self.cipher
             .decrypt(nonce, ciphertext)
-            .map_err(|e| anyhow!("복호화 실패 (키 불일치 또는 변조): {e}"))
+            .map_err(|e| anyhow!(t!("core.decrypt_failed", error = e)))
     }
 }
 

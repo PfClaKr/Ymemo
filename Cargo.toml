@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ymemo-core", "crates/ymemo-desktop", "crates/ymemo-ffi"]
+members = ["crates/ymemo-core", "crates/ymemo-desktop", "crates/ymemo-ffi", "crates/ymemo-i18n"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,6 +12,7 @@ authors = ["PfClaKr"]
 # 공용 의존성. 각 crate 는 `xxx.workspace = true` 로 참조한다.
 [workspace.dependencies]
 ymemo-core = { path = "crates/ymemo-core" }
+ymemo-i18n = { path = "crates/ymemo-i18n" }
 
 # GUI (데스크탑)
 # slint 와 i-slint-backend-winit 은 반드시 같은 버전이어야 한다 (내부 크레이트 공유).

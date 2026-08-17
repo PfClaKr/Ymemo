@@ -9,6 +9,7 @@
 //! 코드는 버전 프리픽스가 붙은 단순 문자열이라 QR 로 렌더링하기 좋다.
 
 use anyhow::{bail, Result};
+use ymemo_i18n::t;
 
 /// 페어링 코드 포맷 버전 프리픽스.
 const PREFIX: &str = "YMEMO1:";
@@ -33,7 +34,7 @@ impl PairingCode {
     pub fn decode(s: &str) -> Result<Self> {
         let id = s.trim().strip_prefix(PREFIX).unwrap_or(s.trim()).trim();
         if id.len() < 7 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-            bail!("올바른 페어링 코드가 아님");
+            bail!(t!("core.bad_pairing_code"));
         }
         Ok(Self::new(id.to_ascii_uppercase()))
     }

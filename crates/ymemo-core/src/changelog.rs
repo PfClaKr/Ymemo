@@ -13,6 +13,7 @@
 //! ```
 
 use anyhow::{anyhow, Result};
+use ymemo_i18n::t;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -40,7 +41,7 @@ impl ChangeLog {
     pub fn append(&self, plaintext: &[u8]) -> Result<()> {
         let record = self.key.encrypt(plaintext)?;
         let len = u32::try_from(record.len())
-            .map_err(|_| anyhow!("레코드가 u32 범위를 넘음 ({}B)", record.len()))?;
+            .map_err(|_| anyhow!(t!("core.record_too_large", len = record.len())))?;
 
         let mut f = OpenOptions::new().create(true).append(true).open(&self.path)?;
         f.write_all(&len.to_le_bytes())?;

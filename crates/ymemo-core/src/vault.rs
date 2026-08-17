@@ -14,6 +14,7 @@
 //! actor id = device_id 이므로 자기 로그의 change 만 자기 actor 를 갖는다.
 
 use anyhow::{anyhow, bail, Context, Result};
+use ymemo_i18n::t;
 use automerge::{
     transaction::Transactable, ActorId, AutoCommit, Change, ObjId, ObjType, ReadDoc, ScalarValue,
     Value, ROOT,
@@ -58,7 +59,7 @@ impl Vault {
         let dir = dir.as_ref();
         let header_path = dir.join(HEADER_FILE);
         if header_path.exists() {
-            bail!("vault 가 이미 존재함: {}", header_path.display());
+            bail!(t!("core.vault_exists", path = header_path.display()));
         }
         fs::create_dir_all(dir)?;
 
@@ -83,7 +84,7 @@ impl Vault {
         let salt_vec = from_hex(&header.salt)?;
         let salt: Salt = salt_vec
             .try_into()
-            .map_err(|_| anyhow!("헤더의 salt 길이가 {SALT_LEN}B 가 아님"))?;
+            .map_err(|_| anyhow!(t!("core.salt_length_bad", expected = SALT_LEN)))?;
         let key = MasterKey::derive(password, &salt)?;
         verify_key(&header, &key)?;
 
@@ -306,7 +307,7 @@ impl Vault {
             let change = self
                 .doc
                 .get_last_local_change()
-                .context("커밋 직후인데 로컬 change 가 없음")?;
+                .context(t!("core.no_local_change"))?;
             self.own_log.append(change.raw_bytes())?;
         }
         Ok(())
@@ -432,7 +433,7 @@ fn heal_divergent_log(
 fn read_header(dir: &Path) -> Result<VaultHeader> {
     let path = dir.join(HEADER_FILE);
     let bytes =
-        fs::read(&path).with_context(|| format!("vault 헤더 없음: {}", path.display()))?;
+        fs::read(&path).with_context(|| t!("core.header_missing", path = path.display()))?;
     Ok(serde_json::from_slice(&bytes)?)
 }
 
@@ -440,9 +441,9 @@ fn read_header(dir: &Path) -> Result<VaultHeader> {
 fn verify_key(header: &VaultHeader, key: &MasterKey) -> Result<()> {
     let check = key
         .decrypt(&from_hex(&header.key_check)?)
-        .map_err(|_| anyhow!("암호가 틀렸습니다, 다시 입력해주세요"))?;
+        .map_err(|_| anyhow!(t!("core.wrong_password")))?;
     if check != KEY_CHECK {
-        bail!("key_check 불일치 (헤더 손상?)");
+        bail!(t!("core.key_check_mismatch"));
     }
     Ok(())
 }
@@ -509,9 +510,9 @@ fn get_str(doc: &AutoCommit, obj: &ObjId, key: &str) -> Result<String> {
     match doc.get(obj, key)? {
         Some((Value::Scalar(s), _)) => match s.as_ref() {
             ScalarValue::Str(v) => Ok(v.to_string()),
-            other => bail!("필드 {key} 가 문자열이 아님: {other:?}"),
+            other => bail!(t!("core.field_not_string", key = key, found = format!("{other:?}"))),
         },
-        _ => bail!("필드 없음: {key}"),
+        _ => bail!(t!("core.field_missing", key = key)),
     }
 }
 
@@ -541,9 +542,9 @@ fn get_i64(doc: &AutoCommit, obj: &ObjId, key: &str) -> Result<i64> {
     match doc.get(obj, key)? {
         Some((Value::Scalar(s), _)) => match s.as_ref() {
             ScalarValue::Int(v) => Ok(*v),
-            other => bail!("필드 {key} 가 정수가 아님: {other:?}"),
+            other => bail!(t!("core.field_not_int", key = key, found = format!("{other:?}"))),
         },
-        _ => bail!("필드 없음: {key}"),
+        _ => bail!(t!("core.field_missing", key = key)),
     }
 }
 
@@ -553,11 +554,11 @@ fn to_hex(bytes: &[u8]) -> String {
 
 fn from_hex(s: &str) -> Result<Vec<u8>> {
     if s.len() % 2 != 0 {
-        bail!("hex 길이가 홀수");
+        bail!(t!("core.hex_odd_length"));
     }
     (0..s.len())
         .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| anyhow!("hex 파싱 실패: {e}")))
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| anyhow!(t!("core.hex_parse_failed", error = e))))
         .collect()
 }
 

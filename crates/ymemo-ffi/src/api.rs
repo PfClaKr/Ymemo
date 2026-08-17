@@ -70,6 +70,21 @@ impl From<Group> for FfiGroup {
     }
 }
 
+/// 코어가 돌려주는 에러 메시지의 언어를 정한다 (`"ko"` / `"en"`, `"ko-KR"` 같은 로캘도 됨).
+///
+/// 모르는 값이면 시스템 로캘로 추정한다. Dart 쪽 UI 문구는 Flutter 가 따로 관리하지만,
+/// 코어 에러는 이 함수로 맞춰야 화면에서 언어가 섞이지 않는다. 다른 API 를 부르기 전에
+/// 한 번 호출하면 되고, 언어를 바꿀 때마다 다시 부르면 된다.
+pub fn set_language(code: String) {
+    let lang = ymemo_i18n::Lang::parse(&code).unwrap_or_else(ymemo_i18n::system_lang);
+    ymemo_i18n::set_lang(lang);
+}
+
+/// 지금 쓰이는 코어 메시지 언어 코드.
+pub fn language() -> String {
+    ymemo_i18n::lang().code().to_string()
+}
+
 /// vault 열기(없으면 생성). `vault_dir` 는 동기화 대상 디렉터리,
 /// `cache_db_path` 는 기기 로컬 SQLite 파일 경로.
 pub fn vault_open(vault_dir: String, cache_db_path: String, password: String) -> Result<()> {

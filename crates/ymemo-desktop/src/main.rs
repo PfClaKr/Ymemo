@@ -19,7 +19,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -32,8 +31,12 @@ use ymemo_core::{
 };
 
 use settings::Settings;
+use ymemo_i18n::t;
 
 slint::include_modules!();
+
+// build.rs 가 i18n 카탈로그에서 만든 `apply_strings` (Slint 전역 Strings 채우기).
+include!(concat!(env!("OUT_DIR"), "/i18n_apply.rs"));
 
 mod settings;
 mod tray;
@@ -101,19 +104,6 @@ fn touch(ctx: &Ctx) {
 // slint 컴포넌트는 Send 가 아니라 클로저에 직접 캡처할 수 없다.
 thread_local! {
     static APP: RefCell<Option<AppUi>> = const { RefCell::new(None) };
-}
-
-/// 트레이 메뉴 문구용 언어 플래그. 트레이 백엔드는 Slint 전역(`Strings`)에 닿을 수 없어
-/// (다른 스레드에서 메뉴를 그린다) 이 원자 값을 본다. `apply_lang` 이 유일한 기록자.
-static TRAY_LANG_EN: AtomicBool = AtomicBool::new(false);
-
-/// 트레이 메뉴 문구를 현재 언어로 고른다.
-pub(crate) fn tray_text(ko: &str, en: &str) -> String {
-    if TRAY_LANG_EN.load(Ordering::Relaxed) {
-        en.to_string()
-    } else {
-        ko.to_string()
-    }
 }
 
 
@@ -276,13 +266,13 @@ fn main() -> Result<()> {
         lock.on_unlock(move |password| {
             let lock = lock_weak.unwrap();
             if password.is_empty() {
-                lock.set_lock_message("암호를 입력하세요".into());
+                lock.set_lock_message(t!("msg.enter_password").into());
                 return;
             }
             let store = match Store::open(dir.join("ymemo.db")) {
                 Ok(s) => s,
                 Err(e) => {
-                    lock.set_lock_message(SharedString::from(format!("캐시 열기 실패: {e}")));
+                    lock.set_lock_message(SharedString::from(t!("msg.cache_open_failed", error = e)));
                     return;
                 }
             };
@@ -306,13 +296,13 @@ fn main() -> Result<()> {
         lock.on_create_vault(move |password| {
             let lock = lock_weak.unwrap();
             if password.is_empty() {
-                lock.set_lock_message("새 마스터 암호를 입력하세요".into());
+                lock.set_lock_message(t!("msg.enter_new_password").into());
                 return;
             }
             let store = match Store::open(dir.join("ymemo.db")) {
                 Ok(s) => s,
                 Err(e) => {
-                    lock.set_lock_message(SharedString::from(format!("캐시 열기 실패: {e}")));
+                    lock.set_lock_message(SharedString::from(t!("msg.cache_open_failed", error = e)));
                     return;
                 }
             };
@@ -375,7 +365,7 @@ fn main() -> Result<()> {
         let list_weak = list.as_weak();
         list.on_new_group(move || {
             touch(&ctx);
-            let group = ymemo_core::Group::new("새 그룹");
+            let group = ymemo_core::Group::new(&t!("msg.new_group_name"));
             {
                 let mut guard = ctx.vault.borrow_mut();
                 let Some(v) = guard.as_mut() else { return };
@@ -470,10 +460,10 @@ fn main() -> Result<()> {
                 };
                 let code = code.trim().to_string();
                 if code.len() != 6 || !code.bytes().all(|b| b.is_ascii_digit()) {
-                    set_msg("6자리 숫자를 입력하세요");
+                    set_msg(&t!("msg.enter_six_digits"));
                     return;
                 }
-                set_msg("연결 중...");
+                set_msg(&t!("msg.connecting"));
                 let join_tx = join_tx.clone();
                 std::thread::spawn(move || {
                     let res = lan_pair::join(&code, &my_id, Duration::from_secs(6))
@@ -518,7 +508,7 @@ fn main() -> Result<()> {
             while let Ok(res) = join_rx.try_recv() {
                 match res {
                     Ok(Some(peer)) => set_msg(register_peer(&syncthing, &peer)),
-                    Ok(None) => set_msg("주변에서 그 코드를 쓰는 기기를 못 찾았습니다".into()),
+                    Ok(None) => set_msg(t!("msg.lan_peer_not_found")),
                     Err(e) => set_msg(e),
                 }
             }
@@ -539,7 +529,7 @@ fn main() -> Result<()> {
             if let Some(lock) = lock_weak.upgrade() {
                 lock.set_vault_exists(true);
                 lock.set_show_sync(false);
-                lock.set_lock_message("다른 기기와 연결됨 — 마스터 암호를 입력하세요".into());
+                lock.set_lock_message(t!("msg.paired_enter_password").into());
             }
         });
     }
@@ -580,10 +570,10 @@ fn main() -> Result<()> {
         let unshare = move |id: SharedString| {
             let msg = match syncthing.borrow().as_ref() {
                 Some(st) => match st.unshare_folder_with(SYNC_FOLDER_ID, id.as_str()) {
-                    Ok(()) => "공유를 해제했습니다".to_string(),
-                    Err(e) => format!("해제 실패: {e}"),
+                    Ok(()) => t!("msg.unshared"),
+                    Err(e) => t!("msg.unshare_failed", error = e),
                 },
-                None => "동기화가 꺼져 있습니다".to_string(),
+                None => t!("msg.sync_off"),
             };
             let msg = SharedString::from(msg);
             if let Some(w) = lock_w.upgrade() {
@@ -689,20 +679,13 @@ fn main() -> Result<()> {
 
             // 자동 해제 기간을 줄였거나 껐다면 이미 남아 있는 세션이 그 정책을 어긴다.
             // 가장 안전한 쪽으로: 세션을 버리고 다음 실행 때 암호를 다시 받는다.
-            if next.unlock_days != prev_unlock_days {
+            let status = if next.unlock_days != prev_unlock_days {
                 settings::clear_session(&ctx.dir);
-                w.set_status(SharedString::from(
-                    w.global::<Strings>().invoke_t(
-                        "저장했습니다. 자동 해제 기간이 바뀌어, 다음 실행 때 암호를 한 번 더 묻습니다.".into(),
-                        "Saved. The auto-unlock period changed, so you will be asked for the password once on next launch.".into(),
-                    ),
-                ));
+                t!("msg.settings_saved_relock")
             } else {
-                w.set_status(SharedString::from(w.global::<Strings>().invoke_t(
-                    "저장했습니다.".into(),
-                    "Saved.".into(),
-                )));
-            }
+                t!("msg.settings_saved")
+            };
+            w.set_status(SharedString::from(status));
         });
     }
     {
@@ -899,10 +882,8 @@ fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     }
 
     let window = StickyWindow::new()?;
-    // 전역은 인스턴스마다 새로 생기므로, 새 스티커에도 현재 언어를 넣어 준다.
-    window
-        .global::<Strings>()
-        .set_lang(SharedString::from(ctx.settings.borrow().effective_lang()));
+    // 전역은 인스턴스마다 새로 생기므로, 새 스티커에도 현재 문구를 넣어 준다.
+    apply_strings(&window.global::<Strings>());
     window.set_memo_title(SharedString::from(memo.title.clone()));
     window.set_memo_text(SharedString::from(sticky_text(memo)));
     window.set_sticky_color(SharedString::from(memo.color.clone()));
@@ -1373,15 +1354,14 @@ fn fill_settings_window(ctx: &Ctx, win: &SettingsWindow) {
 /// 옛 언어로 남는다. 스티커는 열려 있는 것 전부를 돌고, 이후 새로 열리는 스티커는
 /// `open_sticky` 가 생성 직후 직접 넣는다.
 fn apply_lang(ctx: &Ctx, lock: &LockWindow, list: &ListWindow, settings_win: &SettingsWindow) {
-    let effective = ctx.settings.borrow().effective_lang();
-    // 트레이 메뉴는 Slint 밖(다른 스레드)에서 그려지므로 전역 플래그로 언어를 넘긴다.
-    TRAY_LANG_EN.store(effective == "en", Ordering::Relaxed);
-    let lang = SharedString::from(effective);
-    lock.global::<Strings>().set_lang(lang.clone());
-    list.global::<Strings>().set_lang(lang.clone());
-    settings_win.global::<Strings>().set_lang(lang.clone());
+    // 카탈로그의 현재 언어를 먼저 바꾼다 — 이후 t!/apply_strings 가 모두 이걸 본다.
+    // (코어와 트레이도 같은 전역을 보므로 별도 통지가 필요 없다.)
+    ymemo_i18n::set_lang(ctx.settings.borrow().effective_lang());
+    apply_strings(&lock.global::<Strings>());
+    apply_strings(&list.global::<Strings>());
+    apply_strings(&settings_win.global::<Strings>());
     for entry in ctx.stickies.borrow().values() {
-        entry.window.global::<Strings>().set_lang(lang.clone());
+        apply_strings(&entry.window.global::<Strings>());
     }
 }
 
@@ -1613,8 +1593,8 @@ fn pairing_handler(
         let Some(st) = guard.as_ref() else { return };
         let msg = match PairingCode::decode(&code) {
             Ok(peer) => match st.share_folder_with(SYNC_FOLDER_ID, &peer.syncthing_device_id) {
-                Ok(()) => "등록 완료. 상대 기기에서도 이 코드를 등록하세요.".to_string(),
-                Err(e) => format!("등록 실패: {e}"),
+                Ok(()) => t!("msg.register_done"),
+                Err(e) => t!("msg.register_failed", error = e),
             },
             Err(e) => format!("{e}"),
         };
@@ -1626,11 +1606,11 @@ fn pairing_handler(
 fn register_peer(syncthing: &Rc<RefCell<Option<Syncthing>>>, peer_id: &str) -> String {
     let guard = syncthing.borrow();
     let Some(st) = guard.as_ref() else {
-        return "동기화가 꺼져 있어 등록할 수 없습니다".to_string();
+        return t!("msg.sync_off_cannot_register");
     };
     match st.share_folder_with(SYNC_FOLDER_ID, peer_id) {
-        Ok(()) => "기기를 연결했습니다.".to_string(),
-        Err(e) => format!("등록 실패: {e}"),
+        Ok(()) => t!("msg.lan_connected"),
+        Err(e) => t!("msg.register_failed", error = e),
     }
 }
 
