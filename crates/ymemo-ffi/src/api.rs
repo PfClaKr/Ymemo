@@ -86,6 +86,39 @@ pub fn language() -> String {
     ymemo_i18n::lang().code().to_string()
 }
 
+/// 모바일 UI 문구 한 벌 (현재 언어). Dart 가 시작할 때 한 번 받아 들고 쓴다.
+///
+/// 문구를 Dart 에 따로 두면 언어가 갈라진다 — 코어 에러는 카탈로그, 화면 문구는
+/// 하드코딩이 되어 한쪽만 번역된다. 키를 **Rust 에서** 읽어 넘기므로 `ymemo-i18n` 의
+/// "코드가 쓰는 키가 카탈로그에 있는지" 테스트가 모바일 문구까지 함께 지켜 준다.
+/// (언어를 바꾼 뒤엔 [`set_language`] 를 부르고 이걸 다시 받으면 된다.)
+pub struct FfiStrings {
+    pub body_hint: String,
+    pub list_title: String,
+    pub master_password: String,
+    pub new_memo: String,
+    pub opening: String,
+    pub save: String,
+    pub sync_now: String,
+    pub title_hint: String,
+    pub unlock: String,
+}
+
+/// 현재 언어의 모바일 문구를 모아 돌려준다.
+pub fn mobile_strings() -> FfiStrings {
+    FfiStrings {
+        body_hint: t!("mobile.body_hint"),
+        list_title: t!("mobile.list_title"),
+        master_password: t!("mobile.master_password"),
+        new_memo: t!("mobile.new_memo"),
+        opening: t!("mobile.opening"),
+        save: t!("mobile.save"),
+        sync_now: t!("mobile.sync_now"),
+        title_hint: t!("mobile.title_hint"),
+        unlock: t!("mobile.unlock"),
+    }
+}
+
 /// vault 열기(없으면 생성). `vault_dir` 는 동기화 대상 디렉터리,
 /// `cache_db_path` 는 기기 로컬 SQLite 파일 경로.
 pub fn vault_open(vault_dir: String, cache_db_path: String, password: String) -> Result<()> {
