@@ -63,7 +63,7 @@ Ymemo/
 │   │   └── src/          # main(배선) · state · sticky · list · lock · pairing · sync · tray
 │   ├── ymemo-i18n/       # 카탈로그 로더 (t! 매크로)
 │   └── ymemo-ffi/        # 모바일용 FFI (flutter_rust_bridge)
-├── apps/mobile/          # Flutter 앱 (스캐폴딩)
+├── apps/mobile/          # Flutter 앱 (Android 착수 단계)
 └── packaging/            # .deb / .rpm / Inno Setup 스크립트 + 아이콘
 ```
 
