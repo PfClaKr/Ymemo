@@ -230,9 +230,11 @@ mod tests {
     #[test]
     fn settings_roundtrip_and_defaults() {
         let dir = temp_dir();
-        let mut s = Settings::default();
-        s.lang = "en".into();
-        s.unlock_days = 7;
+        let s = Settings {
+            lang: "en".into(),
+            unlock_days: 7,
+            ..Settings::default()
+        };
         s.save(&dir);
         assert_eq!(Settings::load(&dir), s);
         fs::remove_file(dir.join(SETTINGS_FILE)).ok();
@@ -261,8 +263,10 @@ mod tests {
 
     #[test]
     fn explicit_lang_wins_over_system_locale() {
-        let mut s = Settings::default();
-        s.lang = "en".into();
+        let mut s = Settings {
+            lang: "en".into(),
+            ..Settings::default()
+        };
         assert_eq!(s.effective_lang(), Lang::En);
         s.lang = "ko".into();
         assert_eq!(s.effective_lang(), Lang::Ko);

@@ -1,8 +1,11 @@
 //! Ymemo 공유 코어.
 //!
-//! 데스크탑(Slint)과 모바일(Flutter, 향후 FFI)이 함께 쓰는 순수 Rust 라이브러리.
-//! 현재는 데이터 모델 + 로컬 SQLite 저장소만 담는다.
-//! 이후 단계에서 CRDT 병합, E2E 암호화, Syncthing 기반 동기화가 이 crate 에 추가된다.
+//! 데스크탑(Slint)과 모바일(Flutter, `ymemo-ffi` 경유)이 함께 쓰는 순수 Rust 라이브러리.
+//!
+//! 이 파일은 데이터 모델([`Memo`]·[`Group`])과 로컬 SQLite 캐시([`Store`])를 담는다.
+//! 그 위 계층은 형제 모듈에 있다 — [`crypto`] (키 유도·AEAD), [`changelog`] (암호화 append-only 로그),
+//! [`vault`] (automerge 병합 + 캐시 재구축), [`sync`] (Syncthing 제어),
+//! [`pairing`]·[`lan_pair`] (기기 연결).
 
 pub mod changelog;
 pub mod crypto;
@@ -63,7 +66,7 @@ impl Memo {
 /// 메모를 담는 그룹(폴더). `parent_id` 로 폴더 안의 폴더를 표현한다.
 ///
 /// 동시 편집으로 부모 관계가 순환할 수 있으므로(A→B, B→A), 트리를 구성하는 쪽에서
-/// 순환을 감지해 끊어야 한다 — [`Store::group_tree_roots`] 참고.
+/// 순환을 감지해 끊어야 한다 — [`group_children`] 참고.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Group {
     pub id: String,
