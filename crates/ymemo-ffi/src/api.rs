@@ -11,7 +11,7 @@
 use std::sync::Mutex;
 
 use anyhow::{anyhow, Result};
-use ymemo_core::{now_millis, pairing::PairingCode, vault::Vault, Group, Memo, Store};
+use ymemo_core::{now_millis, pairing::PairingCode, vault::Vault, Attachment, Group, Memo, Store};
 use ymemo_i18n::t;
 
 /// 열린 vault (앱 프로세스당 하나).
@@ -46,6 +46,40 @@ impl From<Memo> for FfiMemo {
             group_id: m.group_id,
             created_at: m.created_at,
             updated_at: m.updated_at,
+        }
+    }
+}
+
+/// Dart 로 넘기는 첨부 사진 표현.
+///
+/// 바이트는 들어 있지 않다 — 사진은 수 MB 라 목록마다 실어 나르면 낭비다.
+/// 그릴 때 [`attachment_bytes`] 로 해시를 주고 따로 받는다.
+pub struct FfiAttachment {
+    pub id: String,
+    pub memo_id: String,
+    pub hash: String,
+    pub name: String,
+    pub mime: String,
+    /// 원본 픽셀 크기 (비율 계산용, 모르면 0).
+    pub width_px: i64,
+    pub height_px: i64,
+    /// 표시 너비 (em 의 1/1000). 실제 픽셀 = 이 값/1000 × 이 플랫폼 기본 폰트 px.
+    pub width_em_milli: i64,
+    pub created_at: i64,
+}
+
+impl From<Attachment> for FfiAttachment {
+    fn from(a: Attachment) -> Self {
+        Self {
+            id: a.id,
+            memo_id: a.memo_id,
+            hash: a.hash,
+            name: a.name,
+            mime: a.mime,
+            width_px: a.width_px,
+            height_px: a.height_px,
+            width_em_milli: a.width_em_milli,
+            created_at: a.created_at,
         }
     }
 }
@@ -93,12 +127,24 @@ pub fn language() -> String {
 /// "코드가 쓰는 키가 카탈로그에 있는지" 테스트가 모바일 문구까지 함께 지켜 준다.
 /// (언어를 바꾼 뒤엔 [`set_language`] 를 부르고 이걸 다시 받으면 된다.)
 pub struct FfiStrings {
+    pub add_photo: String,
     pub body_hint: String,
+    pub camera_error: String,
+    pub close: String,
     pub list_title: String,
     pub master_password: String,
     pub new_memo: String,
     pub opening: String,
+    pub photo_camera: String,
+    pub photo_gallery: String,
+    pub photo_missing: String,
+    pub photo_remove: String,
+    pub photo_size: String,
     pub save: String,
+    pub scan_hint: String,
+    pub scan_pairing_unavailable: String,
+    pub scan_qr: String,
+    pub scan_result: String,
     pub sync_now: String,
     pub title_hint: String,
     pub unlock: String,
@@ -107,12 +153,24 @@ pub struct FfiStrings {
 /// 현재 언어의 모바일 문구를 모아 돌려준다.
 pub fn mobile_strings() -> FfiStrings {
     FfiStrings {
+        add_photo: t!("mobile.add_photo"),
         body_hint: t!("mobile.body_hint"),
+        camera_error: t!("mobile.camera_error"),
+        close: t!("mobile.close"),
         list_title: t!("mobile.list_title"),
         master_password: t!("mobile.master_password"),
         new_memo: t!("mobile.new_memo"),
         opening: t!("mobile.opening"),
+        photo_camera: t!("mobile.photo_camera"),
+        photo_gallery: t!("mobile.photo_gallery"),
+        photo_missing: t!("mobile.photo_missing"),
+        photo_remove: t!("mobile.photo_remove"),
+        photo_size: t!("mobile.photo_size"),
         save: t!("mobile.save"),
+        scan_hint: t!("mobile.scan_hint"),
+        scan_pairing_unavailable: t!("mobile.scan_pairing_unavailable"),
+        scan_qr: t!("mobile.scan_qr"),
+        scan_result: t!("mobile.scan_result"),
         sync_now: t!("mobile.sync_now"),
         title_hint: t!("mobile.title_hint"),
         unlock: t!("mobile.unlock"),
@@ -204,6 +262,55 @@ pub fn memo_set_group(id: String, group_id: String) -> Result<()> {
     })
 }
 
+/// 한 메모에 붙은 사진 목록 (붙인 순서).
+pub fn attachment_list(memo_id: String) -> Result<Vec<FfiAttachment>> {
+    with_vault(|v| {
+        Ok(v.store()
+            .attachments_of(&memo_id)?
+            .into_iter()
+            .map(FfiAttachment::from)
+            .collect())
+    })
+}
+
+/// 사진을 메모에 붙인다. `data` 는 **원본 파일 바이트 그대로**.
+///
+/// `width_px`/`height_px` 는 Dart 가 디코딩해서 넘긴다(코어에 이미지 디코더를 두지
+/// 않는다). 모르면 0 — 그 경우 표시 비율이 1:1 로 취급된다.
+pub fn attachment_add(
+    memo_id: String,
+    data: Vec<u8>,
+    name: String,
+    mime: String,
+    width_px: i64,
+    height_px: i64,
+) -> Result<FfiAttachment> {
+    with_vault(|v| {
+        Ok(v.attach(&memo_id, &data, &name, &mime, width_px, height_px)?
+            .into())
+    })
+}
+
+/// 사진 바이트(평문). 아직 동기화가 안 됐으면 에러 — UI 는 자리표시자를 그리면 된다.
+pub fn attachment_bytes(hash: String) -> Result<Vec<u8>> {
+    with_vault(|v| v.attachment_bytes(&hash))
+}
+
+/// 이 기기에 사진 파일이 도착했는가 (없으면 바이트를 청하지 말 것).
+pub fn attachment_has_blob(hash: String) -> Result<bool> {
+    with_vault(|v| Ok(v.has_blob(&hash)))
+}
+
+/// 표시 너비 변경 (em 의 1/1000). 다른 기기에도 같은 비율로 반영된다.
+pub fn attachment_set_width(id: String, width_em_milli: i64) -> Result<()> {
+    with_vault(|v| v.set_attachment_width(&id, width_em_milli))
+}
+
+/// 메모에서 사진을 뗀다. blob 파일은 남는다(GC 없음).
+pub fn attachment_remove(id: String) -> Result<()> {
+    with_vault(|v| v.detach(&id))
+}
+
 /// 전체 그룹 목록 (이름순).
 pub fn group_list() -> Result<Vec<FfiGroup>> {
     with_vault(|v| Ok(v.store().list_groups()?.into_iter().map(FfiGroup::from).collect()))
@@ -270,10 +377,20 @@ pub fn pairing_decode(code: String) -> Result<String> {
 mod tests {
     use super::*;
 
+    /// 이 crate 의 vault 는 **프로세스 전역**이라, 각자 vault 를 여는 테스트들이
+    /// 병렬로 돌면 서로의 상태를 덮어쓴다. 그래서 vault 를 쓰는 테스트는 이 잠금을 잡는다.
+    /// (실패로 poison 돼도 그대로 이어 쓴다 — 테스트 격리에만 쓰는 잠금이다.)
+    static VAULT_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_vault_for_test() -> std::sync::MutexGuard<'static, ()> {
+        VAULT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// FFI 표면 왕복: open → upsert → list → update → delete → close.
     /// (전역 VAULT 를 쓰므로 시나리오를 한 테스트에 몰아넣는다)
     #[test]
     fn ffi_surface_roundtrip() {
+        let _guard = lock_vault_for_test();
         let base = std::env::temp_dir().join(format!("ymemo-ffi-{}", uuid_like()));
         std::fs::create_dir_all(&base).unwrap();
         let vault_dir = base.join("vault");
@@ -322,6 +439,47 @@ mod tests {
         assert!(memo_list().unwrap().is_empty());
         vault_close().unwrap();
 
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// 첨부 FFI 표면: 붙이기 → 목록 → 크기 변경 → 바이트 → 떼기.
+    #[test]
+    fn attachment_surface_roundtrip() {
+        let _guard = lock_vault_for_test();
+        let base = std::env::temp_dir().join(format!("ymemo-ffi-att-{}", uuid_like()));
+        std::fs::create_dir_all(&base).unwrap();
+        vault_open(
+            base.join("vault").to_string_lossy().into(),
+            base.join("cache.db").to_string_lossy().into(),
+            "pw".into(),
+        )
+        .unwrap();
+
+        let memo_id = memo_upsert(None, "사진 메모".into(), "".into()).unwrap();
+        let photo = b"fake jpeg bytes".repeat(20);
+        let a = attachment_add(
+            memo_id.clone(),
+            photo.clone(),
+            "p.jpg".into(),
+            "image/jpeg".into(),
+            1200,
+            800,
+        )
+        .unwrap();
+        assert!(attachment_has_blob(a.hash.clone()).unwrap());
+        assert_eq!(attachment_bytes(a.hash.clone()).unwrap(), photo);
+
+        let listed = attachment_list(memo_id.clone()).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].width_em_milli, ymemo_core::DEFAULT_WIDTH_EM_MILLI);
+
+        attachment_set_width(a.id.clone(), 6_000).unwrap();
+        assert_eq!(attachment_list(memo_id.clone()).unwrap()[0].width_em_milli, 6_000);
+
+        attachment_remove(a.id).unwrap();
+        assert!(attachment_list(memo_id).unwrap().is_empty());
+
+        vault_close().unwrap();
         std::fs::remove_dir_all(&base).ok();
     }
 

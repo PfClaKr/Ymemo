@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/ymemo-core", "crates/ymemo-desktop", "crates/ymemo-ffi", "crates/ymemo-i18n"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.8.0"
 edition = "2021"
 license = "GPL-3.0-only"
 repository = "https://github.com/PfClaKr/Ymemo"
@@ -22,6 +22,12 @@ slint = { version = "1.17", features = ["renderer-software"] }
 slint-build = "1.17"
 i-slint-backend-winit = "1.17" # 무프레임 창의 네이티브 드래그(drag_window) 접근용
 qrcode = { version = "0.14", default-features = false } # 페어링 QR (렌더링은 slint 이미지로 직접)
+# 첨부 사진 디코딩 (슬린트에 넘길 RGBA 로). 코덱은 폰·카메라가 내놓는 두 가지만 켠다 —
+# 기본 기능을 다 켜면 빌드가 무거워지고 쓰지 않는 포맷까지 딸려온다.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+# 사진 고르기 대화상자. Linux 는 xdg-desktop-portal(순수 Rust, 시스템 GTK 불필요),
+# Windows 는 네이티브 대화상자를 쓴다 — CI 에 새 시스템 패키지를 요구하지 않기 위한 선택.
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
 # 트레이 아이콘 (플랫폼별, ymemo-desktop 에서 cfg 로 갈라 쓴다)
 #  - Linux: ksni — StatusNotifierItem (zbus 기반 순수 Rust, libdbus/gtk 불필요)
 #  - Windows: tray-icon — Shell_NotifyIcon. default-features off 로 gtk/libxdo(리눅스 C 의존) 제외
@@ -42,9 +48,14 @@ automerge = "0.10"
 chacha20poly1305 = "0.10" # XChaCha20-Poly1305 AEAD (24B nonce)
 argon2 = "0.5"            # Argon2id 키 유도
 rand = "0.8"              # salt/nonce 생성 (OsRng)
+sha2 = "0.10"             # blob 내용해시 (파일 이름 + convergent nonce 유도)
 
 # Syncthing REST 제어용 HTTP 클라이언트 (localhost 전용이라 TLS 불필요)
 ureq = { version = "3", default-features = false, features = ["json"] }
+
+# Flutter 바인딩 런타임. 생성기(CLI)·Dart 패키지와 **세 곳의 버전이 같아야** 하므로
+# 캐럿 없이 못 박는다 (apps/mobile/pubspec.yaml 참조).
+flutter_rust_bridge = "=2.11.1"
 
 # 공통 유틸
 anyhow = "1"

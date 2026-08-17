@@ -2,37 +2,108 @@
 
 Rust 코어(`crates/ymemo-ffi`)를 `flutter_rust_bridge` 로 쓰는 Android/iOS 앱.
 
-이 디렉터리는 **소스만** 커밋한다. 플랫폼 디렉터리(`android/`, `ios/`)와
-바인딩 생성물(`lib/src/rust/`, `crates/ymemo-ffi/src/frb_generated.rs`)은
-아래 절차로 로컬/CI 에서 생성한다.
+플랫폼 디렉터리(`android/`)와 바인딩 생성물(`lib/src/rust/`,
+`crates/ymemo-ffi/src/frb_generated.rs`)은 아래 절차로 만든 뒤 **커밋한다** —
+codegen 이 `ymemo-ffi` 의 `lib.rs`·`Cargo.toml` 까지 고치므로, 생성물을 빼 두면
+Flutter 가 없는 CI 에서 `cargo test --workspace` 가 깨진다. `build/`·`.gradle/`·
+`jniLibs/` 처럼 순수 빌드 산출물만 gitignore 한다.
 
 ## 최초 설정
 
-```bash
-# 1. 도구 설치
-#    Flutter SDK: https://docs.flutter.dev/get-started/install
-cargo install flutter_rust_bridge_codegen cargo-ndk
+한 번만 하면 되는 절차다. 순서를 지킬 것 — 특히 codegen CLI 버전.
 
-# 2. 플랫폼 디렉터리 생성 (apps/mobile 에서)
-flutter create --platforms=android,ios --org dev.ymemo --project-name ymemo_mobile .
+```bash
+# 1. 시스템 도구 (WSL/Ubuntu 기준)
+sudo apt install -y openjdk-17-jdk unzip     # Gradle 8 은 JDK 17
+#    Flutter SDK: https://docs.flutter.dev/get-started/install/linux
+#      (snap 말고 tar 를 풀어 PATH 에. 설치 후 `flutter doctor --android-licenses`)
+#    Android SDK/NDK: Android Studio 또는 cmdline-tools. NDK 경로를 ANDROID_NDK_HOME 에.
+
+# 2. Rust 쪽 (CI 의 android-libs 잡과 같은 조합)
+rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+cargo install cargo-ndk
+# CLI 는 pubspec.yaml 의 flutter_rust_bridge 와 **정확히 같은 버전**이어야 한다.
+cargo install flutter_rust_bridge_codegen --version 2.11.1
+
+# 3. 플랫폼 디렉터리 생성 (apps/mobile 에서)
+#    주의: flutter create 가 lib/main.dart·pubspec.yaml 을 덮어쓸 수 있다.
+#    실행 뒤 반드시 `git status` 로 확인하고, 덮였으면 `git checkout --` 로 되돌릴 것.
+flutter create --platforms=android --org dev.ymemo --project-name ymemo_mobile .
 flutter pub get
 
-# 3. Dart/Rust 바인딩 생성 (설정: flutter_rust_bridge.yaml)
+# 4. Dart/Rust 바인딩 생성 (설정: flutter_rust_bridge.yaml)
 flutter_rust_bridge_codegen generate
+
+# 5. 생성 결과를 한 커밋으로 남긴다 (Cargo.toml/lib.rs 변경도 함께!)
+cd ../.. && cargo test -p ymemo-ffi   # 바인딩이 붙은 채로 컴파일되는지 먼저 확인
 ```
 
 ## Android 실행/빌드
 
 ```bash
-# Rust → .so (NDK 필요, ANDROID_NDK_HOME 설정)
-cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \
-  -o android/app/src/main/jniLibs build --release -p ymemo-ffi
+# Rust → .so (NDK 필요, ANDROID_NDK_HOME 설정).
+# 개발 중엔 쓰는 기기의 ABI 하나만 굽는 게 훨씬 빠르다 (실기기 대부분 arm64-v8a,
+# 에뮬레이터는 x86_64). --release 없이 디버그로 구우면 빌드가 더 빠르다.
+cargo ndk -t arm64-v8a -o android/app/src/main/jniLibs build -p ymemo-ffi
 
 flutter run            # 연결된 기기/에뮬레이터
-flutter build apk      # 릴리스 APK
 ```
 
+릴리스 APK 는 세 ABI 를 다 굽고 만든다:
+
+```bash
+cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \
+  -o android/app/src/main/jniLibs build --release -p ymemo-ffi
+flutter build apk
+```
+
+> Dart 를 고칠 때마다 `.so` 를 다시 구울 필요는 없지만, **Rust 를 고치면 반드시 다시 구워야
+> 한다** — gradle 은 아직 Rust 를 모른다(cargokit 미적용, 아래 "남은 일").
+
+### 에뮬레이터 (헤드리스, WSL2 에서 검증됨)
+
+창 없이 띄우고 `adb` 로 조작·캡처하는 방식이라 WSLg 없이도 되고 메모리도 덜 먹는다.
+
+```bash
+# 1. 준비 (한 번만). KVM 가속에 /dev/kvm 접근 권한이 필요하다:
+#    sudo usermod -aG kvm $USER   (적용은 WSL 재시작 후. 즉시 쓰려면 sudo chmod 666 /dev/kvm)
+sdkmanager "emulator" "system-images;android-36;google_apis;x86_64"
+avdmanager create avd -n ymemo -k "system-images;android-36;google_apis;x86_64" -d pixel_6
+
+# 2. 기동 → 부팅 대기
+emulator -avd ymemo -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -memory 4096 &
+adb wait-for-device && until [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; do sleep 5; done
+
+# 3. 설치 → 실행 → 화면 확인
+cargo ndk -t x86_64 -o android/app/src/main/jniLibs build -p ymemo-ffi
+flutter build apk --debug --target-platform android-x64
+adb install -r build/app/outputs/flutter-apk/app-debug.apk
+adb shell am start -n dev.ymemo.ymemo_mobile/.MainActivity
+adb exec-out screencap -p > /tmp/shot.png      # 화면 캡처
+adb shell input tap 540 1212                   # 좌표는 1080x2400 기준
+adb shell input text "hunter2"                 # 공백은 %s 로 넣는다
+```
+
+vault 가 실제로 기기에 생겼는지는 앱 전용 디렉터리에서 확인한다(디버그 빌드만 가능):
+
+```bash
+adb shell run-as dev.ymemo.ymemo_mobile ls -l app_flutter/vault app_flutter/vault/logs
+# vault.json (salt + key_check) + logs/<uuid>.ymlog (암호화된 change 로그)
+```
+
+에뮬레이터 종료: `adb emu kill`
+
+### WSL2 에서 실기기 붙이기
+
+- **실기기(권장)** — Android 11+ 의 무선 디버깅으로 `adb pair` → `adb connect`.
+  USB 로 하려면 Windows 쪽 `usbipd-win` 으로 장치를 WSL 에 넘겨야 한다.
+- **에뮬레이터** — 이 머신은 `/dev/kvm` 이 있어 WSL 안에서도 뜨지만 메모리를 많이 먹는다.
+  WSL 에 할당된 RAM 이 8GB 미만이면 `.wslconfig` 에서 늘리거나 실기기를 쓸 것.
+
 ## iOS 실행/빌드 (macOS)
+
+iOS 는 아직 착수하지 않았다. 시작할 때 플랫폼 디렉터리부터 만든다
+(`flutter create --platforms=ios .`) — 그때 `android/` 와 같은 이유로 커밋 대상이 된다.
 
 ```bash
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim

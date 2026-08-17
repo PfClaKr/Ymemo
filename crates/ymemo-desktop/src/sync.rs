@@ -63,6 +63,10 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
                             entry.window.set_memo_title(m.title.into());
                             entry.window.set_sticky_color(m.color.into());
                             entry.window.set_sticky_opacity(m.opacity as f32);
+                            // 다른 기기가 사진을 붙였거나 크기를 바꿨을 수 있다.
+                            entry.window.set_photos(slint::ModelRc::new(slint::VecModel::from(
+                                crate::sticky::photo_rows(&ctx, id),
+                            )));
                             entry.window.window().request_redraw();
                         }
                         // 다른 기기에서 삭제됨 → 창만 숨긴다 (제거는 다음 닫기에서).
