@@ -91,6 +91,7 @@
   "ui.settings_title": "Settings",
   "ui.settings_unlock_days": "Stay unlocked for (days)",
   "ui.settings_unlock_days_hint": "0 = ask for the password every launch. Any higher value keeps the vault openable without the password for that long, which requires caching the key on this device — so anyone who can read the disk can read your memos until it expires.",
+  "ui.settings_version": "Version",
   "ui.settings_window_title": "Ymemo Settings",
   "ui.sticky_default_title": "New memo",
   "ui.sticky_opacity": "Opacity",

@@ -16,6 +16,8 @@ use crate::{apply_strings, ListWindow, LockWindow, SettingsWindow, Strings};
 
 /// 현재 설정값을 환경설정 창의 입력들에 채워 넣는다 (열 때 / 저장 후 되돌려 보여줄 때).
 pub(crate) fn fill_settings_window(ctx: &Ctx, win: &SettingsWindow) {
+    // 워크스페이스 버전 = 릴리스 태그 버전 (release.yml 이 둘의 일치를 검사한다).
+    win.set_app_version(SharedString::from(env!("CARGO_PKG_VERSION")));
     let s = ctx.settings.borrow();
     win.set_lang_sel(SharedString::from(s.lang.clone()));
     win.set_unlock_days(s.unlock_days);

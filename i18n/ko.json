@@ -91,6 +91,7 @@
   "ui.settings_title": "환경설정",
   "ui.settings_unlock_days": "자동 잠금 해제 기간 (일)",
   "ui.settings_unlock_days_hint": "0 = 실행할 때마다 암호를 묻습니다. 1 이상이면 그 기간 동안 암호 없이 열리는데, 그러려면 이 기기에 키를 저장해 둬야 하므로 그동안은 디스크를 읽을 수 있는 사람도 메모를 볼 수 있습니다.",
+  "ui.settings_version": "버전",
   "ui.settings_window_title": "Ymemo 환경설정",
   "ui.sticky_default_title": "새 메모",
   "ui.sticky_opacity": "투명도",

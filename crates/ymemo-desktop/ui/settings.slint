@@ -44,6 +44,8 @@ export component SettingsWindow inherits Window {
     in property <string> status;
     // 지금 잠금이 풀려 있는가. 잠겨 있으면 "지금 잠그기"를 눌러도 의미가 없다.
     in property <bool> unlocked: false;
+    // 실행 중인 앱 버전 (Rust 가 CARGO_PKG_VERSION 을 넣는다). 버그 신고에 필요하다.
+    in property <string> app-version;
 
     callback apply();
     callback lock-now();
@@ -170,6 +172,12 @@ export component SettingsWindow inherits Window {
         }
 
         Rectangle { vertical-stretch: 1; }
+
+        Text {
+            text: Strings.ui_settings_version + " " + root.app-version;
+            font-size: 11px;
+            color: #8a8375;
+        }
 
         HorizontalLayout {
             spacing: 6px;
