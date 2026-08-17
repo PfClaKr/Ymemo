@@ -25,6 +25,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String dco_decode_String(dynamic raw);
 
   @protected
+  bool dco_decode_bool(dynamic raw);
+
+  @protected
+  FfiAttachment dco_decode_ffi_attachment(dynamic raw);
+
+  @protected
   FfiGroup dco_decode_ffi_group(dynamic raw);
 
   @protected
@@ -37,10 +43,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 dco_decode_i_64(dynamic raw);
 
   @protected
+  List<FfiAttachment> dco_decode_list_ffi_attachment(dynamic raw);
+
+  @protected
   List<FfiGroup> dco_decode_list_ffi_group(dynamic raw);
 
   @protected
   List<FfiMemo> dco_decode_list_ffi_memo(dynamic raw);
+
+  @protected
+  List<int> dco_decode_list_prim_u_8_loose(dynamic raw);
 
   @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
@@ -61,6 +73,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
+  bool sse_decode_bool(SseDeserializer deserializer);
+
+  @protected
+  FfiAttachment sse_decode_ffi_attachment(SseDeserializer deserializer);
+
+  @protected
   FfiGroup sse_decode_ffi_group(SseDeserializer deserializer);
 
   @protected
@@ -73,10 +91,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
 
   @protected
+  List<FfiAttachment> sse_decode_list_ffi_attachment(
+      SseDeserializer deserializer);
+
+  @protected
   List<FfiGroup> sse_decode_list_ffi_group(SseDeserializer deserializer);
 
   @protected
   List<FfiMemo> sse_decode_list_ffi_memo(SseDeserializer deserializer);
+
+  @protected
+  List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer);
 
   @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
@@ -94,14 +119,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
-  bool sse_decode_bool(SseDeserializer deserializer);
-
-  @protected
   void sse_encode_AnyhowException(
       AnyhowException self, SseSerializer serializer);
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_bool(bool self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_attachment(FfiAttachment self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_group(FfiGroup self, SseSerializer serializer);
@@ -116,10 +144,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_ffi_attachment(
+      List<FfiAttachment> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_ffi_group(List<FfiGroup> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_ffi_memo(List<FfiMemo> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_prim_u_8_loose(List<int> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_u_8_strict(
@@ -136,9 +171,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_bool(bool self, SseSerializer serializer);
 }
 
 // Section: wire_class

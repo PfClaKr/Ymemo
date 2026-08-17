@@ -7,7 +7,7 @@ import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `with_vault`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `from`, `from`, `from`
 
 /// 코어가 돌려주는 에러 메시지의 언어를 정한다 (`"ko"` / `"en"`, `"ko-KR"` 같은 로캘도 됨).
 ///
@@ -61,6 +61,47 @@ Future<void> memoSetOpacity(
 Future<void> memoSetGroup({required String id, required String groupId}) =>
     RustLib.instance.api.crateApiMemoSetGroup(id: id, groupId: groupId);
 
+/// 한 메모에 붙은 사진 목록 (붙인 순서).
+Future<List<FfiAttachment>> attachmentList({required String memoId}) =>
+    RustLib.instance.api.crateApiAttachmentList(memoId: memoId);
+
+/// 사진을 메모에 붙인다. `data` 는 **원본 파일 바이트 그대로**.
+///
+/// `width_px`/`height_px` 는 Dart 가 디코딩해서 넘긴다(코어에 이미지 디코더를 두지
+/// 않는다). 모르면 0 — 그 경우 표시 비율이 1:1 로 취급된다.
+Future<FfiAttachment> attachmentAdd(
+        {required String memoId,
+        required List<int> data,
+        required String name,
+        required String mime,
+        required PlatformInt64 widthPx,
+        required PlatformInt64 heightPx}) =>
+    RustLib.instance.api.crateApiAttachmentAdd(
+        memoId: memoId,
+        data: data,
+        name: name,
+        mime: mime,
+        widthPx: widthPx,
+        heightPx: heightPx);
+
+/// 사진 바이트(평문). 아직 동기화가 안 됐으면 에러 — UI 는 자리표시자를 그리면 된다.
+Future<Uint8List> attachmentBytes({required String hash}) =>
+    RustLib.instance.api.crateApiAttachmentBytes(hash: hash);
+
+/// 이 기기에 사진 파일이 도착했는가 (없으면 바이트를 청하지 말 것).
+Future<bool> attachmentHasBlob({required String hash}) =>
+    RustLib.instance.api.crateApiAttachmentHasBlob(hash: hash);
+
+/// 표시 너비 변경 (em 의 1/1000). 다른 기기에도 같은 비율로 반영된다.
+Future<void> attachmentSetWidth(
+        {required String id, required PlatformInt64 widthEmMilli}) =>
+    RustLib.instance.api
+        .crateApiAttachmentSetWidth(id: id, widthEmMilli: widthEmMilli);
+
+/// 메모에서 사진을 뗀다. blob 파일은 남는다(GC 없음).
+Future<void> attachmentRemove({required String id}) =>
+    RustLib.instance.api.crateApiAttachmentRemove(id: id);
+
 /// 전체 그룹 목록 (이름순).
 Future<List<FfiGroup>> groupList() => RustLib.instance.api.crateApiGroupList();
 
@@ -88,6 +129,65 @@ Future<void> syncRebuild() => RustLib.instance.api.crateApiSyncRebuild();
 /// (모바일 Syncthing 연동 전까지는 검증/표시에만 쓴다.)
 Future<String> pairingDecode({required String code}) =>
     RustLib.instance.api.crateApiPairingDecode(code: code);
+
+/// Dart 로 넘기는 첨부 사진 표현.
+///
+/// 바이트는 들어 있지 않다 — 사진은 수 MB 라 목록마다 실어 나르면 낭비다.
+/// 그릴 때 [`attachment_bytes`] 로 해시를 주고 따로 받는다.
+class FfiAttachment {
+  final String id;
+  final String memoId;
+  final String hash;
+  final String name;
+  final String mime;
+
+  /// 원본 픽셀 크기 (비율 계산용, 모르면 0).
+  final PlatformInt64 widthPx;
+  final PlatformInt64 heightPx;
+
+  /// 표시 너비 (em 의 1/1000). 실제 픽셀 = 이 값/1000 × 이 플랫폼 기본 폰트 px.
+  final PlatformInt64 widthEmMilli;
+  final PlatformInt64 createdAt;
+
+  const FfiAttachment({
+    required this.id,
+    required this.memoId,
+    required this.hash,
+    required this.name,
+    required this.mime,
+    required this.widthPx,
+    required this.heightPx,
+    required this.widthEmMilli,
+    required this.createdAt,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      memoId.hashCode ^
+      hash.hashCode ^
+      name.hashCode ^
+      mime.hashCode ^
+      widthPx.hashCode ^
+      heightPx.hashCode ^
+      widthEmMilli.hashCode ^
+      createdAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiAttachment &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          memoId == other.memoId &&
+          hash == other.hash &&
+          name == other.name &&
+          mime == other.mime &&
+          widthPx == other.widthPx &&
+          heightPx == other.heightPx &&
+          widthEmMilli == other.widthEmMilli &&
+          createdAt == other.createdAt;
+}
 
 /// Dart 로 넘기는 그룹(폴더) 표현.
 class FfiGroup {
