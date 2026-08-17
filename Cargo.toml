@@ -46,5 +46,9 @@ rand = "0.8"              # salt/nonce 생성 (OsRng)
 # Syncthing REST 제어용 HTTP 클라이언트 (localhost 전용이라 TLS 불필요)
 ureq = { version = "3", default-features = false, features = ["json"] }
 
+# Flutter 바인딩 런타임. 생성기(CLI)·Dart 패키지와 **세 곳의 버전이 같아야** 하므로
+# 캐럿 없이 못 박는다 (apps/mobile/pubspec.yaml 참조).
+flutter_rust_bridge = "=2.11.1"
+
 # 공통 유틸
 anyhow = "1"
