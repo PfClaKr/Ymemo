@@ -35,7 +35,7 @@ jobs:
       # slint 의존성이 edition2024 를 요구 → 최신 stable 로 갱신
       - run: rustup update stable
       # GUI(slint) 를 빌드하지 않으므로 fontconfig 불필요
-      - run: cargo test -p ymemo-core -p ymemo-ffi
+      - run: cargo test -p ymemo-core -p ymemo-ffi -p ymemo-i18n
 
   linux-desktop:
     needs: test
