@@ -1,0 +1,213 @@
+import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox } from "std-widgets.slint";
+import { Strings } from "@i18n";
+import { Palette } from "theme.slint";
+
+// ---------------------------------------------------------------------------
+// 스티커 창: 메모 하나 = 창 하나. 무프레임.
+//  - 제목 바 드래그 → 이동 (Rust 가 처리; X11 에선 자석 스냅까지)
+//  - 제목 바 더블클릭 → 얇은 바 접기/펴기
+//  - 🎨 색 팔레트, ＋ 새 메모, ✕ 창 닫기(삭제 아님)
+// ---------------------------------------------------------------------------
+export component StickyWindow inherits Window {
+    title: root.memo-title == "" ? Strings.ui_sticky_window_title : root.memo-title;
+    no-frame: true;
+    always-on-top: true;
+    background: #0000;
+    preferred-width: 260px;
+    preferred-height: 240px;
+    min-width: 160px;
+    min-height: 28px;
+    resize-border-width: 4px;
+
+    in property <string> memo-title;
+    in-out property <string> memo-text;
+    in property <string> sticky-color: "yellow";
+    // 창 불투명도(%). 슬라이더를 끄는 동안엔 UI 가 직접 갱신(미리보기)하므로 in-out.
+    in-out property <float> sticky-opacity: 100;
+    in property <bool> collapsed: false;
+    callback edited(string);
+    callback close-requested();
+    callback new-memo();
+    callback set-color(string);
+    callback set-opacity(float);
+    callback toggle-collapse();
+    // 제목 바 끌기: OS 에 맡기지 않고 포인터를 직접 따라간다 — 그래야 손을 떼기 전,
+    // 끄는 도중에 자석 스냅이 걸린다. 인자는 모두 창 좌상단 기준 논리 px.
+    //   begin-drag: 잡은 지점. 창 좌표를 못 다루는 환경(네이티브 Wayland)이면
+    //               Rust 가 OS 이동으로 폴백하고 false 를 돌려준다 → 이후 추적 중단.
+    callback begin-drag(float, float) -> bool;
+    callback drag-move(float, float);   // 현재 포인터 위치
+    callback drag-end();
+
+    private property <bool> show-palette: false;
+    // 이번 누름이 끌기로 넘어갔는가 / 그 끌기를 우리가 직접 따라가는 중인가.
+    private property <bool> drag-started: false;
+    private property <bool> drag-manual: false;
+
+    public function focus-body() { body.focus(); }
+
+    Rectangle {
+        background: Palette.bg(root.sticky-color);
+        // 각진 창 — 둥근 모서리 없음.
+        border-radius: 0px;
+        border-width: 1px;
+        border-color: Palette.bar(root.sticky-color).darker(0.15);
+        clip: true;
+        // 창 전체(배경+글자)를 함께 흐리게 한다 — 데스크탑이 비쳐 보이는 위젯 느낌.
+        opacity: root.sticky-opacity / 100;
+
+        VerticalLayout {
+            // ---- 제목 바 (드래그 핸들 + 접기 토글) ----
+            Rectangle {
+                // 접었을 때 창 높이(main.rs 의 BAR_HEIGHT)와 반드시 같아야 한다.
+                height: 28px;
+                background: Palette.bar(root.sticky-color);
+
+                bar-ta := TouchArea {
+                    moved => {
+                        // 4px 넘게 움직여야 끌기로 친다 (클릭·더블클릭 오인 방지).
+                        if (!root.drag-started
+                            && (self.mouse-x > self.pressed-x + 4px || self.mouse-x < self.pressed-x - 4px
+                                || self.mouse-y > self.pressed-y + 4px || self.mouse-y < self.pressed-y - 4px)) {
+                            root.drag-started = true;
+                            root.drag-manual = root.begin-drag(self.pressed-x / 1px, self.pressed-y / 1px);
+                        }
+                        if (root.drag-manual) {
+                            root.drag-move(self.mouse-x / 1px, self.mouse-y / 1px);
+                        }
+                    }
+                    pointer-event(ev) => {
+                        if (ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel) {
+                            if (root.drag-manual) { root.drag-end(); }
+                            root.drag-started = false;
+                            root.drag-manual = false;
+                        }
+                    }
+                    double-clicked => { root.toggle-collapse(); }
+                }
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 6px;
+                    spacing: 2px;
+                    Text {
+                        text: root.memo-title == "" ? Strings.ui_sticky_default_title : root.memo-title;
+                        font-size: 13px;
+                        font-weight: 700;
+                        color: Palette.ink(root.sticky-color);
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    palette-ta := TouchArea {
+                        width: 26px;
+                        Text {
+                            width: 100%;
+                            height: 100%;
+                            text: "🎨";
+                            font-size: 13px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            opacity: palette-ta.has-hover ? 1 : 0.6;
+                        }
+                        clicked => { root.show-palette = !root.show-palette; }
+                    }
+                    plus-ta := TouchArea {
+                        width: 26px;
+                        Text {
+                            width: 100%;
+                            height: 100%;
+                            text: "＋";
+                            font-size: 14px;
+                            font-weight: 700;
+                            color: Palette.ink(root.sticky-color);
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            opacity: plus-ta.has-hover ? 1 : 0.55;
+                        }
+                        clicked => { root.new-memo(); }
+                    }
+                    close-ta := TouchArea {
+                        width: 26px;
+                        Text {
+                            width: 100%;
+                            height: 100%;
+                            text: "✕";
+                            font-size: 13px;
+                            font-weight: 700;
+                            color: Palette.ink(root.sticky-color);
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            opacity: close-ta.has-hover ? 1 : 0.55;
+                        }
+                        clicked => { root.close-requested(); }
+                    }
+                }
+            }
+
+            // ---- 색 · 투명도 패널 (🎨 로 토글) ----
+            // 색과 투명도를 함께 만지는 경우가 많아, 고른 뒤에도 패널을 닫지 않는다.
+            if root.show-palette: Rectangle {
+                height: 72px;
+                background: Palette.bar(root.sticky-color).darker(0.06);
+                VerticalLayout {
+                    padding: 6px;
+                    spacing: 4px;
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: center;
+                        for key in ["yellow", "pink", "green", "blue", "purple"]: Rectangle {
+                            width: 22px;
+                            height: 22px;
+                            border-radius: 11px;
+                            background: Palette.swatch(key);
+                            border-width: root.sticky-color == key ? 3px : 1px;
+                            border-color: root.sticky-color == key ? #ffffff : #00000040;
+                            chip := TouchArea {
+                                clicked => { root.set-color(key); }
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: Strings.ui_sticky_opacity;
+                            font-size: 11px;
+                            color: Palette.ink(root.sticky-color);
+                            vertical-alignment: center;
+                        }
+                        Slider {
+                            horizontal-stretch: 1;
+                            minimum: 20; // 하한 — 코어의 MIN_OPACITY 와 맞춘다
+                            maximum: 100;
+                            value: root.sticky-opacity;
+                            // 끄는 동안엔 미리보기만, 손을 뗄 때 한 번 저장한다.
+                            changed(v) => { root.sticky-opacity = v; }
+                            released(v) => { root.set-opacity(v); }
+                        }
+                        Text {
+                            text: Math.round(root.sticky-opacity) + "%";
+                            font-size: 11px;
+                            color: Palette.ink(root.sticky-color);
+                            vertical-alignment: center;
+                            horizontal-alignment: right;
+                            width: 34px;
+                        }
+                    }
+                }
+            }
+
+            // ---- 본문 (접힌 동안엔 창 높이가 제목 바와 같아 안 보인다) ----
+            body := TextEdit {
+                visible: !root.collapsed;
+                min-height: 0;
+                vertical-stretch: 1;
+                font-size: 13px;
+                wrap: word-wrap;
+                text <=> root.memo-text;
+                edited => { root.edited(self.text); }
+            }
+        }
+    }
+}

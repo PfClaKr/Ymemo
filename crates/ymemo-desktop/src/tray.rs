@@ -5,19 +5,70 @@
 //!  - **그 외(macOS 등)**: 미구현 → 트레이 없이 동작 (핸들만 반환)
 //!
 //! 공통 진입점 [`start`] 는 살아 있는 동안 트레이를 유지하는 핸들을 돌려준다
-//! (핸들이 drop 되면 트레이도 사라진다). 클릭/메뉴는 백엔드가
-//! [`crate::request_toggle`] / [`crate::request_quit`] 로 이벤트 루프에 위임한다.
+//! (핸들이 drop 되면 트레이도 사라진다). 클릭/메뉴는 백엔드가 아래 `request_*` 로
+//! 이벤트 루프에 위임한다 — 트레이 콜백은 UI 스레드가 아니고, slint 컴포넌트는
+//! `Send` 가 아니라 클로저에 직접 캡처할 수 없기 때문이다.
 
 // TrayHandle 은 start() 의 반환 타입이라 공개하되, main 은 이름 없이 추론해 쓴다.
 #[allow(unused_imports)]
 pub use imp::{start, TrayHandle};
+
+use slint::ComponentHandle;
+
+use crate::icon::set_window_icon;
+use crate::lock::lock_now;
+use crate::state::{touch, APP};
+
+/// 트레이 클릭/메뉴: 잠겨 있으면 잠금 창, 아니면 목록 창 토글.
+/// (트레이 콜백이 어느 스레드에서 오든 이벤트 루프로 넘긴 뒤 thread_local 로 UI 접근)
+pub(crate) fn request_toggle() {
+    let _ = slint::invoke_from_event_loop(|| {
+        APP.with(|a| {
+            let borrow = a.borrow();
+            let Some(app) = borrow.as_ref() else { return };
+            touch(&app.ctx);
+            if !app.unlocked.get() {
+                let _ = app.lock.show();
+                set_window_icon(app.lock.window());
+                app.lock.window().request_redraw();
+            } else if app.list.window().is_visible() {
+                let _ = app.list.hide();
+            } else {
+                let _ = app.list.show();
+                set_window_icon(app.list.window());
+                // Windows 소프트웨어 렌더러는 다시 띄운 창을 바로 안 그려서 리프레시 전까지
+                // 하얗게 남는다 → 표시 직후 강제로 다시 그린다.
+                app.list.window().request_redraw();
+            }
+        });
+    });
+}
+
+/// 트레이 "잠금": 지금 잠근다 (목록 창의 🔒 와 같은 동작).
+pub(crate) fn request_lock() {
+    let _ = slint::invoke_from_event_loop(|| {
+        APP.with(|a| {
+            let borrow = a.borrow();
+            let Some(app) = borrow.as_ref() else { return };
+            lock_now(&app.ctx, &app.lock, &app.list, &app.unlocked);
+        });
+    });
+}
+
+/// 트레이 "종료": 이벤트 루프를 끝내 앱을 종료한다.
+pub(crate) fn request_quit() {
+    let _ = slint::invoke_from_event_loop(|| {
+        let _ = slint::quit_event_loop();
+    });
+}
 
 // ===========================================================================
 // Linux: ksni (StatusNotifierItem)
 // ===========================================================================
 #[cfg(target_os = "linux")]
 mod imp {
-    use crate::{request_lock, request_quit, request_toggle, tray_icon_rgba};
+    use super::{request_lock, request_quit, request_toggle};
+    use crate::icon::tray_icon_rgba;
     use ymemo_i18n::t;
 
     struct YmemoTray;
@@ -112,7 +163,8 @@ mod imp {
     use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
     use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
-    use crate::{request_lock, request_quit, request_toggle, tray_icon_rgba};
+    use super::{request_lock, request_quit, request_toggle};
+    use crate::icon::tray_icon_rgba;
     use ymemo_i18n::t;
 
     /// 트레이 아이콘 + 메뉴/클릭 이벤트를 폴링하는 타이머를 함께 들고 있는 핸들.

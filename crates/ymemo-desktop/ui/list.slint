@@ -1,0 +1,263 @@
+import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox } from "std-widgets.slint";
+import { Strings } from "@i18n";
+import { Palette } from "theme.slint";
+import { PairingPanel, SharedDeviceRow } from "pairing.slint";
+
+
+// 목록 창의 한 행. 그룹 트리를 Rust 가 미리 평탄화해 depth 를 붙여 넘긴다
+// (Slint 에 트리 뷰가 없으므로 "들여쓰기 된 리스트"로 그린다).
+export struct ListRow {
+    id: string,
+    title: string,
+    color: string,     // 메모 색 악센트 (그룹이면 무시)
+    depth: int,        // 들여쓰기 단계
+    is-group: bool,
+    expanded: bool,
+    child-count: int,
+}
+
+
+// ---------------------------------------------------------------------------
+// 메모 목록 창: 트레이 아이콘 클릭으로 토글된다. 어두운 배경 + 밝은 글자.
+// 행 클릭 → 스티커 창 열기. ＋ 새 메모, 🗑 삭제. 왼쪽 악센트로 스티커 색 표시.
+// ---------------------------------------------------------------------------
+export component ListWindow inherits Window {
+    title: "Ymemo";
+    // 헤더 버튼이 다섯 개(🔒 ⚙ 🔗 📁 ＋)라 300px 로는 제목이 눌린다.
+    preferred-width: 340px;
+    preferred-height: 420px;
+    background: #2e2b27;
+
+    in property <[ListRow]> rows;
+    in property <bool> sync-available: false;
+    in property <string> my-pairing-code;
+    in property <image> qr-image;
+    in property <string> peer-message;
+    in property <string> lan-pair-code;
+    in property <string> lan-message;
+    in property <[SharedDeviceRow]> shared-devices;
+    callback lan-join(string);
+    callback unshare(string);
+    // 이름 편집 중인 그룹 id. Rust 가 그룹을 새로 만들면 바로 편집 상태로 넣는다.
+    in-out property <string> editing-id: "";
+    in-out property <string> editing-text: "";
+    callback open-memo(string);            // 인자: memo id
+    callback new-memo();
+    callback new-group();
+    callback toggle-group(string);         // 펼침/접힘 (기기 로컬 상태)
+    callback rename-group(string, string); // id, 새 이름
+    callback delete-row(string, bool);     // id, is-group
+    callback move-row(int, int);           // 원본 행 index, 놓은 행 index (음수/범위밖 = 최상위)
+    callback add-peer(string);
+    // 페어링 패널 열림/닫힘 — Rust 가 창 크기를 맞춰 준다 (LockWindow 와 같은 이유).
+    callback sync-toggled(bool);
+    callback open-settings();
+    callback lock-now();
+
+    private property <bool> show-sync: false;
+    changed show-sync => { root.sync-toggled(self.show-sync); }
+    // 드래그 상태: 잡은 행과 현재 놓을 위치. -1 이면 드래그 중이 아님.
+    private property <int> drag-source: -1;
+    private property <int> drag-target: -1;
+    // 이번 누름이 드래그였나 (드래그 후 클릭이 열기로 오인되지 않도록).
+    private property <bool> did-drag: false;
+
+    // 행 높이 — 드래그 시 이동한 행 수를 계산하는 기준이라 고정이어야 한다.
+    private property <length> row-h: 34px;
+
+    // 편집 중이던 이름을 저장하고 편집 모드를 끝낸다.
+    function commit-edit() {
+        if (root.editing-id != "") {
+            root.rename-group(root.editing-id, root.editing-text);
+            root.editing-id = "";
+        }
+    }
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
+
+        HorizontalLayout {
+            spacing: 6px;
+            Text {
+                text: "Ymemo 📝";
+                font-size: 16px;
+                font-weight: 700;
+                color: #f0ead6;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            Button {
+                text: "🔒";
+                clicked => { root.commit-edit(); root.lock-now(); }
+            }
+            Button {
+                text: "⚙";
+                clicked => { root.commit-edit(); root.open-settings(); }
+            }
+            Button {
+                text: "🔗";
+                clicked => { root.show-sync = !root.show-sync; }
+            }
+            Button {
+                text: "📁";
+                clicked => { root.commit-edit(); root.new-group(); }
+            }
+            Button {
+                text: "＋";
+                clicked => { root.commit-edit(); root.new-memo(); }
+            }
+        }
+
+        if root.show-sync: VerticalLayout {
+            vertical-stretch: 1;
+            PairingPanel {
+                available: root.sync-available;
+                my-code: root.my-pairing-code;
+                qr: root.qr-image;
+                message: root.peer-message;
+                lan-code: root.lan-pair-code;
+                lan-message: root.lan-message;
+                devices: root.shared-devices;
+                ink: #d8d2c2;
+                add-peer(code) => { root.add-peer(code); }
+                lan-join(code) => { root.lan-join(code); }
+                unshare(id) => { root.unshare(id); }
+            }
+            Rectangle { vertical-stretch: 1; }
+        }
+
+        if !root.show-sync && root.rows.length == 0: Text {
+            text: Strings.ui_list_empty;
+            font-size: 12px;
+            color: #b0a99a;
+            wrap: word-wrap;
+        }
+
+        if !root.show-sync: ListView {
+            vertical-stretch: 1;
+            for row[idx] in root.rows: Rectangle {
+                height: root.row-h;
+                border-radius: 6px;
+                // 드래그 중인 행은 흐리게, 놓을 대상은 밝게 강조.
+                opacity: root.drag-source == idx ? 0.45 : 1;
+                background: root.drag-source != -1 && root.drag-target == idx ? #7db8ec55
+                          : ta.has-hover ? #ffffff1a
+                          : transparent;
+
+                // 아래에 깔린 터치 영역: 위의 Text 는 입력을 소비하지 않아 여기로 들어온다.
+                // (이름 편집 중일 땐 위에 올라온 LineEdit 가 먼저 입력을 가져간다)
+                ta := TouchArea {
+                    pointer-event(ev) => {
+                        if (ev.kind == PointerEventKind.down) {
+                            root.did-drag = false;
+                        }
+                        if (ev.kind == PointerEventKind.up) {
+                            if (root.drag-source != -1 && root.drag-target != root.drag-source) {
+                                root.move-row(root.drag-source, root.drag-target);
+                            }
+                            root.drag-source = -1;
+                            root.drag-target = -1;
+                        }
+                    }
+                    moved => {
+                        // 살짝 움직인 정도는 클릭으로 두고, 임계값을 넘으면 드래그 시작.
+                        if (self.mouse-y - self.pressed-y > 4px || self.pressed-y - self.mouse-y > 4px) {
+                            root.did-drag = true;
+                            root.drag-source = idx;
+                        }
+                        if (root.drag-source != -1) {
+                            // 행 높이가 일정하므로 이동한 픽셀을 행 수로 환산한다.
+                            root.drag-target = idx + Math.round((self.mouse-y - self.pressed-y) / root.row-h);
+                        }
+                    }
+                    clicked => {
+                        if (!root.did-drag) {
+                            root.commit-edit();
+                            if (row.is-group) {
+                                root.toggle-group(row.id);
+                            } else {
+                                root.open-memo(row.id);
+                            }
+                        }
+                    }
+                    double-clicked => {
+                        // 그룹 이름은 더블클릭으로 바로 고친다.
+                        if (row.is-group) {
+                            root.editing-text = row.title;
+                            root.editing-id = row.id;
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    padding-left: 6px + row.depth * 14px; // 트리 들여쓰기
+                    padding-right: 4px;
+                    spacing: 6px;
+
+                    // 그룹: 펼침 표시 / 메모: 색 악센트
+                    if row.is-group: Text {
+                        width: 14px;
+                        text: row.child-count == 0 ? "" : (row.expanded ? "▾" : "▸");
+                        font-size: 10px;
+                        color: #b0a99a;
+                        vertical-alignment: center;
+                        horizontal-alignment: center;
+                    }
+                    if row.is-group: Text {
+                        text: "📁";
+                        font-size: 13px;
+                        vertical-alignment: center;
+                    }
+                    if !row.is-group: Rectangle {
+                        width: 5px;
+                        height: 22px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 2.5px;
+                        background: Palette.swatch(row.color);
+                    }
+
+                    // 이름: 편집 중인 그룹만 LineEdit 로 바뀐다.
+                    if root.editing-id == row.id: LineEdit {
+                        horizontal-stretch: 1;
+                        text: row.title;
+                        init => { self.focus(); }
+                        edited(t) => { root.editing-text = t; }
+                        accepted => { root.commit-edit(); }
+                    }
+                    if root.editing-id != row.id: Text {
+                        text: row.is-group
+                            ? (row.title == "" ? Strings.ui_list_group_untitled : row.title)
+                            : (row.title == "" ? Strings.ui_list_memo_untitled : row.title);
+                        font-size: 14px;
+                        font-weight: row.is-group ? 700 : 400;
+                        color: row.title == "" ? #9a9384 : #ece7db;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+
+                    if row.is-group: Text {
+                        text: row.child-count > 0 ? row.child-count : "";
+                        font-size: 11px;
+                        color: #8d8778;
+                        vertical-alignment: center;
+                    }
+                    del-ta := TouchArea {
+                        width: 28px;
+                        Text {
+                            width: 100%;
+                            height: 100%;
+                            text: "🗑";
+                            font-size: 13px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            opacity: del-ta.has-hover ? 1 : 0.4;
+                        }
+                        clicked => { root.commit-edit(); root.delete-row(row.id, row.is-group); }
+                    }
+                }
+            }
+        }
+    }
+}

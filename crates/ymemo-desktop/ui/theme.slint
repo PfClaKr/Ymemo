@@ -1,0 +1,70 @@
+// 여러 창이 함께 쓰는 조각: 스티커 색 팔레트와 탭 버튼.
+// 색상 키 → 실제 색 변환은 여기서만 한다.
+// 스티커 팔레트: 색상 키("yellow"/"pink"/"green"/"blue"/"purple") → 실제 색.
+// 코어(Memo.color)는 키 문자열만 저장·동기화하고, 실제 색 해석은 여기 한곳에 모은다.
+export global Palette {
+    // 스티커 본문 배경 (반투명 — 데스크탑 위젯 느낌)
+    pure public function bg(key: string) -> color {
+        return key == "pink" ? #ffd6e6f2
+             : key == "green" ? #d2f0c8f2
+             : key == "blue" ? #cfe6fff2
+             : key == "purple" ? #e6d6f5f2
+             : #fff9b1f2; // yellow (기본)
+    }
+    // 제목 바 (본문보다 진한 불투명색)
+    pure public function bar(key: string) -> color {
+        return key == "pink" ? #f7b8ce
+             : key == "green" ? #b6e0a8
+             : key == "blue" ? #b0d4f2
+             : key == "purple" ? #d0b8ec
+             : #f4e98c; // yellow
+    }
+    // 제목 바 글자색 (색상별로 대비 유지)
+    pure public function ink(key: string) -> color {
+        return key == "pink" ? #7a3350
+             : key == "green" ? #35662f
+             : key == "blue" ? #2a5578
+             : key == "purple" ? #573377
+             : #5c5c25; // yellow
+    }
+    // 팔레트 칩/목록 악센트용 채도 높은 대표색 (불투명)
+    pure public function swatch(key: string) -> color {
+        return key == "pink" ? #ff9fc0
+             : key == "green" ? #8fd678
+             : key == "blue" ? #7db8ec
+             : key == "purple" ? #b98fe0
+             : #ffe15c; // yellow
+    }
+}
+
+
+// 기기 페어링 패널.
+//  - 기본: 같은 네트워크에서 6자리 코드로 연결 (이 기기 코드 표시 + 상대 코드 입력).
+
+// 페어링 패널 상단의 탭 버튼 하나. 두 연결 방식을 한 번에 한쪽만 보여주기 위한 것으로,
+// 이렇게 나눠야 각 화면이 스크롤 없이 창 안에 다 들어온다.
+export component TabButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    in property <color> ink;
+    callback clicked();
+
+    height: 26px;
+    background: root.active ? #ffffff26 : #ffffff08;
+    border-width: 1px;
+    border-color: root.active ? #ffffff59 : #ffffff1f;
+    Text {
+        width: 100%;
+        height: 100%;
+        text: root.label;
+        font-size: 11px;
+        font-weight: root.active ? 700 : 400;
+        color: root.ink;
+        opacity: root.active ? 1.0 : 0.7;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
