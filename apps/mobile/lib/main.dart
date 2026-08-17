@@ -252,8 +252,18 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   Widget build(BuildContext context) {
     return PopScope(
       // 뒤로 가기 = 저장. 별도 저장 버튼도 두되, 눌러야만 저장되는 방식은 쓰지 않는다.
+      //
+      // `canPop: false` 로 두고 **저장한 뒤 직접 pop** 한다. 기본값(true)이면 라우트가
+      // 먼저 사라지고 컨트롤러가 dispose 된 다음에 이 콜백이 도는데, 그때 `_title.text`
+      // 를 읽으면 "used after being disposed" 로 저장이 조용히 실패한다.
+      // (에뮬레이터에서 실제로 겪은 버그 — 뒤로 나가면 편집분이 사라졌다.)
+      canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
-        if (didPop) await _save();
+        if (didPop) return;
+        // await 를 건너면 context 를 다시 쓸 수 없으므로 navigator 를 미리 잡아 둔다.
+        final navigator = Navigator.of(context);
+        await _save();
+        navigator.pop();
       },
       child: Scaffold(
         appBar: AppBar(
