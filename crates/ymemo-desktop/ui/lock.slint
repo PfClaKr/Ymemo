@@ -1,0 +1,159 @@
+import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox } from "std-widgets.slint";
+import { Strings } from "@i18n";
+import { PairingPanel, SharedDeviceRow } from "pairing.slint";
+
+// ---------------------------------------------------------------------------
+// 잠금 창: 시작 시 마스터 암호 입력. unlock 성공 후엔 숨겨진다.
+// ---------------------------------------------------------------------------
+export component LockWindow inherits Window {
+    title: Strings.ui_lock_title;
+    preferred-width: 320px;
+    preferred-height: 300px;
+    min-height: 200px;
+    background: #2e2b27;
+
+    in property <string> lock-message;
+    in property <bool> sync-available: false;
+    in property <string> my-pairing-code;
+    in property <image> qr-image;
+    in property <string> peer-message;
+    in property <string> lan-pair-code;
+    in property <string> lan-message;
+    // vault.json 존재 여부. true = 기존 vault(잠금 해제), false = 새 기기(선택 화면).
+    // Rust 가 페어링으로 vault.json 이 도착하면 true 로 바꿔 잠금 해제로 전환한다.
+    in property <bool> vault-exists: false;
+    in property <[SharedDeviceRow]> shared-devices;
+    callback unlock(string);
+    callback create-vault(string);
+    callback add-peer(string);
+    callback lan-join(string);
+    callback unshare(string);
+    // 페어링 패널이 열리고 닫힐 때 — Rust 가 창을 패널이 다 보이는 크기로 넓혔다 되돌린다
+    // (스크롤 없이 한눈에 보이게 하는 것이 목적).
+    callback sync-toggled(bool);
+
+    // Rust 가 vault 도착 시 닫을 수 있도록 in-out.
+    in-out property <bool> show-sync: false;
+    changed show-sync => { root.sync-toggled(self.show-sync); }
+    // 새 기기에서 "새로 만들기"를 골라 암호 설정 단계로 들어갔는가.
+    private property <bool> creating: false;
+    // 암호 입력칸의 내용. LineEdit 이 조건부 블록 안에 있어 밖에서 id 로 못 잡으므로
+    // root 프로퍼티에 양방향으로 묶어 두고, 잠글 때 Rust 가 이걸 비운다.
+    private property <string> password-text;
+    public function clear-password() { root.password-text = ""; }
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+
+        HorizontalLayout {
+            spacing: 6px;
+            Text {
+                text: "Ymemo 🔒";
+                font-size: 16px;
+                font-weight: 700;
+                color: #f0ead6;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            Button {
+                text: "🔗";
+                clicked => { root.show-sync = !root.show-sync; }
+            }
+        }
+
+        if root.show-sync: VerticalLayout {
+            vertical-stretch: 1;
+            PairingPanel {
+                available: root.sync-available;
+                my-code: root.my-pairing-code;
+                qr: root.qr-image;
+                message: root.peer-message;
+                lan-code: root.lan-pair-code;
+                lan-message: root.lan-message;
+                devices: root.shared-devices;
+                ink: #d8d2c2;
+                add-peer(code) => { root.add-peer(code); }
+                lan-join(code) => { root.lan-join(code); }
+                unshare(id) => { root.unshare(id); }
+            }
+            // 남는 세로 공간은 아래로 — 패널이 위에 붙어 보이도록.
+            Rectangle { vertical-stretch: 1; }
+        }
+
+        if !root.show-sync: VerticalLayout {
+            spacing: 8px;
+            Text {
+                text: root.lock-message;
+                font-size: 12px;
+                color: #e79a9a;
+                wrap: word-wrap;
+            }
+
+            // 기존 vault: 마스터 암호로 잠금 해제.
+            if root.vault-exists: HorizontalLayout {
+                spacing: 6px;
+                LineEdit {
+                    placeholder-text: Strings.ui_lock_password_placeholder;
+                    input-type: InputType.password;
+                    text <=> root.password-text;
+                    accepted => { root.unlock(self.text); }
+                }
+                Button {
+                    text: Strings.ui_lock_open;
+                    clicked => { root.unlock(root.password-text); }
+                }
+            }
+
+            // 새 기기 첫 실행: 어떻게 시작할지 선택.
+            if !root.vault-exists && !root.creating: VerticalLayout {
+                spacing: 8px;
+                Text {
+                    text: Strings.ui_lock_start_question;
+                    font-size: 13px;
+                    color: #f0ead6;
+                    wrap: word-wrap;
+                }
+                Button {
+                    text: Strings.ui_lock_create_choice;
+                    clicked => { root.creating = true; }
+                }
+                Button {
+                    text: Strings.ui_lock_connect_choice;
+                    enabled: root.sync-available;
+                    clicked => { root.show-sync = true; }
+                }
+                Text {
+                    text: Strings.ui_lock_start_hint;
+                    font-size: 11px;
+                    color: #b8b2a2;
+                    wrap: word-wrap;
+                }
+            }
+
+            // 새 기기 + "새로 만들기" 선택: 새 마스터 암호 설정.
+            if !root.vault-exists && root.creating: VerticalLayout {
+                spacing: 6px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    npw := LineEdit {
+                        placeholder-text: Strings.ui_lock_new_password_placeholder;
+                        input-type: InputType.password;
+                        accepted => { root.create-vault(self.text); }
+                    }
+                    Button {
+                        text: Strings.ui_lock_create;
+                        clicked => { root.create-vault(npw.text); }
+                    }
+                }
+                Button {
+                    text: Strings.ui_lock_back;
+                    clicked => { root.creating = false; }
+                }
+            }
+        }
+
+        Rectangle { vertical-stretch: 1; }
+    }
+}
+

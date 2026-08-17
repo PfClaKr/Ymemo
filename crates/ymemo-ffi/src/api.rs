@@ -12,13 +12,14 @@ use std::sync::Mutex;
 
 use anyhow::{anyhow, Result};
 use ymemo_core::{now_millis, pairing::PairingCode, vault::Vault, Group, Memo, Store};
+use ymemo_i18n::t;
 
 /// 열린 vault (앱 프로세스당 하나).
 static VAULT: Mutex<Option<Vault>> = Mutex::new(None);
 
 fn with_vault<T>(f: impl FnOnce(&mut Vault) -> Result<T>) -> Result<T> {
-    let mut guard = VAULT.lock().map_err(|_| anyhow!("vault 잠금 오염"))?;
-    let vault = guard.as_mut().ok_or_else(|| anyhow!("vault 가 열려 있지 않음"))?;
+    let mut guard = VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))?;
+    let vault = guard.as_mut().ok_or_else(|| anyhow!(t!("core.vault_not_open")))?;
     f(vault)
 }
 
@@ -85,18 +86,51 @@ pub fn language() -> String {
     ymemo_i18n::lang().code().to_string()
 }
 
+/// 모바일 UI 문구 한 벌 (현재 언어). Dart 가 시작할 때 한 번 받아 들고 쓴다.
+///
+/// 문구를 Dart 에 따로 두면 언어가 갈라진다 — 코어 에러는 카탈로그, 화면 문구는
+/// 하드코딩이 되어 한쪽만 번역된다. 키를 **Rust 에서** 읽어 넘기므로 `ymemo-i18n` 의
+/// "코드가 쓰는 키가 카탈로그에 있는지" 테스트가 모바일 문구까지 함께 지켜 준다.
+/// (언어를 바꾼 뒤엔 [`set_language`] 를 부르고 이걸 다시 받으면 된다.)
+pub struct FfiStrings {
+    pub body_hint: String,
+    pub list_title: String,
+    pub master_password: String,
+    pub new_memo: String,
+    pub opening: String,
+    pub save: String,
+    pub sync_now: String,
+    pub title_hint: String,
+    pub unlock: String,
+}
+
+/// 현재 언어의 모바일 문구를 모아 돌려준다.
+pub fn mobile_strings() -> FfiStrings {
+    FfiStrings {
+        body_hint: t!("mobile.body_hint"),
+        list_title: t!("mobile.list_title"),
+        master_password: t!("mobile.master_password"),
+        new_memo: t!("mobile.new_memo"),
+        opening: t!("mobile.opening"),
+        save: t!("mobile.save"),
+        sync_now: t!("mobile.sync_now"),
+        title_hint: t!("mobile.title_hint"),
+        unlock: t!("mobile.unlock"),
+    }
+}
+
 /// vault 열기(없으면 생성). `vault_dir` 는 동기화 대상 디렉터리,
 /// `cache_db_path` 는 기기 로컬 SQLite 파일 경로.
 pub fn vault_open(vault_dir: String, cache_db_path: String, password: String) -> Result<()> {
     let store = Store::open(&cache_db_path)?;
     let vault = Vault::open_or_create(&vault_dir, password.as_bytes(), store)?;
-    *VAULT.lock().map_err(|_| anyhow!("vault 잠금 오염"))? = Some(vault);
+    *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = Some(vault);
     Ok(())
 }
 
 /// vault 닫기 (로그아웃).
 pub fn vault_close() -> Result<()> {
-    *VAULT.lock().map_err(|_| anyhow!("vault 잠금 오염"))? = None;
+    *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = None;
     Ok(())
 }
 
@@ -113,7 +147,7 @@ pub fn memo_upsert(id: Option<String>, title: String, body: String) -> Result<St
                 let mut memo = v
                     .store()
                     .get(&id)?
-                    .ok_or_else(|| anyhow!("메모 없음: {id}"))?;
+                    .ok_or_else(|| anyhow!(t!("core.memo_not_found", id = id)))?;
                 memo.title = title;
                 memo.body = body;
                 memo.updated_at = now_millis();
@@ -137,7 +171,7 @@ pub fn memo_set_color(id: String, color: String) -> Result<()> {
         let mut memo = v
             .store()
             .get(&id)?
-            .ok_or_else(|| anyhow!("메모 없음: {id}"))?;
+            .ok_or_else(|| anyhow!(t!("core.memo_not_found", id = id)))?;
         memo.color = color;
         memo.updated_at = now_millis();
         v.upsert(&memo)
@@ -150,7 +184,7 @@ pub fn memo_set_opacity(id: String, opacity: i64) -> Result<()> {
         let mut memo = v
             .store()
             .get(&id)?
-            .ok_or_else(|| anyhow!("메모 없음: {id}"))?;
+            .ok_or_else(|| anyhow!(t!("core.memo_not_found", id = id)))?;
         memo.opacity = opacity;
         memo.updated_at = now_millis();
         v.upsert(&memo)
@@ -163,7 +197,7 @@ pub fn memo_set_group(id: String, group_id: String) -> Result<()> {
         let mut memo = v
             .store()
             .get(&id)?
-            .ok_or_else(|| anyhow!("메모 없음: {id}"))?;
+            .ok_or_else(|| anyhow!(t!("core.memo_not_found", id = id)))?;
         memo.group_id = group_id;
         memo.updated_at = now_millis();
         v.upsert(&memo)
@@ -191,7 +225,7 @@ pub fn group_rename(id: String, name: String) -> Result<()> {
         let mut group = v
             .store()
             .get_group(&id)?
-            .ok_or_else(|| anyhow!("그룹 없음: {id}"))?;
+            .ok_or_else(|| anyhow!(t!("core.group_not_found", id = id)))?;
         group.name = name;
         group.updated_at = now_millis();
         v.upsert_group(&group)
@@ -203,12 +237,12 @@ pub fn group_move(id: String, parent_id: String) -> Result<()> {
     with_vault(|v| {
         let groups = v.store().list_groups()?;
         if !parent_id.is_empty() && ymemo_core::is_descendant(&groups, &parent_id, &id) {
-            return Err(anyhow!("그룹을 자기 자신이나 자손 밑으로 옮길 수 없습니다"));
+            return Err(anyhow!(t!("core.group_cycle")));
         }
         let mut group = v
             .store()
             .get_group(&id)?
-            .ok_or_else(|| anyhow!("그룹 없음: {id}"))?;
+            .ok_or_else(|| anyhow!(t!("core.group_not_found", id = id)))?;
         group.parent_id = parent_id;
         group.updated_at = now_millis();
         v.upsert_group(&group)
@@ -267,7 +301,16 @@ mod tests {
         assert!(memo_list().unwrap().is_empty());
 
         vault_close().unwrap();
-        assert!(memo_list().is_err()); // 닫힌 뒤엔 에러
+        // 닫힌 뒤엔 에러 — 그 문구가 카탈로그를 타는지도 함께 본다
+        // (하드코딩으로 되돌아가면 여기서 걸린다. 전역 VAULT 를 쓰므로 이 테스트 안에서 확인).
+        for code in ["en", "ko"] {
+            set_language(code.into());
+            let lang = ymemo_i18n::Lang::parse(code).unwrap();
+            let Err(e) = memo_list() else {
+                panic!("닫힌 vault 인데 목록이 나왔다");
+            };
+            assert_eq!(e.to_string(), ymemo_i18n::raw(lang, "core.vault_not_open").unwrap());
+        }
 
         // 재오픈: 로그에서 복원 (삭제까지 반영된 빈 상태)
         vault_open(

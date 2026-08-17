@@ -32,10 +32,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # 태그 버전과 워크스페이스 버전이 어긋나면 인스톨러 파일명과 앱이 표시하는 버전이
+      # 달라진다 (설정 창의 버전은 CARGO_PKG_VERSION). 빌드 전에 여기서 막는다.
+      - name: Check tag matches workspace version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          crate=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [ "$tag" != "$crate" ]; then
+            echo "::error::태그 v$tag 와 Cargo.toml 의 $crate 가 다릅니다. workspace.package.version 을 맞추고 태그를 다시 미세요."
+            exit 1
+          fi
       # slint 의존성이 edition2024 를 요구 → 최신 stable 로 갱신
       - run: rustup update stable
       # GUI(slint) 를 빌드하지 않으므로 fontconfig 불필요
-      - run: cargo test -p ymemo-core -p ymemo-ffi
+      - run: cargo test -p ymemo-core -p ymemo-ffi -p ymemo-i18n
 
   linux-desktop:
     needs: test
@@ -73,7 +83,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install build deps
         run: dnf install -y rustup gcc fontconfig-devel rpm-build >/dev/null
-      - name: Set up Rust (stable ≥ 1.85)
+      - name: Set up Rust (stable ≥ 1.87)
         run: |
           rustup-init -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"

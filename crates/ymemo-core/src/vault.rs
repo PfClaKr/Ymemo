@@ -102,7 +102,7 @@ impl Vault {
 
     /// 이미 유도해 둔 키로 열기 ("자동 잠금 해제" 경로 — 마스터 암호를 묻지 않는다).
     ///
-    /// 암호가 없으므로 갈라진 키 자가 치유([`heal_divergent_log`])는 건너뛴다. 그 상황이면
+    /// 암호가 없으므로 갈라진 키 자가 치유(`heal_divergent_log`)는 건너뛴다. 그 상황이면
     /// 여기서 로그가 열리지 않아 에러가 나고, 호출자는 잠금 화면으로 되돌리면 된다 —
     /// 복구는 사용자가 암호를 입력하는 [`Self::open`] 경로에서 일어난다.
     pub fn open_with_key(dir: impl AsRef<Path>, key: MasterKey, store: Store) -> Result<Self> {
@@ -553,7 +553,7 @@ fn to_hex(bytes: &[u8]) -> String {
 }
 
 fn from_hex(s: &str) -> Result<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         bail!(t!("core.hex_odd_length"));
     }
     (0..s.len())

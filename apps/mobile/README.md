@@ -42,8 +42,21 @@ cargo build --release --target aarch64-apple-ios -p ymemo-ffi
 flutter build ios --no-codesign
 ```
 
+## 화면
+
+- **잠금** — 마스터 암호로 vault 열기(없으면 생성).
+- **목록** — 메모 목록, 밀어서 삭제, ＋ 로 새 메모, 🔄 로 도착한 로그 병합(`sync_rebuild`).
+- **편집** — 제목 + 본문. 뒤로 가기/✓ 로 저장하며, 바뀐 게 없으면 쓰지 않는다.
+
+문구는 Dart 에 두지 않는다. 저장소 루트 `i18n/*.json` 을 `mobile_strings()` 로 한 벌 받아
+쓰므로 코어 에러와 화면 문구의 언어가 항상 같다. 문구를 늘리려면 두 JSON 에 `mobile.*`
+키를 넣고 `crates/ymemo-ffi` 의 `FfiStrings` 에 필드를 추가한다.
+
 ## 남은 일
 
-- [ ] Syncthing 모바일 연동 (gomobile `.aar` 번들 — 결정 사항)
-- [ ] QR 스캔으로 페어링 코드 읽기 (`mobile_scanner` 등)
+- [ ] Syncthing 모바일 연동 (gomobile `.aar` 번들 — 결정 사항). **이게 붙기 전까지 모바일은
+      로컬 전용**이다 — vault 디렉터리에 파일이 도착할 방법이 없어 🔄 도 할 일이 없다.
+- [ ] 그룹(폴더) 화면 — FFI(`group_*`)는 이미 있고 Dart UI 만 없다.
+- [ ] QR 스캔으로 페어링 코드 읽기 (`mobile_scanner` 등, `pairing_decode` 와 연결)
 - [ ] cargokit 통합으로 Rust 빌드를 gradle/Xcode 에 자동 연결
+- [ ] 자동 잠금/세션 정책 (데스크탑의 `settings.rs` 에 해당하는 것)
