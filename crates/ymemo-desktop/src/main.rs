@@ -45,6 +45,8 @@ const BAR_HEIGHT: f32 = 28.0;
 const SNAP_DIST: f32 = 12.0;
 /// 스티커 위치 감시(스냅 판정) 주기.
 const SNAP_INTERVAL: Duration = Duration::from_millis(90);
+/// 페어링 패널이 스크롤 없이 다 들어가는 최소 창 크기 (논리 px).
+const PAIRING_MIN_SIZE: (f32, f32) = (360.0, 520.0);
 
 type SharedVault = Rc<RefCell<Option<Vault>>>;
 
@@ -59,6 +61,8 @@ struct StickyEntry {
     last_pos: Cell<Option<(i32, i32)>>,
     /// 지난 틱 대비 위치가 바뀌었는가(=드래그 중). 멈춘 순간 한 번만 스냅한다.
     moving: Cell<bool>,
+    /// 제목 바로 끌고 있는 동안 잡은 지점(창 좌상단 기준, 물리 px). None = 끌기 아님.
+    drag_grab: Cell<Option<(i32, i32)>>,
 }
 
 type Stickies = Rc<RefCell<HashMap<String, StickyEntry>>>;
@@ -511,6 +515,28 @@ fn main() -> Result<()> {
         list.on_unshare(unshare);
     }
 
+    // ---- 페어링 패널 열림/닫힘 → 창 크기 조절 ----
+    // 패널은 스크롤 없이 한 화면에 다 보여야 하는데 두 창 모두 그만큼 크지 않다.
+    // 열 때만 잠시 넓히고, 닫으면 열기 직전 크기로 되돌린다.
+    {
+        let saved = Rc::new(Cell::new(None));
+        let weak = lock.as_weak();
+        lock.on_sync_toggled(move |open| {
+            if let Some(w) = weak.upgrade() {
+                resize_for_pairing(&w.window(), open, &saved);
+            }
+        });
+    }
+    {
+        let saved = Rc::new(Cell::new(None));
+        let weak = list.as_weak();
+        list.on_sync_toggled(move |open| {
+            if let Some(w) = weak.upgrade() {
+                resize_for_pairing(&w.window(), open, &saved);
+            }
+        });
+    }
+
     // ---- 주기적 병합: 다른 기기의 로그를 목록/스티커에 반영 ----
     let merge_timer = slint::Timer::default();
     {
@@ -787,14 +813,94 @@ fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
-    // 제목 바 드래그 → OS 네이티브 창 이동 (Wayland 에선 이 방법뿐이다).
+    // 제목 바 끌기 시작. 창 좌표를 읽을 수 있으면(X11) 우리가 직접 창을 옮기며
+    // 실시간 스냅을 걸고, 아니면(네이티브 Wayland) OS 이동에 맡기고 false 를 돌려준다.
     {
         let weak = window.as_weak();
-        window.on_start_drag(move || {
-            let w = weak.unwrap();
-            w.window().with_winit_window(|ww| {
-                let _ = ww.drag_window();
-            });
+        let ctx = ctx.clone();
+        let id = memo.id.clone();
+        window.on_begin_drag(move |px, py| {
+            let Some(w) = weak.upgrade() else { return false };
+            let sw = w.window();
+            let scale = sw.scale_factor();
+            let can_move = sw
+                .with_winit_window(|ww| ww.outer_position().is_ok())
+                .unwrap_or(false);
+            if !can_move {
+                sw.with_winit_window(|ww| {
+                    let _ = ww.drag_window();
+                });
+                return false;
+            }
+            if let Some(e) = ctx.stickies.borrow().get(&id) {
+                e.drag_grab.set(Some(((px * scale) as i32, (py * scale) as i32)));
+            }
+            true
+        });
+    }
+
+    // 끄는 중 매 포인터 이동: 포인터를 따라갈 위치를 구한 뒤 스냅해서 창을 옮긴다.
+    // 스냅된 뒤에도 포인터의 절대 위치로 다시 계산하므로, 임계값을 벗어나면 자연히 떨어진다.
+    {
+        let weak = window.as_weak();
+        let ctx = ctx.clone();
+        let id = memo.id.clone();
+        window.on_drag_move(move |mx, my| {
+            let Some(w) = weak.upgrade() else { return };
+            let map = ctx.stickies.borrow();
+            let Some(me) = map.get(&id) else { return };
+            let Some(grab) = me.drag_grab.get() else { return };
+            let sw = w.window();
+            let scale = sw.scale_factor();
+            let Some(Some((pos, size, mon))) = sw.with_winit_window(|ww| {
+                let p = ww.outer_position().ok()?;
+                let s = ww.inner_size();
+                let mon = ww.current_monitor().map(|m| {
+                    let mp = m.position();
+                    let ms = m.size();
+                    (mp.x, mp.y, ms.width as i32, ms.height as i32)
+                });
+                Some(((p.x, p.y), (s.width as i32, s.height as i32), mon))
+            }) else {
+                return;
+            };
+            // 창 위치 + 창 안 포인터 좌표 = 화면상의 포인터 위치. 여기서 잡은 지점을
+            // 빼면 "스냅이 없었다면 있었을" 위치가 나온다.
+            let want = (
+                pos.0 + (mx * scale) as i32 - grab.0,
+                pos.1 + (my * scale) as i32 - grab.1,
+            );
+            let others = other_rects(&map, &id);
+            let threshold = (SNAP_DIST * scale) as i32;
+            let (nx, ny) = snap_position((want.0, want.1, size.0, size.1), &others, mon, threshold);
+            if (nx, ny) != pos {
+                sw.with_winit_window(|ww| {
+                    ww.set_outer_position(PhysicalPosition::new(nx, ny));
+                });
+                me.last_pos.set(Some((nx, ny)));
+            }
+        });
+    }
+
+    // 손을 뗌: 끌기 상태를 지우고, 스냅 타이머가 이걸 "방금 멈춘 창"으로 오인해
+    // 한 번 더 스냅하지 않도록 관측 위치를 현재 값으로 맞춰 둔다.
+    {
+        let weak = window.as_weak();
+        let ctx = ctx.clone();
+        let id = memo.id.clone();
+        window.on_drag_end(move || {
+            let map = ctx.stickies.borrow();
+            let Some(e) = map.get(&id) else { return };
+            e.drag_grab.set(None);
+            if let Some(w) = weak.upgrade() {
+                if let Some(Some(p)) = w
+                    .window()
+                    .with_winit_window(|ww| ww.outer_position().ok().map(|p| (p.x, p.y)))
+                {
+                    e.last_pos.set(Some(p));
+                }
+            }
+            e.moving.set(false);
         });
     }
 
@@ -833,6 +939,7 @@ fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
             dirty,
             last_pos: Cell::new(None),
             moving: Cell::new(false),
+            drag_grab: Cell::new(None),
         },
     );
     Ok(())
@@ -876,6 +983,12 @@ fn snap_tick(stickies: &Stickies) {
     for (idx, (id, rect, scale, mon)) in rects.iter().enumerate() {
         let Some(e) = map.get(id) else { continue };
         let cur = (rect.0, rect.1);
+        // 제목 바로 끄는 중인 창은 drag-move 가 이미 실시간으로 스냅한다.
+        if e.drag_grab.get().is_some() {
+            e.last_pos.set(Some(cur));
+            e.moving.set(false);
+            continue;
+        }
         if e.last_pos.get() != Some(cur) {
             // 아직 움직이는 중.
             e.moving.set(true);
@@ -902,6 +1015,42 @@ fn snap_tick(stickies: &Stickies) {
         }
         e.moving.set(false);
     }
+}
+
+/// 페어링 패널을 열 때 창을 패널이 다 보이는 크기로 넓히고, 닫으면 원래 크기로 되돌린다.
+/// `saved` 에 열기 직전 크기를 담아 두므로 사용자가 조절해 둔 크기도 보존된다.
+fn resize_for_pairing(win: &slint::Window, open: bool, saved: &Cell<Option<(f32, f32)>>) {
+    let scale = win.scale_factor();
+    let size = win.size();
+    let cur = (size.width as f32 / scale, size.height as f32 / scale);
+    if open {
+        saved.set(Some(cur));
+        let want = (cur.0.max(PAIRING_MIN_SIZE.0), cur.1.max(PAIRING_MIN_SIZE.1));
+        if want != cur {
+            win.set_size(LogicalSize::new(want.0, want.1));
+        }
+    } else if let Some((w, h)) = saved.take() {
+        win.set_size(LogicalSize::new(w, h));
+    }
+}
+
+/// 나를 뺀, 화면에 보이는 다른 스티커들의 물리 px rect (끌기 중 스냅 대상).
+fn other_rects(map: &HashMap<String, StickyEntry>, me: &str) -> Vec<Rect> {
+    let mut out = Vec::new();
+    for (id, e) in map.iter() {
+        if id == me || !e.window.window().is_visible() {
+            continue;
+        }
+        let got = e.window.window().with_winit_window(|ww| {
+            let p = ww.outer_position().ok()?;
+            let s = ww.inner_size();
+            Some((p.x, p.y, s.width as i32, s.height as i32))
+        });
+        if let Some(Some(r)) = got {
+            out.push(r);
+        }
+    }
+    out
 }
 
 /// 활성 창 rect 를 화면 테두리·다른 창 테두리에 스냅한 새 좌표를 계산한다(순수 함수).

@@ -1,4 +1,4 @@
-import { LineEdit, Button, TextEdit, ListView, Slider, ScrollView } from "std-widgets.slint";
+import { LineEdit, Button, TextEdit, ListView, Slider } from "std-widgets.slint";
 
 // 스티커 팔레트: 색상 키("yellow"/"pink"/"green"/"blue"/"purple") → 실제 색.
 // 코어(Memo.color)는 키 문자열만 저장·동기화하고, 실제 색 해석은 여기 한곳에 모은다.
@@ -37,6 +37,7 @@ export global Palette {
     }
 }
 
+
 // 기기 페어링 패널.
 //  - 기본: 같은 네트워크에서 6자리 코드로 연결 (이 기기 코드 표시 + 상대 코드 입력).
 //  - 접이식 폴백: QR / 긴 device-id 직접 등록 (다른 네트워크용).
@@ -45,6 +46,34 @@ export struct SharedDeviceRow {
     id: string,        // syncthing device-id (해제 시 식별자)
     name: string,      // 사람이 읽을 이름 (없으면 빈 문자열 → id 축약 표시)
     connected: bool,   // 지금 연결돼 있는지
+}
+
+// 페어링 패널 상단의 탭 버튼 하나. 두 연결 방식을 한 번에 한쪽만 보여주기 위한 것으로,
+// 이렇게 나눠야 각 화면이 스크롤 없이 창 안에 다 들어온다.
+component TabButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    in property <color> ink;
+    callback clicked();
+
+    height: 26px;
+    background: root.active ? #ffffff26 : #ffffff08;
+    border-width: 1px;
+    border-color: root.active ? #ffffff59 : #ffffff1f;
+    Text {
+        width: 100%;
+        height: 100%;
+        text: root.label;
+        font-size: 11px;
+        font-weight: root.active ? 700 : 400;
+        color: root.ink;
+        opacity: root.active ? 1.0 : 0.7;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
 }
 
 component PairingPanel inherits VerticalLayout {
@@ -60,105 +89,90 @@ component PairingPanel inherits VerticalLayout {
     callback lan-join(string);
     callback unshare(string);              // 인자: 해제할 device-id
 
-    private property <bool> show-manual: false;
+    // 지금 보고 있는 탭. false = 같은 Wi-Fi(6자리), true = 다른 네트워크(QR·device-id).
+    private property <bool> remote: false;
 
-    spacing: 6px;
+    spacing: 8px;
 
     if root.available: VerticalLayout {
-        spacing: 6px;
+        spacing: 8px;
         Text {
             text: "기기 연결";
             font-size: 13px;
             font-weight: 700;
             color: root.ink;
         }
-        Text {
-            text: "같은 Wi-Fi에서 아래 6자리를 상대 기기에 입력하세요";
-            font-size: 10px;
-            color: root.ink;
-            opacity: 0.8;
-            wrap: word-wrap;
-        }
-        // 이 기기의 6자리 코드 (크게).
-        Text {
-            text: root.lan-code == "" ? "------" : root.lan-code;
-            font-size: 26px;
-            font-weight: 800;
-            letter-spacing: 3px;
-            color: root.ink;
-            horizontal-alignment: center;
-        }
-        // 상대 코드 입력 → LAN 연결.
+
+        // ---- 연결 방식 탭 ----
         HorizontalLayout {
+            TabButton {
+                label: "같은 Wi-Fi";
+                active: !root.remote;
+                ink: root.ink;
+                clicked => { root.remote = false; }
+            }
+            TabButton {
+                label: "다른 네트워크";
+                active: root.remote;
+                ink: root.ink;
+                clicked => { root.remote = true; }
+            }
+        }
+
+        // ---- 방식 1: 같은 네트워크 — 6자리 코드 ----
+        if !root.remote: VerticalLayout {
             spacing: 6px;
-            lan := LineEdit {
-                placeholder-text: "상대 6자리 코드";
-                input-type: InputType.number;
-                accepted => { root.lan-join(self.text); self.text = ""; }
-            }
-            Button {
-                text: "연결";
-                clicked => { root.lan-join(lan.text); lan.text = ""; }
-            }
-        }
-        if root.lan-message != "": Text {
-            text: root.lan-message;
-            font-size: 11px;
-            color: root.ink;
-            wrap: word-wrap;
-        }
-
-        // ---- 현재 공유 중인 기기 목록 (해제 가능) ----
-        if root.devices.length > 0: VerticalLayout {
-            spacing: 4px;
-            Rectangle { height: 1px; background: root.ink; opacity: 0.25; }
             Text {
-                text: "공유 중인 기기";
-                font-size: 12px;
-                font-weight: 700;
-                color: root.ink;
-            }
-            for dev in root.devices: HorizontalLayout {
-                spacing: 6px;
-                // 연결 상태 점.
-                Text {
-                    text: dev.connected ? "●" : "○";
-                    font-size: 11px;
-                    color: dev.connected ? #6fae6f : root.ink;
-                    vertical-alignment: center;
-                }
-                Text {
-                    text: dev.name;
-                    font-size: 11px;
-                    color: root.ink;
-                    overflow: elide;
-                    horizontal-stretch: 1;
-                    vertical-alignment: center;
-                }
-                Button {
-                    text: "해제";
-                    clicked => { root.unshare(dev.id); }
-                }
-            }
-        }
-
-        // ---- 폴백: 다른 네트워크면 QR / 긴 코드 ----
-        TouchArea {
-            height: 20px;
-            Text {
-                text: root.show-manual ? "▾ 다른 네트워크 (QR·코드)" : "▸ 다른 네트워크 (QR·코드)";
+                text: "① 아래 6자리를 상대 기기에 입력하거나,\n② 상대 기기의 6자리를 여기에 입력하세요.";
                 font-size: 10px;
                 color: root.ink;
                 opacity: 0.8;
+                wrap: word-wrap;
             }
-            clicked => { root.show-manual = !root.show-manual; }
+            // 이 기기의 6자리 코드 (크게).
+            Text {
+                text: root.lan-code == "" ? "------" : root.lan-code;
+                font-size: 26px;
+                font-weight: 800;
+                letter-spacing: 3px;
+                color: root.ink;
+                horizontal-alignment: center;
+            }
+            // 상대 코드 입력 → LAN 연결.
+            HorizontalLayout {
+                spacing: 6px;
+                lan := LineEdit {
+                    placeholder-text: "상대 6자리 코드";
+                    input-type: InputType.number;
+                    accepted => { root.lan-join(self.text); self.text = ""; }
+                }
+                Button {
+                    text: "연결";
+                    clicked => { root.lan-join(lan.text); lan.text = ""; }
+                }
+            }
+            if root.lan-message != "": Text {
+                text: root.lan-message;
+                font-size: 11px;
+                color: root.ink;
+                wrap: word-wrap;
+            }
         }
-        if root.show-manual: VerticalLayout {
+
+        // ---- 방식 2 (폴백): 다른 네트워크 — QR / 긴 device-id ----
+        if root.remote: VerticalLayout {
             spacing: 6px;
+            Text {
+                text: "다른 네트워크라면 QR 또는 아래 코드를 상대에게 전달하고,\n상대의 코드를 입력해 등록하세요.";
+                font-size: 10px;
+                color: root.ink;
+                opacity: 0.8;
+                wrap: word-wrap;
+            }
             Image {
                 source: root.qr;
-                width: 130px;
-                height: 130px;
+                width: 120px;
+                height: 120px;
                 image-rendering: pixelated;
             }
             Text {
@@ -184,6 +198,43 @@ component PairingPanel inherits VerticalLayout {
                 font-size: 11px;
                 color: root.ink;
                 wrap: word-wrap;
+            }
+        }
+
+        // ---- 현재 공유 중인 기기 목록 (탭과 무관하게 항상 보인다) ----
+        Rectangle { height: 1px; background: root.ink; opacity: 0.25; }
+        Text {
+            text: "공유 중인 기기";
+            font-size: 12px;
+            font-weight: 700;
+            color: root.ink;
+        }
+        if root.devices.length == 0: Text {
+            text: "아직 연결된 기기가 없습니다.";
+            font-size: 11px;
+            color: root.ink;
+            opacity: 0.7;
+        }
+        for dev in root.devices: HorizontalLayout {
+            spacing: 6px;
+            // 연결 상태 점.
+            Text {
+                text: dev.connected ? "●" : "○";
+                font-size: 11px;
+                color: dev.connected ? #6fae6f : root.ink;
+                vertical-alignment: center;
+            }
+            Text {
+                text: dev.name;
+                font-size: 11px;
+                color: root.ink;
+                overflow: elide;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            Button {
+                text: "해제";
+                clicked => { root.unshare(dev.id); }
             }
         }
     }
@@ -233,9 +284,13 @@ export component LockWindow inherits Window {
     callback add-peer(string);
     callback lan-join(string);
     callback unshare(string);
+    // 페어링 패널이 열리고 닫힐 때 — Rust 가 창을 패널이 다 보이는 크기로 넓혔다 되돌린다
+    // (스크롤 없이 한눈에 보이게 하는 것이 목적).
+    callback sync-toggled(bool);
 
     // Rust 가 vault 도착 시 닫을 수 있도록 in-out.
     in-out property <bool> show-sync: false;
+    changed show-sync => { root.sync-toggled(self.show-sync); }
     // 새 기기에서 "새로 만들기"를 골라 암호 설정 단계로 들어갔는가.
     private property <bool> creating: false;
 
@@ -259,23 +314,23 @@ export component LockWindow inherits Window {
             }
         }
 
-        if root.show-sync: ScrollView {
+        if root.show-sync: VerticalLayout {
             vertical-stretch: 1;
-            VerticalLayout {
-                PairingPanel {
-                    available: root.sync-available;
-                    my-code: root.my-pairing-code;
-                    qr: root.qr-image;
-                    message: root.peer-message;
-                    lan-code: root.lan-pair-code;
-                    lan-message: root.lan-message;
-                    devices: root.shared-devices;
-                    ink: #d8d2c2;
-                    add-peer(code) => { root.add-peer(code); }
-                    lan-join(code) => { root.lan-join(code); }
-                    unshare(id) => { root.unshare(id); }
-                }
+            PairingPanel {
+                available: root.sync-available;
+                my-code: root.my-pairing-code;
+                qr: root.qr-image;
+                message: root.peer-message;
+                lan-code: root.lan-pair-code;
+                lan-message: root.lan-message;
+                devices: root.shared-devices;
+                ink: #d8d2c2;
+                add-peer(code) => { root.add-peer(code); }
+                lan-join(code) => { root.lan-join(code); }
+                unshare(id) => { root.unshare(id); }
             }
+            // 남는 세로 공간은 아래로 — 패널이 위에 붙어 보이도록.
+            Rectangle { vertical-stretch: 1; }
         }
 
         if !root.show-sync: VerticalLayout {
@@ -320,8 +375,7 @@ export component LockWindow inherits Window {
                     clicked => { root.show-sync = true; }
                 }
                 Text {
-                    text: "다른 기기의 메모를 함께 쓰려면 '연결'을 고르고 페어링하세요. "
-                        + "먼저 '새 메모장'을 만들면 서로 다른 키가 생겨 동기화되지 않습니다.";
+                    text: "다른 기기의 메모를 함께 쓰려면 '연결'을 고르고 페어링하세요. 먼저 '새 메모장'을 만들면 서로 다른 키가 생겨 동기화되지 않습니다.";
                     font-size: 11px;
                     color: #b8b2a2;
                     wrap: word-wrap;
@@ -385,8 +439,11 @@ export component ListWindow inherits Window {
     callback delete-row(string, bool);     // id, is-group
     callback move-row(int, int);           // 원본 행 index, 놓은 행 index (음수/범위밖 = 최상위)
     callback add-peer(string);
+    // 페어링 패널 열림/닫힘 — Rust 가 창 크기를 맞춰 준다 (LockWindow 와 같은 이유).
+    callback sync-toggled(bool);
 
     private property <bool> show-sync: false;
+    changed show-sync => { root.sync-toggled(self.show-sync); }
     // 드래그 상태: 잡은 행과 현재 놓을 위치. -1 이면 드래그 중이 아님.
     private property <int> drag-source: -1;
     private property <int> drag-target: -1;
@@ -432,23 +489,22 @@ export component ListWindow inherits Window {
             }
         }
 
-        if root.show-sync: ScrollView {
+        if root.show-sync: VerticalLayout {
             vertical-stretch: 1;
-            VerticalLayout {
-                PairingPanel {
-                    available: root.sync-available;
-                    my-code: root.my-pairing-code;
-                    qr: root.qr-image;
-                    message: root.peer-message;
-                    lan-code: root.lan-pair-code;
-                    lan-message: root.lan-message;
-                    devices: root.shared-devices;
-                    ink: #d8d2c2;
-                    add-peer(code) => { root.add-peer(code); }
-                    lan-join(code) => { root.lan-join(code); }
-                    unshare(id) => { root.unshare(id); }
-                }
+            PairingPanel {
+                available: root.sync-available;
+                my-code: root.my-pairing-code;
+                qr: root.qr-image;
+                message: root.peer-message;
+                lan-code: root.lan-pair-code;
+                lan-message: root.lan-message;
+                devices: root.shared-devices;
+                ink: #d8d2c2;
+                add-peer(code) => { root.add-peer(code); }
+                lan-join(code) => { root.lan-join(code); }
+                unshare(id) => { root.unshare(id); }
             }
+            Rectangle { vertical-stretch: 1; }
         }
 
         if !root.show-sync && root.rows.length == 0: Text {
@@ -614,10 +670,19 @@ export component StickyWindow inherits Window {
     callback new-memo();
     callback set-color(string);
     callback set-opacity(float);
-    callback start-drag();
     callback toggle-collapse();
+    // 제목 바 끌기: OS 에 맡기지 않고 포인터를 직접 따라간다 — 그래야 손을 떼기 전,
+    // 끄는 도중에 자석 스냅이 걸린다. 인자는 모두 창 좌상단 기준 논리 px.
+    //   begin-drag: 잡은 지점. 창 좌표를 못 다루는 환경(네이티브 Wayland)이면
+    //               Rust 가 OS 이동으로 폴백하고 false 를 돌려준다 → 이후 추적 중단.
+    callback begin-drag(float, float) -> bool;
+    callback drag-move(float, float);   // 현재 포인터 위치
+    callback drag-end();
 
     private property <bool> show-palette: false;
+    // 이번 누름이 끌기로 넘어갔는가 / 그 끌기를 우리가 직접 따라가는 중인가.
+    private property <bool> drag-started: false;
+    private property <bool> drag-manual: false;
 
     public function focus-body() { body.focus(); }
 
@@ -640,9 +705,22 @@ export component StickyWindow inherits Window {
 
                 bar-ta := TouchArea {
                     moved => {
-                        if (self.mouse-x > self.pressed-x + 4px || self.mouse-x < self.pressed-x - 4px
-                            || self.mouse-y > self.pressed-y + 4px || self.mouse-y < self.pressed-y - 4px) {
-                            root.start-drag();
+                        // 4px 넘게 움직여야 끌기로 친다 (클릭·더블클릭 오인 방지).
+                        if (!root.drag-started
+                            && (self.mouse-x > self.pressed-x + 4px || self.mouse-x < self.pressed-x - 4px
+                                || self.mouse-y > self.pressed-y + 4px || self.mouse-y < self.pressed-y - 4px)) {
+                            root.drag-started = true;
+                            root.drag-manual = root.begin-drag(self.pressed-x / 1px, self.pressed-y / 1px);
+                        }
+                        if (root.drag-manual) {
+                            root.drag-move(self.mouse-x / 1px, self.mouse-y / 1px);
+                        }
+                    }
+                    pointer-event(ev) => {
+                        if (ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel) {
+                            if (root.drag-manual) { root.drag-end(); }
+                            root.drag-started = false;
+                            root.drag-manual = false;
                         }
                     }
                     double-clicked => { root.toggle-collapse(); }
