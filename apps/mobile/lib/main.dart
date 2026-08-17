@@ -1,6 +1,6 @@
 // Ymemo 모바일: 잠금 화면 → 메모 목록 → 메모 편집.
-// `lib/src/rust/` 는 flutter_rust_bridge codegen 생성물이다 (커밋 안 함).
-// 생성 전에는 이 파일이 컴파일되지 않는다 — apps/mobile/README.md 의 절차 참조.
+// `lib/src/rust/` 는 flutter_rust_bridge codegen 생성물이다 (커밋한다 — README 참조).
+// api.rs 를 고쳤으면 `flutter_rust_bridge_codegen generate` 를 먼저 돌려야 한다.
 //
 // 문구는 여기 쓰지 않는다. 데스크탑과 **같은 카탈로그**(저장소 루트 i18n/*.json)에서
 // `mobileStrings()` 로 한 벌 받아 쓴다 — 코어 에러 메시지와 언어가 갈라지지 않게 하기
@@ -10,6 +10,7 @@
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'src/rust/api.dart';
@@ -167,6 +168,13 @@ class _MemoListScreenState extends State<MemoListScreen> {
         title: Text(widget.strings.listTitle),
         actions: [
           IconButton(
+            icon: const Icon(Icons.qr_code_scanner),
+            tooltip: widget.strings.scanQr,
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => ScanScreen(strings: widget.strings)),
+            ),
+          ),
+          IconButton(
             icon: const Icon(Icons.sync),
             tooltip: widget.strings.syncNow,
             onPressed: () async {
@@ -302,6 +310,122 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 상대 기기의 페어링 QR 을 카메라로 읽는다.
+///
+/// 코드 형식 검증은 코어(`pairingDecode`)가 한다 — 형식이 바뀌어도 Dart 는 그대로다.
+/// 다만 **읽은 기기를 실제로 등록하지는 못한다**: 모바일 Syncthing(gomobile) 이 아직
+/// 없어서 공유 폴더에 상대를 추가할 수단이 없다. 그래서 지금은 확인만 하고 그 사실을
+/// 화면에 밝힌다 (조용히 실패해 "연결됐나?" 하게 만들지 않는다).
+class ScanScreen extends StatefulWidget {
+  const ScanScreen({super.key, required this.strings});
+
+  final FfiStrings strings;
+
+  @override
+  State<ScanScreen> createState() => _ScanScreenState();
+}
+
+class _ScanScreenState extends State<ScanScreen> {
+  final _controller = MobileScannerController(
+    // 페어링 QR 만 보면 되므로 다른 바코드 형식은 아예 무시한다(오탐·배터리 둘 다 이득).
+    formats: const [BarcodeFormat.qrCode],
+    detectionSpeed: DetectionSpeed.noDuplicates,
+  );
+  // 한 번 읽으면 더 처리하지 않는다 — 카메라는 같은 코드를 계속 흘려보낸다.
+  bool _handled = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _onDetect(BarcodeCapture capture) async {
+    if (_handled) return;
+    final raw = capture.barcodes
+        .map((b) => b.rawValue)
+        .firstWhere((v) => v != null && v.isNotEmpty, orElse: () => null);
+    if (raw == null) return;
+    _handled = true;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    try {
+      final deviceId = await pairingDecode(code: raw);
+      await _controller.stop();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(widget.strings.scanResult),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SelectableText(deviceId),
+              const SizedBox(height: 12),
+              Text(
+                widget.strings.scanPairingUnavailable,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(widget.strings.close),
+            ),
+          ],
+        ),
+      );
+      navigator.pop();
+    } catch (e) {
+      // 코어가 돌려준 문구(현재 언어)를 그대로 보여주고 다시 읽을 수 있게 푼다.
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      _handled = false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.strings.scanQr)),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          MobileScanner(
+            controller: _controller,
+            onDetect: _onDetect,
+            // 카메라를 못 여는 경우(권한 거부·카메라 없음)를 빈 화면으로 두지 않는다.
+            errorBuilder: (context, error) => Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  '${widget.strings.cameraError}\n\n${error.errorCode.name}',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              width: double.infinity,
+              color: Colors.black54,
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+              child: Text(
+                widget.strings.scanHint,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

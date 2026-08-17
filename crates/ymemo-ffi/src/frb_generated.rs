@@ -741,21 +741,33 @@ impl SseDecode for crate::api::FfiStrings {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_bodyHint = <String>::sse_decode(deserializer);
+        let mut var_cameraError = <String>::sse_decode(deserializer);
+        let mut var_close = <String>::sse_decode(deserializer);
         let mut var_listTitle = <String>::sse_decode(deserializer);
         let mut var_masterPassword = <String>::sse_decode(deserializer);
         let mut var_newMemo = <String>::sse_decode(deserializer);
         let mut var_opening = <String>::sse_decode(deserializer);
         let mut var_save = <String>::sse_decode(deserializer);
+        let mut var_scanHint = <String>::sse_decode(deserializer);
+        let mut var_scanPairingUnavailable = <String>::sse_decode(deserializer);
+        let mut var_scanQr = <String>::sse_decode(deserializer);
+        let mut var_scanResult = <String>::sse_decode(deserializer);
         let mut var_syncNow = <String>::sse_decode(deserializer);
         let mut var_titleHint = <String>::sse_decode(deserializer);
         let mut var_unlock = <String>::sse_decode(deserializer);
         return crate::api::FfiStrings {
             body_hint: var_bodyHint,
+            camera_error: var_cameraError,
+            close: var_close,
             list_title: var_listTitle,
             master_password: var_masterPassword,
             new_memo: var_newMemo,
             opening: var_opening,
             save: var_save,
+            scan_hint: var_scanHint,
+            scan_pairing_unavailable: var_scanPairingUnavailable,
+            scan_qr: var_scanQr,
+            scan_result: var_scanResult,
             sync_now: var_syncNow,
             title_hint: var_titleHint,
             unlock: var_unlock,
@@ -934,11 +946,17 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.body_hint.into_into_dart().into_dart(),
+            self.camera_error.into_into_dart().into_dart(),
+            self.close.into_into_dart().into_dart(),
             self.list_title.into_into_dart().into_dart(),
             self.master_password.into_into_dart().into_dart(),
             self.new_memo.into_into_dart().into_dart(),
             self.opening.into_into_dart().into_dart(),
             self.save.into_into_dart().into_dart(),
+            self.scan_hint.into_into_dart().into_dart(),
+            self.scan_pairing_unavailable.into_into_dart().into_dart(),
+            self.scan_qr.into_into_dart().into_dart(),
+            self.scan_result.into_into_dart().into_dart(),
             self.sync_now.into_into_dart().into_dart(),
             self.title_hint.into_into_dart().into_dart(),
             self.unlock.into_into_dart().into_dart(),
@@ -996,11 +1014,17 @@ impl SseEncode for crate::api::FfiStrings {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.body_hint, serializer);
+        <String>::sse_encode(self.camera_error, serializer);
+        <String>::sse_encode(self.close, serializer);
         <String>::sse_encode(self.list_title, serializer);
         <String>::sse_encode(self.master_password, serializer);
         <String>::sse_encode(self.new_memo, serializer);
         <String>::sse_encode(self.opening, serializer);
         <String>::sse_encode(self.save, serializer);
+        <String>::sse_encode(self.scan_hint, serializer);
+        <String>::sse_encode(self.scan_pairing_unavailable, serializer);
+        <String>::sse_encode(self.scan_qr, serializer);
+        <String>::sse_encode(self.scan_result, serializer);
         <String>::sse_encode(self.sync_now, serializer);
         <String>::sse_encode(self.title_hint, serializer);
         <String>::sse_encode(self.unlock, serializer);

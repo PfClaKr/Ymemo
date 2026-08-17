@@ -181,22 +181,34 @@ class FfiMemo {
 /// (언어를 바꾼 뒤엔 [`set_language`] 를 부르고 이걸 다시 받으면 된다.)
 class FfiStrings {
   final String bodyHint;
+  final String cameraError;
+  final String close;
   final String listTitle;
   final String masterPassword;
   final String newMemo;
   final String opening;
   final String save;
+  final String scanHint;
+  final String scanPairingUnavailable;
+  final String scanQr;
+  final String scanResult;
   final String syncNow;
   final String titleHint;
   final String unlock;
 
   const FfiStrings({
     required this.bodyHint,
+    required this.cameraError,
+    required this.close,
     required this.listTitle,
     required this.masterPassword,
     required this.newMemo,
     required this.opening,
     required this.save,
+    required this.scanHint,
+    required this.scanPairingUnavailable,
+    required this.scanQr,
+    required this.scanResult,
     required this.syncNow,
     required this.titleHint,
     required this.unlock,
@@ -205,11 +217,17 @@ class FfiStrings {
   @override
   int get hashCode =>
       bodyHint.hashCode ^
+      cameraError.hashCode ^
+      close.hashCode ^
       listTitle.hashCode ^
       masterPassword.hashCode ^
       newMemo.hashCode ^
       opening.hashCode ^
       save.hashCode ^
+      scanHint.hashCode ^
+      scanPairingUnavailable.hashCode ^
+      scanQr.hashCode ^
+      scanResult.hashCode ^
       syncNow.hashCode ^
       titleHint.hashCode ^
       unlock.hashCode;
@@ -220,11 +238,17 @@ class FfiStrings {
       other is FfiStrings &&
           runtimeType == other.runtimeType &&
           bodyHint == other.bodyHint &&
+          cameraError == other.cameraError &&
+          close == other.close &&
           listTitle == other.listTitle &&
           masterPassword == other.masterPassword &&
           newMemo == other.newMemo &&
           opening == other.opening &&
           save == other.save &&
+          scanHint == other.scanHint &&
+          scanPairingUnavailable == other.scanPairingUnavailable &&
+          scanQr == other.scanQr &&
+          scanResult == other.scanResult &&
           syncNow == other.syncNow &&
           titleHint == other.titleHint &&
           unlock == other.unlock;

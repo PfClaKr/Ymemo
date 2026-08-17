@@ -17,6 +17,8 @@ dependencies:
   #   cargo install flutter_rust_bridge_codegen --version 2.11.1
   # 그래서 캐럿(^) 없이 못 박는다 — pub 이 2.12 로 올려 버리면 CLI 와 어긋난다.
   flutter_rust_bridge: 2.11.1
+  # 페어링 코드 QR 스캔 (카메라). 권한은 플러그인이 런타임에 요청한다.
+  mobile_scanner: ^7.4.0
   # 플랫폼별 앱 데이터 디렉터리 (vault/캐시 경로)
   path_provider: ^2.1.0
 

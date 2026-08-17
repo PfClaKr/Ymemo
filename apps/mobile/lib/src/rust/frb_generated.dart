@@ -627,18 +627,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FfiStrings dco_decode_ffi_strings(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 15)
+      throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
     return FfiStrings(
       bodyHint: dco_decode_String(arr[0]),
-      listTitle: dco_decode_String(arr[1]),
-      masterPassword: dco_decode_String(arr[2]),
-      newMemo: dco_decode_String(arr[3]),
-      opening: dco_decode_String(arr[4]),
-      save: dco_decode_String(arr[5]),
-      syncNow: dco_decode_String(arr[6]),
-      titleHint: dco_decode_String(arr[7]),
-      unlock: dco_decode_String(arr[8]),
+      cameraError: dco_decode_String(arr[1]),
+      close: dco_decode_String(arr[2]),
+      listTitle: dco_decode_String(arr[3]),
+      masterPassword: dco_decode_String(arr[4]),
+      newMemo: dco_decode_String(arr[5]),
+      opening: dco_decode_String(arr[6]),
+      save: dco_decode_String(arr[7]),
+      scanHint: dco_decode_String(arr[8]),
+      scanPairingUnavailable: dco_decode_String(arr[9]),
+      scanQr: dco_decode_String(arr[10]),
+      scanResult: dco_decode_String(arr[11]),
+      syncNow: dco_decode_String(arr[12]),
+      titleHint: dco_decode_String(arr[13]),
+      unlock: dco_decode_String(arr[14]),
     );
   }
 
@@ -740,21 +746,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FfiStrings sse_decode_ffi_strings(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_bodyHint = sse_decode_String(deserializer);
+    var var_cameraError = sse_decode_String(deserializer);
+    var var_close = sse_decode_String(deserializer);
     var var_listTitle = sse_decode_String(deserializer);
     var var_masterPassword = sse_decode_String(deserializer);
     var var_newMemo = sse_decode_String(deserializer);
     var var_opening = sse_decode_String(deserializer);
     var var_save = sse_decode_String(deserializer);
+    var var_scanHint = sse_decode_String(deserializer);
+    var var_scanPairingUnavailable = sse_decode_String(deserializer);
+    var var_scanQr = sse_decode_String(deserializer);
+    var var_scanResult = sse_decode_String(deserializer);
     var var_syncNow = sse_decode_String(deserializer);
     var var_titleHint = sse_decode_String(deserializer);
     var var_unlock = sse_decode_String(deserializer);
     return FfiStrings(
         bodyHint: var_bodyHint,
+        cameraError: var_cameraError,
+        close: var_close,
         listTitle: var_listTitle,
         masterPassword: var_masterPassword,
         newMemo: var_newMemo,
         opening: var_opening,
         save: var_save,
+        scanHint: var_scanHint,
+        scanPairingUnavailable: var_scanPairingUnavailable,
+        scanQr: var_scanQr,
+        scanResult: var_scanResult,
         syncNow: var_syncNow,
         titleHint: var_titleHint,
         unlock: var_unlock);
@@ -871,11 +889,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_ffi_strings(FfiStrings self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.bodyHint, serializer);
+    sse_encode_String(self.cameraError, serializer);
+    sse_encode_String(self.close, serializer);
     sse_encode_String(self.listTitle, serializer);
     sse_encode_String(self.masterPassword, serializer);
     sse_encode_String(self.newMemo, serializer);
     sse_encode_String(self.opening, serializer);
     sse_encode_String(self.save, serializer);
+    sse_encode_String(self.scanHint, serializer);
+    sse_encode_String(self.scanPairingUnavailable, serializer);
+    sse_encode_String(self.scanQr, serializer);
+    sse_encode_String(self.scanResult, serializer);
     sse_encode_String(self.syncNow, serializer);
     sse_encode_String(self.titleHint, serializer);
     sse_encode_String(self.unlock, serializer);
