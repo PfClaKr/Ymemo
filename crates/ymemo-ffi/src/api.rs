@@ -127,6 +127,7 @@ pub fn language() -> String {
 /// "코드가 쓰는 키가 카탈로그에 있는지" 테스트가 모바일 문구까지 함께 지켜 준다.
 /// (언어를 바꾼 뒤엔 [`set_language`] 를 부르고 이걸 다시 받으면 된다.)
 pub struct FfiStrings {
+    pub add_photo: String,
     pub body_hint: String,
     pub camera_error: String,
     pub close: String,
@@ -134,6 +135,11 @@ pub struct FfiStrings {
     pub master_password: String,
     pub new_memo: String,
     pub opening: String,
+    pub photo_camera: String,
+    pub photo_gallery: String,
+    pub photo_missing: String,
+    pub photo_remove: String,
+    pub photo_size: String,
     pub save: String,
     pub scan_hint: String,
     pub scan_pairing_unavailable: String,
@@ -147,6 +153,7 @@ pub struct FfiStrings {
 /// 현재 언어의 모바일 문구를 모아 돌려준다.
 pub fn mobile_strings() -> FfiStrings {
     FfiStrings {
+        add_photo: t!("mobile.add_photo"),
         body_hint: t!("mobile.body_hint"),
         camera_error: t!("mobile.camera_error"),
         close: t!("mobile.close"),
@@ -154,6 +161,11 @@ pub fn mobile_strings() -> FfiStrings {
         master_password: t!("mobile.master_password"),
         new_memo: t!("mobile.new_memo"),
         opening: t!("mobile.opening"),
+        photo_camera: t!("mobile.photo_camera"),
+        photo_gallery: t!("mobile.photo_gallery"),
+        photo_missing: t!("mobile.photo_missing"),
+        photo_remove: t!("mobile.photo_remove"),
+        photo_size: t!("mobile.photo_size"),
         save: t!("mobile.save"),
         scan_hint: t!("mobile.scan_hint"),
         scan_pairing_unavailable: t!("mobile.scan_pairing_unavailable"),

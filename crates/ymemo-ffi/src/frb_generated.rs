@@ -997,6 +997,7 @@ impl SseDecode for crate::api::FfiMemo {
 impl SseDecode for crate::api::FfiStrings {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_addPhoto = <String>::sse_decode(deserializer);
         let mut var_bodyHint = <String>::sse_decode(deserializer);
         let mut var_cameraError = <String>::sse_decode(deserializer);
         let mut var_close = <String>::sse_decode(deserializer);
@@ -1004,6 +1005,11 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_masterPassword = <String>::sse_decode(deserializer);
         let mut var_newMemo = <String>::sse_decode(deserializer);
         let mut var_opening = <String>::sse_decode(deserializer);
+        let mut var_photoCamera = <String>::sse_decode(deserializer);
+        let mut var_photoGallery = <String>::sse_decode(deserializer);
+        let mut var_photoMissing = <String>::sse_decode(deserializer);
+        let mut var_photoRemove = <String>::sse_decode(deserializer);
+        let mut var_photoSize = <String>::sse_decode(deserializer);
         let mut var_save = <String>::sse_decode(deserializer);
         let mut var_scanHint = <String>::sse_decode(deserializer);
         let mut var_scanPairingUnavailable = <String>::sse_decode(deserializer);
@@ -1013,6 +1019,7 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_titleHint = <String>::sse_decode(deserializer);
         let mut var_unlock = <String>::sse_decode(deserializer);
         return crate::api::FfiStrings {
+            add_photo: var_addPhoto,
             body_hint: var_bodyHint,
             camera_error: var_cameraError,
             close: var_close,
@@ -1020,6 +1027,11 @@ impl SseDecode for crate::api::FfiStrings {
             master_password: var_masterPassword,
             new_memo: var_newMemo,
             opening: var_opening,
+            photo_camera: var_photoCamera,
+            photo_gallery: var_photoGallery,
+            photo_missing: var_photoMissing,
+            photo_remove: var_photoRemove,
+            photo_size: var_photoSize,
             save: var_save,
             scan_hint: var_scanHint,
             scan_pairing_unavailable: var_scanPairingUnavailable,
@@ -1236,6 +1248,7 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::FfiMemo> for crate::api::FfiM
 impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.add_photo.into_into_dart().into_dart(),
             self.body_hint.into_into_dart().into_dart(),
             self.camera_error.into_into_dart().into_dart(),
             self.close.into_into_dart().into_dart(),
@@ -1243,6 +1256,11 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.master_password.into_into_dart().into_dart(),
             self.new_memo.into_into_dart().into_dart(),
             self.opening.into_into_dart().into_dart(),
+            self.photo_camera.into_into_dart().into_dart(),
+            self.photo_gallery.into_into_dart().into_dart(),
+            self.photo_missing.into_into_dart().into_dart(),
+            self.photo_remove.into_into_dart().into_dart(),
+            self.photo_size.into_into_dart().into_dart(),
             self.save.into_into_dart().into_dart(),
             self.scan_hint.into_into_dart().into_dart(),
             self.scan_pairing_unavailable.into_into_dart().into_dart(),
@@ -1326,6 +1344,7 @@ impl SseEncode for crate::api::FfiMemo {
 impl SseEncode for crate::api::FfiStrings {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.add_photo, serializer);
         <String>::sse_encode(self.body_hint, serializer);
         <String>::sse_encode(self.camera_error, serializer);
         <String>::sse_encode(self.close, serializer);
@@ -1333,6 +1352,11 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.master_password, serializer);
         <String>::sse_encode(self.new_memo, serializer);
         <String>::sse_encode(self.opening, serializer);
+        <String>::sse_encode(self.photo_camera, serializer);
+        <String>::sse_encode(self.photo_gallery, serializer);
+        <String>::sse_encode(self.photo_missing, serializer);
+        <String>::sse_encode(self.photo_remove, serializer);
+        <String>::sse_encode(self.photo_size, serializer);
         <String>::sse_encode(self.save, serializer);
         <String>::sse_encode(self.scan_hint, serializer);
         <String>::sse_encode(self.scan_pairing_unavailable, serializer);

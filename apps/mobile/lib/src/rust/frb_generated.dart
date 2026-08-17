@@ -828,24 +828,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FfiStrings dco_decode_ffi_strings(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 15)
-      throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
+    if (arr.length != 21)
+      throw Exception('unexpected arr length: expect 21 but see ${arr.length}');
     return FfiStrings(
-      bodyHint: dco_decode_String(arr[0]),
-      cameraError: dco_decode_String(arr[1]),
-      close: dco_decode_String(arr[2]),
-      listTitle: dco_decode_String(arr[3]),
-      masterPassword: dco_decode_String(arr[4]),
-      newMemo: dco_decode_String(arr[5]),
-      opening: dco_decode_String(arr[6]),
-      save: dco_decode_String(arr[7]),
-      scanHint: dco_decode_String(arr[8]),
-      scanPairingUnavailable: dco_decode_String(arr[9]),
-      scanQr: dco_decode_String(arr[10]),
-      scanResult: dco_decode_String(arr[11]),
-      syncNow: dco_decode_String(arr[12]),
-      titleHint: dco_decode_String(arr[13]),
-      unlock: dco_decode_String(arr[14]),
+      addPhoto: dco_decode_String(arr[0]),
+      bodyHint: dco_decode_String(arr[1]),
+      cameraError: dco_decode_String(arr[2]),
+      close: dco_decode_String(arr[3]),
+      listTitle: dco_decode_String(arr[4]),
+      masterPassword: dco_decode_String(arr[5]),
+      newMemo: dco_decode_String(arr[6]),
+      opening: dco_decode_String(arr[7]),
+      photoCamera: dco_decode_String(arr[8]),
+      photoGallery: dco_decode_String(arr[9]),
+      photoMissing: dco_decode_String(arr[10]),
+      photoRemove: dco_decode_String(arr[11]),
+      photoSize: dco_decode_String(arr[12]),
+      save: dco_decode_String(arr[13]),
+      scanHint: dco_decode_String(arr[14]),
+      scanPairingUnavailable: dco_decode_String(arr[15]),
+      scanQr: dco_decode_String(arr[16]),
+      scanResult: dco_decode_String(arr[17]),
+      syncNow: dco_decode_String(arr[18]),
+      titleHint: dco_decode_String(arr[19]),
+      unlock: dco_decode_String(arr[20]),
     );
   }
 
@@ -988,6 +994,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   FfiStrings sse_decode_ffi_strings(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_addPhoto = sse_decode_String(deserializer);
     var var_bodyHint = sse_decode_String(deserializer);
     var var_cameraError = sse_decode_String(deserializer);
     var var_close = sse_decode_String(deserializer);
@@ -995,6 +1002,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_masterPassword = sse_decode_String(deserializer);
     var var_newMemo = sse_decode_String(deserializer);
     var var_opening = sse_decode_String(deserializer);
+    var var_photoCamera = sse_decode_String(deserializer);
+    var var_photoGallery = sse_decode_String(deserializer);
+    var var_photoMissing = sse_decode_String(deserializer);
+    var var_photoRemove = sse_decode_String(deserializer);
+    var var_photoSize = sse_decode_String(deserializer);
     var var_save = sse_decode_String(deserializer);
     var var_scanHint = sse_decode_String(deserializer);
     var var_scanPairingUnavailable = sse_decode_String(deserializer);
@@ -1004,6 +1016,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_titleHint = sse_decode_String(deserializer);
     var var_unlock = sse_decode_String(deserializer);
     return FfiStrings(
+        addPhoto: var_addPhoto,
         bodyHint: var_bodyHint,
         cameraError: var_cameraError,
         close: var_close,
@@ -1011,6 +1024,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         masterPassword: var_masterPassword,
         newMemo: var_newMemo,
         opening: var_opening,
+        photoCamera: var_photoCamera,
+        photoGallery: var_photoGallery,
+        photoMissing: var_photoMissing,
+        photoRemove: var_photoRemove,
+        photoSize: var_photoSize,
         save: var_save,
         scanHint: var_scanHint,
         scanPairingUnavailable: var_scanPairingUnavailable,
@@ -1165,6 +1183,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_ffi_strings(FfiStrings self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.addPhoto, serializer);
     sse_encode_String(self.bodyHint, serializer);
     sse_encode_String(self.cameraError, serializer);
     sse_encode_String(self.close, serializer);
@@ -1172,6 +1191,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.masterPassword, serializer);
     sse_encode_String(self.newMemo, serializer);
     sse_encode_String(self.opening, serializer);
+    sse_encode_String(self.photoCamera, serializer);
+    sse_encode_String(self.photoGallery, serializer);
+    sse_encode_String(self.photoMissing, serializer);
+    sse_encode_String(self.photoRemove, serializer);
+    sse_encode_String(self.photoSize, serializer);
     sse_encode_String(self.save, serializer);
     sse_encode_String(self.scanHint, serializer);
     sse_encode_String(self.scanPairingUnavailable, serializer);

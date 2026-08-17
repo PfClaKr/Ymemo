@@ -8,8 +8,11 @@
 // crates/ymemo-ffi 의 FfiStrings 에 필드를 추가한다 (ymemo-i18n 테스트가 키를 검사한다).
 
 import 'dart:io' show Platform;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -242,6 +245,77 @@ class MemoEditScreen extends StatefulWidget {
 class _MemoEditScreenState extends State<MemoEditScreen> {
   late final TextEditingController _title = TextEditingController(text: widget.title);
   late final TextEditingController _body = TextEditingController(text: widget.body);
+  List<FfiAttachment> _photos = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _reloadPhotos();
+  }
+
+  Future<void> _reloadPhotos() async {
+    final list = await attachmentList(memoId: widget.id);
+    if (mounted) setState(() => _photos = list);
+  }
+
+  /// 사진첩/카메라에서 한 장 골라 붙인다.
+  ///
+  /// 원본 바이트를 그대로 코어에 넘긴다(리사이즈하지 않는 것이 결정 사항). 다만
+  /// **원본 픽셀 크기는 여기서 재서 넘긴다** — 코어에 이미지 디코더를 두지 않기 때문이고,
+  /// 그 값으로 표시 높이 비율이 정해진다.
+  Future<void> _addPhoto(ImageSource source) async {
+    final picked = await ImagePicker().pickImage(source: source);
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    final size = await _decodeSize(bytes);
+    await attachmentAdd(
+      memoId: widget.id,
+      data: bytes,
+      name: picked.name,
+      mime: picked.mimeType ?? '',
+      widthPx: size?.width.toInt() ?? 0,
+      heightPx: size?.height.toInt() ?? 0,
+    );
+    await _reloadPhotos();
+  }
+
+  /// 원본 픽셀 크기. 디코딩에 실패하면 null (코어는 0 을 받고 1:1 로 취급한다).
+  Future<ui.Size?> _decodeSize(Uint8List bytes) async {
+    try {
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final size = ui.Size(frame.image.width.toDouble(), frame.image.height.toDouble());
+      frame.image.dispose();
+      codec.dispose();
+      return size;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _pickSource() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: Text(widget.strings.photoGallery),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera),
+              title: Text(widget.strings.photoCamera),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source != null) await _addPhoto(source);
+  }
 
   @override
   void dispose() {
@@ -278,6 +352,11 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
           title: Text(widget.strings.newMemo),
           actions: [
             IconButton(
+              icon: const Icon(Icons.add_photo_alternate),
+              tooltip: widget.strings.addPhoto,
+              onPressed: _pickSource,
+            ),
+            IconButton(
               icon: const Icon(Icons.check),
               tooltip: widget.strings.save,
               onPressed: () async {
@@ -299,12 +378,22 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
               ),
               const SizedBox(height: 12),
               Expanded(
-                child: TextField(
-                  controller: _body,
-                  decoration: InputDecoration(hintText: widget.strings.bodyHint),
-                  maxLines: null,
-                  expands: true,
-                  textAlignVertical: TextAlignVertical.top,
+                child: ListView(
+                  children: [
+                    TextField(
+                      controller: _body,
+                      decoration: InputDecoration(hintText: widget.strings.bodyHint),
+                      maxLines: null,
+                      minLines: 4,
+                    ),
+                    for (final photo in _photos)
+                      AttachmentView(
+                        key: ValueKey(photo.id),
+                        strings: widget.strings,
+                        attachment: photo,
+                        onChanged: _reloadPhotos,
+                      ),
+                  ],
                 ),
               ),
             ],
@@ -424,6 +513,108 @@ class _ScanScreenState extends State<ScanScreen> {
                 style: const TextStyle(color: Colors.white),
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 첨부 사진 한 장: 표시 + 크기 조절 + 떼기.
+///
+/// 표시 크기는 **폰트 크기 배수(em)** 로 동기화된다. 여기서 슬라이더로 줄이면 데스크탑에서도
+/// 같은 배수로 줄어들고, 실제 픽셀은 각 플랫폼이 자기 기본 폰트로 환산한다.
+class AttachmentView extends StatefulWidget {
+  const AttachmentView({
+    super.key,
+    required this.strings,
+    required this.attachment,
+    required this.onChanged,
+  });
+
+  final FfiStrings strings;
+  final FfiAttachment attachment;
+  final Future<void> Function() onChanged;
+
+  @override
+  State<AttachmentView> createState() => _AttachmentViewState();
+}
+
+class _AttachmentViewState extends State<AttachmentView> {
+  Uint8List? _bytes;
+  bool _missing = false;
+  late double _widthEm = widget.attachment.widthEmMilli / 1000.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    // 아직 동기화 전이면 바이트가 없다 — 그 사실을 그대로 보여준다.
+    if (!await attachmentHasBlob(hash: widget.attachment.hash)) {
+      if (mounted) setState(() => _missing = true);
+      return;
+    }
+    final bytes = await attachmentBytes(hash: widget.attachment.hash);
+    if (mounted) setState(() => _bytes = bytes);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 이 플랫폼의 기본 본문 폰트 크기 = em 의 기준.
+    final baseFont = DefaultTextStyle.of(context).style.fontSize ?? 14.0;
+    final width = _widthEm * baseFont;
+    final a = widget.attachment;
+    final ratio = (a.widthPx > 0 && a.heightPx > 0) ? a.heightPx / a.widthPx : 1.0;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_missing)
+            Text(widget.strings.photoMissing, style: Theme.of(context).textTheme.bodySmall)
+          else if (_bytes == null)
+            const SizedBox(height: 48, child: Center(child: CircularProgressIndicator()))
+          else
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.memory(
+                _bytes!,
+                width: width,
+                height: width * ratio,
+                fit: BoxFit.cover,
+              ),
+            ),
+          Row(
+            children: [
+              Text(widget.strings.photoSize, style: Theme.of(context).textTheme.bodySmall),
+              Expanded(
+                child: Slider(
+                  // 코어의 허용 범위(4~80em)와 같은 값. 벗어나면 코어가 어차피 자른다.
+                  min: 4,
+                  max: 80,
+                  value: _widthEm.clamp(4, 80),
+                  onChanged: (v) => setState(() => _widthEm = v),
+                  // 드래그하는 내내 쓰지 않고 손을 뗄 때 한 번만 기록한다
+                  // (슬라이더 한 번에 change 를 수십 개 남기면 로그가 부푼다).
+                  onChangeEnd: (v) async {
+                    await attachmentSetWidth(id: a.id, widthEmMilli: (v * 1000).round());
+                    await widget.onChanged();
+                  },
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline),
+                tooltip: widget.strings.photoRemove,
+                onPressed: () async {
+                  await attachmentRemove(id: a.id);
+                  await widget.onChanged();
+                },
+              ),
+            ],
           ),
         ],
       ),

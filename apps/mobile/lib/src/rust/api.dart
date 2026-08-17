@@ -280,6 +280,7 @@ class FfiMemo {
 /// "코드가 쓰는 키가 카탈로그에 있는지" 테스트가 모바일 문구까지 함께 지켜 준다.
 /// (언어를 바꾼 뒤엔 [`set_language`] 를 부르고 이걸 다시 받으면 된다.)
 class FfiStrings {
+  final String addPhoto;
   final String bodyHint;
   final String cameraError;
   final String close;
@@ -287,6 +288,11 @@ class FfiStrings {
   final String masterPassword;
   final String newMemo;
   final String opening;
+  final String photoCamera;
+  final String photoGallery;
+  final String photoMissing;
+  final String photoRemove;
+  final String photoSize;
   final String save;
   final String scanHint;
   final String scanPairingUnavailable;
@@ -297,6 +303,7 @@ class FfiStrings {
   final String unlock;
 
   const FfiStrings({
+    required this.addPhoto,
     required this.bodyHint,
     required this.cameraError,
     required this.close,
@@ -304,6 +311,11 @@ class FfiStrings {
     required this.masterPassword,
     required this.newMemo,
     required this.opening,
+    required this.photoCamera,
+    required this.photoGallery,
+    required this.photoMissing,
+    required this.photoRemove,
+    required this.photoSize,
     required this.save,
     required this.scanHint,
     required this.scanPairingUnavailable,
@@ -316,6 +328,7 @@ class FfiStrings {
 
   @override
   int get hashCode =>
+      addPhoto.hashCode ^
       bodyHint.hashCode ^
       cameraError.hashCode ^
       close.hashCode ^
@@ -323,6 +336,11 @@ class FfiStrings {
       masterPassword.hashCode ^
       newMemo.hashCode ^
       opening.hashCode ^
+      photoCamera.hashCode ^
+      photoGallery.hashCode ^
+      photoMissing.hashCode ^
+      photoRemove.hashCode ^
+      photoSize.hashCode ^
       save.hashCode ^
       scanHint.hashCode ^
       scanPairingUnavailable.hashCode ^
@@ -337,6 +355,7 @@ class FfiStrings {
       identical(this, other) ||
       other is FfiStrings &&
           runtimeType == other.runtimeType &&
+          addPhoto == other.addPhoto &&
           bodyHint == other.bodyHint &&
           cameraError == other.cameraError &&
           close == other.close &&
@@ -344,6 +363,11 @@ class FfiStrings {
           masterPassword == other.masterPassword &&
           newMemo == other.newMemo &&
           opening == other.opening &&
+          photoCamera == other.photoCamera &&
+          photoGallery == other.photoGallery &&
+          photoMissing == other.photoMissing &&
+          photoRemove == other.photoRemove &&
+          photoSize == other.photoSize &&
           save == other.save &&
           scanHint == other.scanHint &&
           scanPairingUnavailable == other.scanPairingUnavailable &&
