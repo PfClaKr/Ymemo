@@ -29,10 +29,11 @@ pub fn generate_salt() -> Salt {
 
 /// 마스터 암호에서 유도한 대칭 암호화 키.
 ///
-/// 원시 키 바이트는 밖으로 노출하지 않고, 준비된 AEAD cipher 만 들고 있는다.
 /// Clone 은 같은 키를 여러 로그(vault 의 기기별 로그들)에서 쓰기 위함.
 #[derive(Clone)]
 pub struct MasterKey {
+    /// 유도된 원시 키. [`Self::to_bytes`] 로만 나가며, 그 문서를 반드시 읽을 것.
+    raw: [u8; KEY_LEN],
     cipher: XChaCha20Poly1305,
 }
 
@@ -45,9 +46,23 @@ impl MasterKey {
         Argon2::default()
             .hash_password_into(password, salt, &mut key)
             .map_err(|e| anyhow!("Argon2id 키 유도 실패: {e}"))?;
-        let cipher = XChaCha20Poly1305::new_from_slice(&key)
+        Self::from_bytes(&key)
+    }
+
+    /// 이미 유도해 둔 원시 키로 복원 (암호 없이 여는 경로).
+    pub fn from_bytes(key: &[u8; KEY_LEN]) -> Result<Self> {
+        let cipher = XChaCha20Poly1305::new_from_slice(key)
             .map_err(|e| anyhow!("cipher 초기화 실패: {e}"))?;
-        Ok(Self { cipher })
+        Ok(Self { raw: *key, cipher })
+    }
+
+    /// 유도된 원시 키 바이트.
+    ///
+    /// **이 값을 디스크에 남기면 그 순간부터 vault 의 저장 시 암호화는 의미가 없다**
+    /// (마스터 암호 없이도 모든 메모를 읽을 수 있는 값이기 때문). 사용자가 명시적으로
+    /// 켠 "자동 잠금 해제" 캐시 외에는 쓰지 말 것.
+    pub fn to_bytes(&self) -> [u8; KEY_LEN] {
+        self.raw
     }
 
     /// 평문을 암호화. 반환 형식: `nonce(24B) || ciphertext+tag`.

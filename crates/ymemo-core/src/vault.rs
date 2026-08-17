@@ -78,25 +78,14 @@ impl Vault {
     /// 모든 기기 로그를 병합해 automerge 문서와 로컬 캐시를 재구성한다.
     pub fn open(dir: impl AsRef<Path>, password: &[u8], store: Store) -> Result<Self> {
         let dir = dir.as_ref().to_path_buf();
-        let header_path = dir.join(HEADER_FILE);
-        let header: VaultHeader = serde_json::from_slice(
-            &fs::read(&header_path)
-                .with_context(|| format!("vault 헤더 없음: {}", header_path.display()))?,
-        )?;
+        let header = read_header(&dir)?;
 
         let salt_vec = from_hex(&header.salt)?;
         let salt: Salt = salt_vec
             .try_into()
             .map_err(|_| anyhow!("헤더의 salt 길이가 {SALT_LEN}B 가 아님"))?;
         let key = MasterKey::derive(password, &salt)?;
-
-        // 암호 검증: 카나리 복호화가 실패하면 틀린 암호.
-        let check = key
-            .decrypt(&from_hex(&header.key_check)?)
-            .map_err(|_| anyhow!("암호가 틀렸습니다, 다시 입력해주세요"))?;
-        if check != KEY_CHECK {
-            bail!("key_check 불일치 (헤더 손상?)");
-        }
+        verify_key(&header, &key)?;
 
         let device_id = store.device_id()?;
         fs::create_dir_all(dir.join(LOGS_DIR))?;
@@ -107,6 +96,27 @@ impl Vault {
         // salt 에서 옛 키를 찾아 로그를 정본 키로 재암호화한다.
         heal_divergent_log(&dir, &device_id, password, &key)?;
 
+        Self::finish_open(dir, store, key, device_id)
+    }
+
+    /// 이미 유도해 둔 키로 열기 ("자동 잠금 해제" 경로 — 마스터 암호를 묻지 않는다).
+    ///
+    /// 암호가 없으므로 갈라진 키 자가 치유([`heal_divergent_log`])는 건너뛴다. 그 상황이면
+    /// 여기서 로그가 열리지 않아 에러가 나고, 호출자는 잠금 화면으로 되돌리면 된다 —
+    /// 복구는 사용자가 암호를 입력하는 [`Self::open`] 경로에서 일어난다.
+    pub fn open_with_key(dir: impl AsRef<Path>, key: MasterKey, store: Store) -> Result<Self> {
+        let dir = dir.as_ref().to_path_buf();
+        let header = read_header(&dir)?;
+        verify_key(&header, &key)?;
+
+        let device_id = store.device_id()?;
+        fs::create_dir_all(dir.join(LOGS_DIR))?;
+
+        Self::finish_open(dir, store, key, device_id)
+    }
+
+    /// 키 검증까지 끝난 뒤의 공통 마무리: 내 로그를 열고 전체를 병합한다.
+    fn finish_open(dir: PathBuf, store: Store, key: MasterKey, device_id: String) -> Result<Self> {
         let own_log = ChangeLog::open(
             dir.join(LOGS_DIR).join(format!("{device_id}.{LOG_EXT}")),
             key.clone(),
@@ -122,6 +132,12 @@ impl Vault {
         };
         vault.rebuild()?;
         Ok(vault)
+    }
+
+    /// 이 vault 를 여는 원시 키. "자동 잠금 해제" 캐시에 쓰라고 있는 것으로,
+    /// 보안상의 의미는 [`MasterKey::to_bytes`] 문서를 볼 것.
+    pub fn key_bytes(&self) -> [u8; crate::crypto::KEY_LEN] {
+        self.key.to_bytes()
     }
 
     /// 헤더가 있으면 열고, 없으면 새로 만든다.
@@ -412,6 +428,25 @@ fn heal_divergent_log(
     Ok(())
 }
 
+/// `vault.json` 헤더를 읽는다.
+fn read_header(dir: &Path) -> Result<VaultHeader> {
+    let path = dir.join(HEADER_FILE);
+    let bytes =
+        fs::read(&path).with_context(|| format!("vault 헤더 없음: {}", path.display()))?;
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+/// 헤더의 카나리(key_check)를 복호화해 키가 맞는지 본다. 실패 = 틀린 암호/키.
+fn verify_key(header: &VaultHeader, key: &MasterKey) -> Result<()> {
+    let check = key
+        .decrypt(&from_hex(&header.key_check)?)
+        .map_err(|_| anyhow!("암호가 틀렸습니다, 다시 입력해주세요"))?;
+    if check != KEY_CHECK {
+        bail!("key_check 불일치 (헤더 손상?)");
+    }
+    Ok(())
+}
+
 /// `vault.sync-conflict-*.json` 들에서 salt 를 파싱해 반환. 읽기/파싱 실패는 조용히 건너뛴다.
 fn conflict_salts(dir: &Path) -> Vec<Salt> {
     let mut salts = Vec::new();
@@ -664,6 +699,31 @@ mod tests {
         // 로그가 비어 있어도 헤더 카나리만으로 즉시 거부돼야 한다.
         assert!(Vault::open(&dir, b"wrong", Store::open_in_memory().unwrap()).is_err());
         fs::remove_dir_all(&dir).ok();
+    }
+
+    /// "자동 잠금 해제": 캐시해 둔 원시 키만으로 암호 없이 같은 vault 가 열려야 한다.
+    #[test]
+    fn cached_key_opens_vault_without_password() {
+        let dir = temp_dir();
+        let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
+
+        let memo = Memo::new("자동 해제로 볼 메모", "본문");
+        let key_bytes = {
+            let mut vault = Vault::create(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+            vault.upsert(&memo).unwrap();
+            vault.key_bytes()
+        };
+
+        let key = MasterKey::from_bytes(&key_bytes).unwrap();
+        let vault = Vault::open_with_key(&dir, key, Store::open(&db).unwrap()).unwrap();
+        assert_eq!(vault.store().list().unwrap(), vec![memo]);
+
+        // 엉뚱한 키는 헤더 카나리에서 걸러진다.
+        let bogus = MasterKey::from_bytes(&[7u8; crate::crypto::KEY_LEN]).unwrap();
+        assert!(Vault::open_with_key(&dir, bogus, Store::open_in_memory().unwrap()).is_err());
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db).ok();
     }
 
     /// automerge 의 핵심 가치: 두 기기가 같은 메모의 **다른 필드**를 동시에 고치면

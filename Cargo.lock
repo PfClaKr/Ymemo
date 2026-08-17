@@ -6592,6 +6592,8 @@ dependencies = [
  "i-slint-backend-winit",
  "ksni",
  "qrcode",
+ "serde",
+ "serde_json",
  "slint",
  "slint-build",
  "tray-icon",

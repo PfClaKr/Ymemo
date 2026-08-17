@@ -17,7 +17,7 @@ pub use imp::{start, TrayHandle};
 // ===========================================================================
 #[cfg(target_os = "linux")]
 mod imp {
-    use crate::{request_quit, request_toggle, tray_icon_rgba};
+    use crate::{request_lock, request_quit, request_toggle, tray_icon_rgba, tray_text};
 
     struct YmemoTray;
 
@@ -55,14 +55,20 @@ mod imp {
             use ksni::menu::*;
             vec![
                 StandardItem {
-                    label: "메모 목록".into(),
+                    label: tray_text("메모 목록", "Memo list"),
                     activate: Box::new(|_| request_toggle()),
+                    ..Default::default()
+                }
+                .into(),
+                StandardItem {
+                    label: tray_text("잠금", "Lock"),
+                    activate: Box::new(|_| request_lock()),
                     ..Default::default()
                 }
                 .into(),
                 MenuItem::Separator,
                 StandardItem {
-                    label: "종료".into(),
+                    label: tray_text("종료", "Quit"),
                     activate: Box::new(|_| request_quit()),
                     ..Default::default()
                 }
@@ -72,7 +78,16 @@ mod imp {
     }
 
     /// 살아 있는 동안 트레이를 유지하는 핸들. (spawn 실패 시 None)
-    pub struct TrayHandle(#[allow(dead_code)] Option<ksni::blocking::Handle<YmemoTray>>);
+    pub struct TrayHandle(Option<ksni::blocking::Handle<YmemoTray>>);
+
+    impl TrayHandle {
+        /// 메뉴를 다시 그리게 한다 (언어가 바뀌었을 때).
+        pub fn refresh(&self) {
+            if let Some(h) = &self.0 {
+                h.update(|_| {});
+            }
+        }
+    }
 
     pub fn start() -> TrayHandle {
         use ksni::blocking::TrayMethods;
@@ -96,26 +111,42 @@ mod imp {
     use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
     use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
-    use crate::{request_quit, request_toggle, tray_icon_rgba};
+    use crate::{request_lock, request_quit, request_toggle, tray_icon_rgba, tray_text};
 
     /// 트레이 아이콘 + 메뉴/클릭 이벤트를 폴링하는 타이머를 함께 들고 있는 핸들.
     /// (둘 다 살아 있어야 트레이가 유지되고 이벤트가 처리된다)
     pub struct TrayHandle {
         _tray: Option<TrayIcon>,
         _poll: slint::Timer,
+        /// 언어가 바뀔 때 문구를 갈아 끼우기 위해 항목을 들고 있는다.
+        items: Vec<MenuItem>,
+    }
+
+    impl TrayHandle {
+        /// 메뉴 문구를 현재 언어로 다시 쓴다. 순서는 start() 의 append 순서와 같다.
+        pub fn refresh(&self) {
+            let labels = [tray_text("메모 목록", "Memo list"), tray_text("잠금", "Lock"),
+                          tray_text("종료", "Quit")];
+            for (item, label) in self.items.iter().zip(labels) {
+                item.set_text(label);
+            }
+        }
     }
 
     pub fn start() -> TrayHandle {
-        // 메뉴: "메모 목록" / --- / "종료". 각 항목 id 로 이벤트를 분기한다.
-        let list_item = MenuItem::new("메모 목록", true, None);
-        let quit_item = MenuItem::new("종료", true, None);
+        // 메뉴: "메모 목록" / "잠금" / --- / "종료". 각 항목 id 로 이벤트를 분기한다.
+        let list_item = MenuItem::new(tray_text("메모 목록", "Memo list"), true, None);
+        let lock_item = MenuItem::new(tray_text("잠금", "Lock"), true, None);
+        let quit_item = MenuItem::new(tray_text("종료", "Quit"), true, None);
         let list_id: MenuId = list_item.id().clone();
+        let lock_id: MenuId = lock_item.id().clone();
         let quit_id: MenuId = quit_item.id().clone();
 
         let menu = Menu::new();
         // append 는 muda(=tray_icon::menu) 의 Result 를 돌려준다 (tray_icon::Result 아님).
         let build_menu = || -> tray_icon::menu::Result<()> {
             menu.append(&list_item)?;
+            menu.append(&lock_item)?;
             menu.append(&PredefinedMenuItem::separator())?;
             menu.append(&quit_item)?;
             Ok(())
@@ -151,6 +182,8 @@ mod imp {
             while let Ok(ev) = MenuEvent::receiver().try_recv() {
                 if ev.id == list_id {
                     request_toggle();
+                } else if ev.id == lock_id {
+                    request_lock();
                 } else if ev.id == quit_id {
                     request_quit();
                 }
@@ -171,6 +204,7 @@ mod imp {
         TrayHandle {
             _tray: tray,
             _poll: poll,
+            items: vec![list_item, lock_item, quit_item],
         }
     }
 }
@@ -181,6 +215,10 @@ mod imp {
 #[cfg(not(any(target_os = "linux", windows)))]
 mod imp {
     pub struct TrayHandle;
+
+    impl TrayHandle {
+        pub fn refresh(&self) {}
+    }
 
     pub fn start() -> TrayHandle {
         eprintln!("이 플랫폼에는 트레이 백엔드가 없어 트레이 없이 동작합니다.");

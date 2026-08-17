@@ -17,26 +17,29 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use i_slint_backend_winit::winit::dpi::PhysicalPosition;
 use i_slint_backend_winit::WinitWindowAccessor;
 use slint::{ComponentHandle, LogicalSize, ModelRc, SharedString, TimerMode, VecModel};
 use ymemo_core::{
-    lan_pair, now_millis, pairing::PairingCode, sync::SharedDevice, sync::Syncthing, vault::Vault,
-    Memo, Store,
+    crypto::MasterKey, lan_pair, now_millis, pairing::PairingCode, sync::SharedDevice,
+    sync::Syncthing, vault::Vault, Memo, Store,
 };
+
+use settings::Settings;
 
 slint::include_modules!();
 
+mod settings;
 mod tray;
 
 /// Syncthing 쪽에서 vault 공유 폴더를 식별하는 고정 id (모든 기기가 같은 값 사용).
 const SYNC_FOLDER_ID: &str = "ymemo-vault";
-/// 다른 기기의 로그 반영 주기.
-const MERGE_INTERVAL: Duration = Duration::from_secs(15);
 /// 본문 편집 후 자동 저장까지의 디바운스.
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(800);
 /// 스티커 제목 바 높이 (접힌 상태의 창 높이, app.slint 와 일치해야 함).
@@ -45,6 +48,8 @@ const BAR_HEIGHT: f32 = 28.0;
 const SNAP_DIST: f32 = 12.0;
 /// 스티커 위치 감시(스냅 판정) 주기.
 const SNAP_INTERVAL: Duration = Duration::from_millis(90);
+/// 자리 비움(무동작) 확인 주기. 설정된 분 단위에 비하면 충분히 촘촘하다.
+const IDLE_CHECK_INTERVAL: Duration = Duration::from_secs(20);
 /// 페어링 패널이 스크롤 없이 다 들어가는 최소 창 크기 (논리 px).
 const PAIRING_MIN_SIZE: (f32, f32) = (360.0, 520.0);
 
@@ -76,6 +81,20 @@ struct Ctx {
     /// 접어 둔 그룹 id. **기기 로컬 보기 상태**라 동기화하지 않는다
     /// (없으면 펼침 — 새 기기에서도 내용이 바로 보이도록).
     collapsed: Rc<RefCell<HashSet<String>>>,
+    /// 앱 데이터 디렉터리. settings.json / session.json 이 여기 있다.
+    dir: Rc<PathBuf>,
+    /// 기기 로컬 환경설정 (언어, 잠금 정책, 새 메모 기본값 …).
+    settings: Rc<RefCell<Settings>>,
+    /// 사용자가 마지막으로 앱을 건드린 시각. 자리 비움 자동 잠금이 이걸 본다.
+    last_activity: Rc<Cell<Instant>>,
+}
+
+/// "방금 사용자가 앱을 건드렸다"고 표시한다 (자리 비움 자동 잠금 타이머를 되돌린다).
+///
+/// OS 전역 입력 훅이 아니라 앱 콜백에서 찍는 방식이라, 정확히는 "앱과의 상호작용"이
+/// 기준이다. 창을 띄워 두고 마우스만 지나가는 건 활동으로 치지 않는다.
+fn touch(ctx: &Ctx) {
+    ctx.last_activity.set(Instant::now());
 }
 
 // 트레이 콜백(별도 스레드)이 invoke_from_event_loop 로 넘어온 뒤 UI 에 닿기 위한 통로.
@@ -84,10 +103,27 @@ thread_local! {
     static APP: RefCell<Option<AppUi>> = const { RefCell::new(None) };
 }
 
+/// 트레이 메뉴 문구용 언어 플래그. 트레이 백엔드는 Slint 전역(`Strings`)에 닿을 수 없어
+/// (다른 스레드에서 메뉴를 그린다) 이 원자 값을 본다. `apply_lang` 이 유일한 기록자.
+static TRAY_LANG_EN: AtomicBool = AtomicBool::new(false);
+
+/// 트레이 메뉴 문구를 현재 언어로 고른다.
+pub(crate) fn tray_text(ko: &str, en: &str) -> String {
+    if TRAY_LANG_EN.load(Ordering::Relaxed) {
+        en.to_string()
+    } else {
+        ko.to_string()
+    }
+}
+
+
+
 struct AppUi {
     lock: LockWindow,
     list: ListWindow,
     unlocked: Rc<Cell<bool>>,
+    /// 트레이 "잠금" 이 잠금 절차를 그대로 돌릴 수 있도록.
+    ctx: Ctx,
 }
 
 /// Slint 렌더러 선택. 창을 만들기 전에 한 번 호출한다.
@@ -181,19 +217,52 @@ fn main() -> Result<()> {
             }
         });
 
+    let mut loaded = Settings::load(&dir);
+    loaded.sanitize();
     let ctx = Ctx {
         vault: Rc::new(RefCell::new(None)),
         model: Rc::new(VecModel::from(Vec::<ListRow>::new())),
         stickies: Rc::new(RefCell::new(HashMap::new())),
         collapsed: Rc::new(RefCell::new(HashSet::new())),
+        dir: Rc::new(dir.clone()),
+        settings: Rc::new(RefCell::new(loaded)),
+        last_activity: Rc::new(Cell::new(Instant::now())),
     };
     list.set_rows(ModelRc::from(ctx.model.clone()));
     let unlocked = Rc::new(Cell::new(false));
 
+    // 환경설정 창은 한 번만 만들어 두고 보이기/숨기기만 한다 (매번 새로 만들면 열 때마다
+    // 창 위치가 초기화된다).
+    let settings_win = SettingsWindow::new()?;
+    apply_lang(&ctx, &lock, &list, &settings_win);
+
     // 첫 실행 판별: vault.json 이 있으면 기존 vault(→ 잠금 해제), 없으면 새 기기
     // (→ "새로 만들기" / "기존 기기 연결" 선택). 이 분기가 없으면 새 기기가 페어링으로
     // vault.json 을 받기 전에 암호를 입력해 제 salt 로 vault 를 만들어버려 키가 갈라진다.
-    lock.set_vault_exists(vault_dir.join("vault.json").exists());
+    let vault_exists = vault_dir.join("vault.json").exists();
+    lock.set_vault_exists(vault_exists);
+
+    // ---- 자동 잠금 해제: 유효한 세션 키가 남아 있으면 암호를 묻지 않는다 ----
+    // 실패하면(키 불일치, 캐시 손상, 갈라진 키 등) 조용히 세션을 버리고 잠금 화면으로 간다.
+    let auto_unlocked = vault_exists
+        && settings::load_session(&dir).is_some_and(|key_bytes| {
+            let opened = MasterKey::from_bytes(&key_bytes)
+                .and_then(|key| {
+                    let store = Store::open(dir.join("ymemo.db"))?;
+                    Vault::open_with_key(vault_dir.clone(), key, store)
+                });
+            match opened {
+                Ok(v) => {
+                    apply_opened_vault(v, &ctx, &lock, &list.as_weak(), &unlocked);
+                    true
+                }
+                Err(e) => {
+                    eprintln!("자동 잠금 해제 실패, 암호를 다시 묻습니다: {e}");
+                    settings::clear_session(&dir);
+                    false
+                }
+            }
+        });
 
     // ---- 잠금 창: 기존 vault 열기 / 새 vault 생성 ----
     {
@@ -219,7 +288,10 @@ fn main() -> Result<()> {
             };
             // Argon2id 유도가 잠깐(수백 ms) UI 를 막지만 잠금 화면에서만 일어난다.
             match Vault::open(dir.join("vault"), password.as_bytes(), store) {
-                Ok(v) => apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked),
+                Ok(v) => {
+                    start_unlock_session(&ctx, &v);
+                    apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked);
+                }
                 Err(e) => lock.set_lock_message(SharedString::from(format!("{e}"))),
             }
         });
@@ -245,7 +317,10 @@ fn main() -> Result<()> {
                 }
             };
             match Vault::open_or_create(dir.join("vault"), password.as_bytes(), store) {
-                Ok(v) => apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked),
+                Ok(v) => {
+                    start_unlock_session(&ctx, &v);
+                    apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked);
+                }
                 Err(e) => lock.set_lock_message(SharedString::from(format!("{e}"))),
             }
         });
@@ -255,6 +330,7 @@ fn main() -> Result<()> {
     {
         let ctx = ctx.clone();
         list.on_open_memo(move |id| {
+            touch(&ctx);
             let memo = {
                 let guard = ctx.vault.borrow();
                 let Some(v) = guard.as_ref() else { return };
@@ -275,6 +351,7 @@ fn main() -> Result<()> {
     {
         let ctx = ctx.clone();
         list.on_delete_row(move |id, is_group| {
+            touch(&ctx);
             {
                 let mut guard = ctx.vault.borrow_mut();
                 let Some(v) = guard.as_mut() else { return };
@@ -297,6 +374,7 @@ fn main() -> Result<()> {
         let ctx = ctx.clone();
         let list_weak = list.as_weak();
         list.on_new_group(move || {
+            touch(&ctx);
             let group = ymemo_core::Group::new("새 그룹");
             {
                 let mut guard = ctx.vault.borrow_mut();
@@ -317,6 +395,7 @@ fn main() -> Result<()> {
     {
         let ctx = ctx.clone();
         list.on_toggle_group(move |id| {
+            touch(&ctx);
             {
                 let mut collapsed = ctx.collapsed.borrow_mut();
                 if !collapsed.remove(id.as_str()) {
@@ -331,6 +410,7 @@ fn main() -> Result<()> {
     {
         let ctx = ctx.clone();
         list.on_rename_group(move |id, name| {
+            touch(&ctx);
             let mut guard = ctx.vault.borrow_mut();
             let Some(v) = guard.as_mut() else { return };
             let Ok(Some(mut g)) = v.store().get_group(&id) else { return };
@@ -348,7 +428,10 @@ fn main() -> Result<()> {
     }
     {
         let ctx = ctx.clone();
-        list.on_move_row(move |src, dst| move_row(&ctx, src, dst));
+        list.on_move_row(move |src, dst| {
+            touch(&ctx);
+            move_row(&ctx, src, dst);
+        });
     }
 
     // ---- 페어링: 긴 device-id 직접 등록 (잠금/목록 창 공용, 폴백 경로) ----
@@ -538,47 +621,139 @@ fn main() -> Result<()> {
     }
 
     // ---- 주기적 병합: 다른 기기의 로그를 목록/스티커에 반영 ----
-    let merge_timer = slint::Timer::default();
+    // 주기가 설정값이라 환경설정 저장 시 다시 걸어야 한다 → Rc 로 들고 있는다.
+    let merge_timer = Rc::new(slint::Timer::default());
+    start_merge_timer(&merge_timer, &ctx, list.as_weak());
+
+    // 트레이는 아래에서 만들지만, 언어를 바꾸면 메뉴 문구도 갈아야 해서 설정 콜백이
+    // 핸들에 닿아야 한다. 먼저 빈 칸을 만들어 두고 생성 후 채운다.
+    let tray_handle: Rc<RefCell<Option<tray::TrayHandle>>> = Rc::new(RefCell::new(None));
+
+    // ---- 환경설정 창 ----
     {
         let ctx = ctx.clone();
-        let list_weak = list.as_weak();
-        merge_timer.start(TimerMode::Repeated, MERGE_INTERVAL, move || {
-            let mut guard = ctx.vault.borrow_mut();
-            let Some(v) = guard.as_mut() else { return };
-            match v.rebuild() {
-                Ok(()) => {
-                    refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
-                    // 목록 창을 강제로 다시 그린다 (Windows 소프트웨어 렌더러가 모델 변경만으론
-                    // 리페인트를 안 해, 병합돼도 화면이 그대로여서 "동기화 안 됨"처럼 보인다).
-                    if let Some(w) = list_weak.upgrade() {
-                        w.window().request_redraw();
-                    }
-                    // 열린 스티커에 원격 변경 반영. 편집 중(dirty)이면 덮어쓰지 않는다.
-                    for (id, entry) in ctx.stickies.borrow().iter() {
-                        if entry.dirty.get() {
-                            continue;
-                        }
-                        match v.store().get(id) {
-                            Ok(Some(m)) => {
-                                let text = sticky_text(&m);
-                                if entry.window.get_memo_text() != text.as_str() {
-                                    entry.window.set_memo_text(text.into());
-                                }
-                                entry.window.set_memo_title(m.title.into());
-                                entry.window.set_sticky_color(m.color.into());
-                                entry.window.set_sticky_opacity(m.opacity as f32);
-                                entry.window.window().request_redraw();
-                            }
-                            // 다른 기기에서 삭제됨 → 창만 숨긴다 (제거는 다음 닫기에서).
-                            Ok(None) => {
-                                let _ = entry.window.hide();
-                            }
-                            Err(e) => eprintln!("메모 조회 실패: {e}"),
-                        }
-                    }
-                }
-                Err(e) => eprintln!("병합 실패: {e}"),
+        let win = settings_win.as_weak();
+        let unlocked = unlocked.clone();
+        list.on_open_settings(move || {
+            touch(&ctx);
+            let Some(w) = win.upgrade() else { return };
+            fill_settings_window(&ctx, &w);
+            w.set_unlocked(unlocked.get());
+            w.set_status(SharedString::new());
+            let _ = w.show();
+            set_window_icon(&w.window());
+        });
+    }
+    {
+        let win = settings_win.as_weak();
+        settings_win.on_close_requested(move || {
+            if let Some(w) = win.upgrade() {
+                let _ = w.hide();
             }
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        let win = settings_win.as_weak();
+        let lock_weak = lock.as_weak();
+        let list_weak = list.as_weak();
+        let merge_timer = merge_timer.clone();
+        let tray_handle = tray_handle.clone();
+        settings_win.on_apply(move || {
+            let Some(w) = win.upgrade() else { return };
+            let (Some(lock), Some(list)) = (lock_weak.upgrade(), list_weak.upgrade()) else {
+                return;
+            };
+            touch(&ctx);
+
+            let mut next = Settings {
+                lang: w.get_lang_sel().to_string(),
+                unlock_days: w.get_unlock_days(),
+                idle_lock_minutes: w.get_idle_minutes(),
+                default_color: w.get_default_color().to_string(),
+                default_opacity: w.get_default_opacity(),
+                merge_seconds: w.get_merge_seconds(),
+            };
+            next.sanitize();
+            let prev_unlock_days = ctx.settings.borrow().unlock_days;
+            next.save(&ctx.dir);
+            *ctx.settings.borrow_mut() = next.clone();
+
+            // 다듬어진 값을 창에 되돌려 보여 준다 (범위를 벗어난 입력이 조용히 바뀌지 않도록).
+            fill_settings_window(&ctx, &w);
+            apply_lang(&ctx, &lock, &list, &w);
+            if let Some(t) = tray_handle.borrow().as_ref() {
+                t.refresh();
+            }
+            start_merge_timer(&merge_timer, &ctx, list.as_weak());
+
+            // 자동 해제 기간을 줄였거나 껐다면 이미 남아 있는 세션이 그 정책을 어긴다.
+            // 가장 안전한 쪽으로: 세션을 버리고 다음 실행 때 암호를 다시 받는다.
+            if next.unlock_days != prev_unlock_days {
+                settings::clear_session(&ctx.dir);
+                w.set_status(SharedString::from(
+                    w.global::<Strings>().invoke_t(
+                        "저장했습니다. 자동 해제 기간이 바뀌어, 다음 실행 때 암호를 한 번 더 묻습니다.".into(),
+                        "Saved. The auto-unlock period changed, so you will be asked for the password once on next launch.".into(),
+                    ),
+                ));
+            } else {
+                w.set_status(SharedString::from(w.global::<Strings>().invoke_t(
+                    "저장했습니다.".into(),
+                    "Saved.".into(),
+                )));
+            }
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        let win = settings_win.as_weak();
+        let lock_weak = lock.as_weak();
+        let list_weak = list.as_weak();
+        let unlocked = unlocked.clone();
+        settings_win.on_lock_now(move || {
+            let (Some(lock), Some(list)) = (lock_weak.upgrade(), list_weak.upgrade()) else {
+                return;
+            };
+            lock_now(&ctx, &lock, &list, &unlocked);
+            if let Some(w) = win.upgrade() {
+                w.set_unlocked(false);
+                let _ = w.hide();
+            }
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        let lock_weak = lock.as_weak();
+        let list_weak = list.as_weak();
+        let unlocked = unlocked.clone();
+        list.on_lock_now(move || {
+            let (Some(lock), Some(list)) = (lock_weak.upgrade(), list_weak.upgrade()) else {
+                return;
+            };
+            lock_now(&ctx, &lock, &list, &unlocked);
+        });
+    }
+
+    // ---- 자리 비움 자동 잠금 ----
+    let idle_timer = slint::Timer::default();
+    {
+        let ctx = ctx.clone();
+        let lock_weak = lock.as_weak();
+        let list_weak = list.as_weak();
+        let unlocked = unlocked.clone();
+        idle_timer.start(TimerMode::Repeated, IDLE_CHECK_INTERVAL, move || {
+            let minutes = ctx.settings.borrow().idle_lock_minutes;
+            if minutes <= 0 || !unlocked.get() {
+                return;
+            }
+            if ctx.last_activity.get().elapsed() < Duration::from_secs(minutes as u64 * 60) {
+                return;
+            }
+            let (Some(lock), Some(list)) = (lock_weak.upgrade(), list_weak.upgrade()) else {
+                return;
+            };
+            lock_now(&ctx, &lock, &list, &unlocked);
         });
     }
 
@@ -595,10 +770,12 @@ fn main() -> Result<()> {
         *a.borrow_mut() = Some(AppUi {
             lock: lock.clone_strong(),
             list: list.clone_strong(),
-            unlocked,
+            unlocked: unlocked.clone(),
+            ctx: ctx.clone(),
         })
     });
-    let _tray = tray::start(); // 핸들이 살아 있는 동안만 트레이가 유지된다
+    // 핸들이 살아 있는 동안만 트레이가 유지된다 (tray_handle 이 main 끝까지 산다).
+    *tray_handle.borrow_mut() = Some(tray::start());
 
     // 창 아이콘은 이벤트 루프가 돌기 시작해 winit 창이 생긴 뒤에야 적용된다.
     // 시작 직후 한 번(단발 타이머) 잠금·목록 창에 심고, 이후 새로 뜨는 창은 각 show
@@ -617,7 +794,10 @@ fn main() -> Result<()> {
         });
     }
 
-    lock.show()?;
+    // 자동 해제로 이미 목록이 떠 있으면 잠금 창을 다시 띄우지 않는다.
+    if !auto_unlocked {
+        lock.show()?;
+    }
     slint::run_event_loop_until_quit()?;
     Ok(())
 }
@@ -674,7 +854,14 @@ fn save_memo(ctx: &Ctx, id: &str, text: &str) {
 
 /// 새 메모를 만들고 그 스티커 창을 연다. (목록 ＋ 버튼, 스티커 ＋ 버튼 공용)
 fn new_memo(ctx: &Ctx) {
-    let memo = Memo::new("", "");
+    touch(ctx);
+    let mut memo = Memo::new("", "");
+    {
+        // 새 메모의 색/투명도 기본값은 환경설정에서 온다.
+        let s = ctx.settings.borrow();
+        memo.color = s.default_color.clone();
+        memo.opacity = s.default_opacity as i64;
+    }
     {
         let mut guard = ctx.vault.borrow_mut();
         let Some(v) = guard.as_mut() else { return };
@@ -712,6 +899,10 @@ fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     }
 
     let window = StickyWindow::new()?;
+    // 전역은 인스턴스마다 새로 생기므로, 새 스티커에도 현재 언어를 넣어 준다.
+    window
+        .global::<Strings>()
+        .set_lang(SharedString::from(ctx.settings.borrow().effective_lang()));
     window.set_memo_title(SharedString::from(memo.title.clone()));
     window.set_memo_text(SharedString::from(sticky_text(memo)));
     window.set_sticky_color(SharedString::from(memo.color.clone()));
@@ -727,6 +918,7 @@ fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         let dirty = dirty.clone();
         let weak = window.as_weak();
         window.on_edited(move |_| {
+            touch(&ctx);
             dirty.set(true);
             let ctx2 = ctx.clone();
             let id2 = id.clone();
@@ -750,6 +942,7 @@ fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         let dirty = dirty.clone();
         let weak = window.as_weak();
         window.on_close_requested(move || {
+            touch(&ctx);
             if dirty.get() {
                 if let Some(w) = weak.upgrade() {
                     save_memo(&ctx, &id, w.get_memo_text().as_str());
@@ -772,6 +965,7 @@ fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         let id = memo.id.clone();
         let weak = window.as_weak();
         window.on_set_color(move |key| {
+            touch(&ctx);
             {
                 let mut guard = ctx.vault.borrow_mut();
                 let Some(v) = guard.as_mut() else { return };
@@ -798,6 +992,7 @@ fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         let ctx = ctx.clone();
         let id = memo.id.clone();
         window.on_set_opacity(move |pct| {
+            touch(&ctx);
             let pct = ymemo_core::clamp_opacity(pct.round() as i64);
             let mut guard = ctx.vault.borrow_mut();
             let Some(v) = guard.as_mut() else { return };
@@ -820,6 +1015,7 @@ fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         let ctx = ctx.clone();
         let id = memo.id.clone();
         window.on_begin_drag(move |px, py| {
+            touch(&ctx);
             let Some(w) = weak.upgrade() else { return false };
             let sw = w.window();
             let scale = sw.scale_factor();
@@ -1113,6 +1309,147 @@ fn to_shared_row(d: SharedDevice) -> SharedDeviceRow {
     }
 }
 
+/// 다른 기기의 로그를 가져오는 주기 타이머를 (다시) 건다.
+///
+/// 주기가 환경설정 값이라 저장할 때마다 새 간격으로 다시 걸어야 한다. `Timer::start` 는
+/// 기존 예약을 대체하므로 같은 타이머에 그대로 다시 걸면 된다.
+fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slint::Weak<ListWindow>) {
+    let interval = Duration::from_secs(ctx.settings.borrow().merge_seconds.max(1) as u64);
+    let ctx = ctx.clone();
+    timer.start(TimerMode::Repeated, interval, move || {
+        let mut guard = ctx.vault.borrow_mut();
+        let Some(v) = guard.as_mut() else { return };
+        match v.rebuild() {
+            Ok(()) => {
+                refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+                // 목록 창을 강제로 다시 그린다 (Windows 소프트웨어 렌더러가 모델 변경만으론
+                // 리페인트를 안 해, 병합돼도 화면이 그대로여서 "동기화 안 됨"처럼 보인다).
+                if let Some(w) = list_weak.upgrade() {
+                    w.window().request_redraw();
+                }
+                // 열린 스티커에 원격 변경 반영. 편집 중(dirty)이면 덮어쓰지 않는다.
+                for (id, entry) in ctx.stickies.borrow().iter() {
+                    if entry.dirty.get() {
+                        continue;
+                    }
+                    match v.store().get(id) {
+                        Ok(Some(m)) => {
+                            let text = sticky_text(&m);
+                            if entry.window.get_memo_text() != text.as_str() {
+                                entry.window.set_memo_text(text.into());
+                            }
+                            entry.window.set_memo_title(m.title.into());
+                            entry.window.set_sticky_color(m.color.into());
+                            entry.window.set_sticky_opacity(m.opacity as f32);
+                            entry.window.window().request_redraw();
+                        }
+                        // 다른 기기에서 삭제됨 → 창만 숨긴다 (제거는 다음 닫기에서).
+                        Ok(None) => {
+                            let _ = entry.window.hide();
+                        }
+                        Err(e) => eprintln!("메모 조회 실패: {e}"),
+                    }
+                }
+            }
+            Err(e) => eprintln!("병합 실패: {e}"),
+        }
+    });
+}
+
+/// 현재 설정값을 환경설정 창의 입력들에 채워 넣는다 (열 때 / 저장 후 되돌려 보여줄 때).
+fn fill_settings_window(ctx: &Ctx, win: &SettingsWindow) {
+    let s = ctx.settings.borrow();
+    win.set_lang_sel(SharedString::from(s.lang.clone()));
+    win.set_unlock_days(s.unlock_days);
+    win.set_idle_minutes(s.idle_lock_minutes);
+    win.set_default_color(SharedString::from(s.default_color.clone()));
+    win.set_default_opacity(s.default_opacity);
+    win.set_merge_seconds(s.merge_seconds);
+}
+
+/// 언어를 **모든 창**에 반영한다.
+///
+/// Slint 전역(`Strings`)은 컴포넌트 인스턴스마다 하나씩 생기므로 한 창만 바꾸면 나머지는
+/// 옛 언어로 남는다. 스티커는 열려 있는 것 전부를 돌고, 이후 새로 열리는 스티커는
+/// `open_sticky` 가 생성 직후 직접 넣는다.
+fn apply_lang(ctx: &Ctx, lock: &LockWindow, list: &ListWindow, settings_win: &SettingsWindow) {
+    let effective = ctx.settings.borrow().effective_lang();
+    // 트레이 메뉴는 Slint 밖(다른 스레드)에서 그려지므로 전역 플래그로 언어를 넘긴다.
+    TRAY_LANG_EN.store(effective == "en", Ordering::Relaxed);
+    let lang = SharedString::from(effective);
+    lock.global::<Strings>().set_lang(lang.clone());
+    list.global::<Strings>().set_lang(lang.clone());
+    settings_win.global::<Strings>().set_lang(lang.clone());
+    for entry in ctx.stickies.borrow().values() {
+        entry.window.global::<Strings>().set_lang(lang.clone());
+    }
+}
+
+/// 암호로 잠금을 푼 직후: 설정된 기간만큼 자동 해제 세션을 남긴다.
+///
+/// 기간은 **암호를 넣은 시점부터** 고정이다(쓸 때마다 연장되는 방식이 아니다) — 그래야
+/// "N일마다 한 번은 암호를 확인한다"가 실제로 지켜진다. 0일이면 아무것도 남기지 않는다.
+fn start_unlock_session(ctx: &Ctx, vault: &Vault) {
+    let days = ctx.settings.borrow().unlock_days;
+    settings::save_session(&ctx.dir, &vault.key_bytes(), days);
+}
+
+/// 지금 잠근다: 미저장 편집을 흘려보내고, 스티커를 모두 닫고, 메모리에서 vault 를 내리고,
+/// 자동 해제 세션까지 지운 뒤 잠금 창을 띄운다.
+///
+/// 세션을 지우는 게 핵심이다 — 남겨 두면 앱을 다시 켤 때 그대로 열려서 "잠금" 버튼이
+/// 아무 의미가 없어진다.
+fn lock_now(ctx: &Ctx, lock: &LockWindow, list: &ListWindow, unlocked: &Rc<Cell<bool>>) {
+    if !unlocked.get() {
+        return;
+    }
+
+    // 열려 있는 스티커의 미저장 편집을 먼저 저장한다 (borrow 를 겹치지 않도록 두 단계로).
+    let ids: Vec<String> = ctx.stickies.borrow().keys().cloned().collect();
+    for id in &ids {
+        let pending = {
+            let map = ctx.stickies.borrow();
+            match map.get(id) {
+                Some(e) if e.dirty.get() => {
+                    e.save_timer.stop();
+                    Some(e.window.get_memo_text().to_string())
+                }
+                Some(e) => {
+                    e.save_timer.stop();
+                    None
+                }
+                None => None,
+            }
+        };
+        if let Some(text) = pending {
+            save_memo(ctx, id, &text);
+        }
+    }
+    for id in &ids {
+        if let Some(e) = ctx.stickies.borrow().get(id) {
+            let _ = e.window.hide();
+        }
+    }
+    // 창 handle 의 drop 은 이벤트 루프 다음 턴으로 미룬다 (close_sticky 와 같은 이유).
+    {
+        let stickies = ctx.stickies.clone();
+        slint::Timer::single_shot(Duration::ZERO, move || stickies.borrow_mut().clear());
+    }
+
+    *ctx.vault.borrow_mut() = None;
+    ctx.model.set_vec(Vec::new());
+    unlocked.set(false);
+    settings::clear_session(&ctx.dir);
+
+    let _ = list.hide();
+    lock.invoke_clear_password();
+    lock.set_lock_message(SharedString::new());
+    lock.set_show_sync(false);
+    let _ = lock.show();
+    set_window_icon(&lock.window());
+    lock.window().request_redraw();
+}
+
 /// vault 를 연 뒤 공통 마무리: 목록 채우기 → ctx 에 보관 → 잠금 창 숨기고 목록 창 표시.
 /// (unlock/create-vault 두 경로가 공유한다.)
 fn apply_opened_vault(
@@ -1347,6 +1684,7 @@ pub(crate) fn request_toggle() {
         APP.with(|a| {
             let borrow = a.borrow();
             let Some(app) = borrow.as_ref() else { return };
+            touch(&app.ctx);
             if !app.unlocked.get() {
                 let _ = app.lock.show();
                 set_window_icon(&app.lock.window());
@@ -1360,6 +1698,17 @@ pub(crate) fn request_toggle() {
                 // 하얗게 남는다 → 표시 직후 강제로 다시 그린다.
                 app.list.window().request_redraw();
             }
+        });
+    });
+}
+
+/// 트레이 "잠금": 지금 잠근다 (목록 창의 🔒 와 같은 동작).
+pub(crate) fn request_lock() {
+    let _ = slint::invoke_from_event_loop(|| {
+        APP.with(|a| {
+            let borrow = a.borrow();
+            let Some(app) = borrow.as_ref() else { return };
+            lock_now(&app.ctx, &app.lock, &app.list, &app.unlocked);
         });
     });
 }
