@@ -7,7 +7,9 @@ plugins {
 android {
     namespace = "dev.ymemo.ymemo_mobile"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // NDK 를 못 박는다. gradle 과 cargo-ndk(ANDROID_NDK_HOME)가 **같은 NDK** 를 써야
+    // "왜 여기선 되는데 저기선 안 되지" 를 겪지 않는다. 올릴 땐 두 곳을 같이 올릴 것.
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
