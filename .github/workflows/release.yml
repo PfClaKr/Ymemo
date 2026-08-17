@@ -4,15 +4,22 @@
 #  - ymemo_<ver>_amd64.deb               (Debian/Ubuntu 패키지 — syncthing 포함, 제거 시 함께 삭제)
 #  - ymemo-<ver>-1.fc*.x86_64.rpm        (Fedora 패키지 — syncthing 포함, 제거 시 함께 삭제)
 #  - ymemo-setup-x86_64.exe              (Windows 인스톨러 — syncthing 포함, 제거 시 함께 삭제)
-#  - ymemo-ffi-android-jniLibs.zip       (arm64-v8a / armeabi-v7a / x86_64 .so)
+#  - ymemo-<ver>-android-<abi>.apk       (Android 앱. ABI 별로 나눈다 — 아래 설명 참조)
 #  - ymemo-ffi-ios.zip                   (aarch64 기기·시뮬레이터 .a)
 #
 # 데스크탑은 syncthing 을 인스톨러 안에 번들해 `ymemo-sync`(.exe) 로 리네임 설치한다.
 # 사용자는 syncthing 을 별도로 받지 않고, 앱 제거 시 함께 지워진다 (packaging/ 참조).
 #
-# 모바일은 현재 Rust FFI 라이브러리까지만 빌드한다. APK/IPA 패키징은
-# flutter_rust_bridge codegen + flutter create + 서명 설정이 갖춰지면 추가한다
-# (apps/mobile/README.md 참조).
+# Android 는 APK 까지 만든다. frb 바인딩과 android/ 프로젝트를 저장소에 커밋해 두었으므로
+# CI 에서 codegen 없이 그대로 빌드된다.
+#   ABI 별로 쪼갠다(--split-per-abi): 셋을 한 APK 에 담으면 76MB 가 되는데, 어느 기기든
+#   자기 ABI 하나만 쓰므로 나누면 23~32MB 다. 요즘 폰은 거의 전부 arm64-v8a 이고,
+#   armeabi-v7a 는 구형 32비트, x86_64 는 에뮬레이터용이다.
+#   **서명 주의:** flutter create 기본 설정대로 릴리스 APK 가 *디버그 키* 로 서명된다
+#   (apps/mobile/android/app/build.gradle.kts 의 signingConfig). 설치·배포는 되지만
+#   Play 스토어에는 올릴 수 없고, 기기에서 "출처를 알 수 없는 앱" 허용이 필요하다.
+#   정식 서명은 keystore 를 secrets 로 받아 붙이면 된다 (windows-desktop 잡의 인증서 처리와 같은 방식).
+# iOS 는 아직 라이브러리까지만 — IPA 는 서명 설정이 갖춰지면 추가한다.
 #
 # 주의: GitHub 소유 액션(actions/*)만 쓴다 — 서드파티 액션 차단 정책에서도 돌도록.
 # 툴체인은 러너에 내장된 rustup, 릴리스 생성은 내장 gh CLI 를 쓴다.
@@ -26,6 +33,11 @@ on:
 env:
   # 데스크탑에 번들할 syncthing 버전 (통째 번들 결정 사항)
   SYNCTHING_VERSION: v2.1.2
+  # Android 빌드에 쓰는 Flutter. 로컬에서 검증한 버전을 못 박는다(stable 은 계속 움직인다).
+  FLUTTER_VERSION: 3.47.0
+  # **apps/mobile/android/app/build.gradle.kts 의 ndkVersion 과 같아야 한다.**
+  # gradle 과 cargo-ndk 가 서로 다른 NDK 를 쓰면 찾기 어려운 링크 오류가 난다.
+  ANDROID_NDK_VERSION: 28.2.13676358
 
 jobs:
   test:
@@ -156,26 +168,53 @@ jobs:
           name: windows-desktop
           path: dist/ymemo-setup-x86_64.exe
 
-  android-libs:
+  android-app:
     needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: |
+      # Gradle 8 은 JDK 17 을 요구한다 (러너 기본 JDK 는 더 높을 수 있다).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install Flutter
+        run: |
+          curl -sL -o flutter.tar.xz \
+            "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz"
+          tar xf flutter.tar.xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - name: Install the pinned NDK
+        run: |
+          # 러너 이미지마다 sdkmanager 위치가 다를 수 있어 두 곳을 다 본다.
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$sdkmanager" ] || sdkmanager="$(command -v sdkmanager)"
+          "$sdkmanager" "ndk;$ANDROID_NDK_VERSION" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
+      - name: Set up Rust for Android
+        run: |
           rustup update stable
           rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk
-      - name: Build .so for all ABIs
+          cargo install cargo-ndk
+      # gradle 은 Rust 를 모른다 (cargokit 미적용) → .so 를 먼저 구워 jniLibs 에 넣어 준다.
+      - name: Build the rust library for all ABIs
         run: |
-          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
           cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \
-            -o jniLibs build --release -p ymemo-ffi
-          zip -r ymemo-ffi-android-jniLibs.zip jniLibs
+            -o apps/mobile/android/app/src/main/jniLibs build --release -p ymemo-ffi
+      - name: Build the apk
+        working-directory: apps/mobile
+        run: |
+          flutter pub get
+          flutter build apk --release --split-per-abi
+          version="${GITHUB_REF_NAME#v}"
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            mv "build/app/outputs/flutter-apk/app-$abi-release.apk" \
+              "$GITHUB_WORKSPACE/ymemo-$version-android-$abi.apk"
+          done
       - uses: actions/upload-artifact@v4
         with:
-          name: android-libs
-          path: ymemo-ffi-android-jniLibs.zip
+          name: android-app
+          path: ymemo-*-android-*.apk
 
   ios-lib:
     needs: test
@@ -199,7 +238,7 @@ jobs:
           path: ymemo-ffi-ios.zip
 
   release:
-    needs: [linux-desktop, fedora-desktop, windows-desktop, android-libs, ios-lib]
+    needs: [linux-desktop, fedora-desktop, windows-desktop, android-app, ios-lib]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -217,5 +256,5 @@ jobs:
             ymemo_*_amd64.deb \
             ymemo-*.rpm \
             ymemo-setup-x86_64.exe \
-            ymemo-ffi-android-jniLibs.zip \
+            ymemo-*-android-*.apk \
             ymemo-ffi-ios.zip

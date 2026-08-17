@@ -24,6 +24,7 @@ apps/mobile/android/.gradle/
 apps/mobile/android/local.properties
 apps/mobile/android/app/src/main/jniLibs/
 apps/mobile/android/**/build/
+apps/mobile/android/.kotlin/
 apps/mobile/**/*.iml
 
 # 패키징 빌드 산출물 (에셋 packaging/assets/* 는 커밋, 아래 결과물은 제외)
