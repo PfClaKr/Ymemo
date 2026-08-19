@@ -1,20 +1,21 @@
-//! Vault: 암호화 change 로그(automerge) + 로컬 SQLite 캐시를 묶는 상위 계층.
+//! Vault: the layer that ties the encrypted automerge change logs to the local SQLite cache.
 //!
-//! 동기화 디렉터리(이후 Syncthing 공유 폴더) 레이아웃:
+//! Layout of the synced directory (the Syncthing shared folder):
 //! ```text
 //! <vault_dir>/
-//!   vault.json            ← 헤더: salt + key_check. 생성 시 1회 기록, 이후 불변 → 동기화 충돌 없음.
-//!   logs/<device_id>.ymlog ← 기기별 append-only 암호화 로그. 각 기기는 자기 파일에만 쓴다.
+//!   vault.json             <- header: salt + key_check. Written once, then immutable.
+//!   logs/<device_id>.ymlog <- per-device append-only log; a device writes only its own.
 //! ```
 //!
-//! 로그 레코드 = **automerge change 바이너리** (암호화됨). 문서 구조:
+//! A log record is an encrypted **automerge change**. Document shape:
 //! `ROOT.memos: Map<memo_id, {title, body, created_at, updated_at}>`,
 //! `ROOT.groups: Map<group_id, {...}>`, `ROOT.attachments: Map<attachment_id, {...}>`.
-//! 사진 바이트 자체는 문서가 아니라 `blobs/<해시>.ymblob` 에 있고
-//! (automerge 문서를 사진으로 부풀리지 않는다), 첨부 항목은 그 해시만 가리킨다.
-//! 병합은 automerge 가 순서 무관으로 처리한다 — 서로 다른 기기가 같은 메모의 다른
-//! 필드를 고치면 둘 다 살아남고(필드 단위), 같은 필드 충돌은 결정론적으로 수렴한다.
-//! actor id = device_id 이므로 자기 로그의 change 만 자기 actor 를 갖는다.
+//! Photo bytes stay out of the document, in `blobs/<hash>.ymblob`; an attachment only
+//! points at the hash.
+//!
+//! Automerge merges changes order-independently: edits to different fields of one memo
+//! both survive, and a conflict on the same field converges deterministically. The actor
+//! id is the device id, so only our own log carries our actor.
 
 use anyhow::{anyhow, bail, Context, Result};
 use ymemo_i18n::t;
@@ -34,16 +35,16 @@ use crate::{clamp_width_em_milli, Attachment, Group, Memo, Store};
 const HEADER_FILE: &str = "vault.json";
 const LOGS_DIR: &str = "logs";
 const LOG_EXT: &str = "ymlog";
-/// 틀린 암호 조기 감지용 카나리. 이 평문을 암호화해 헤더에 둔다.
+/// Canary plaintext, stored encrypted in the header to detect a wrong password early.
 const KEY_CHECK: &[u8] = b"ymemo-key-check-v1";
 
-/// `vault.json` 내용. salt 는 비밀이 아니다.
+/// Contents of `vault.json`. The salt is not secret.
 #[derive(Serialize, Deserialize)]
 struct VaultHeader {
     version: u32,
-    /// hex 인코딩된 Argon2id salt.
+    /// Argon2id salt, hex encoded.
     salt: String,
-    /// hex 인코딩된 `encrypt(KEY_CHECK)`. 복호화 성공 = 암호 일치.
+    /// `encrypt(KEY_CHECK)`, hex encoded; decrypting it proves the password.
     key_check: String,
 }
 
@@ -53,14 +54,14 @@ pub struct Vault {
     key: MasterKey,
     device_id: String,
     own_log: ChangeLog,
-    /// 모든 기기 로그를 병합한 automerge 문서 (진실의 원천의 메모리 표현).
+    /// All device logs merged: the in-memory source of truth.
     doc: AutoCommit,
-    /// 첨부 사진 바이트 저장소 (`<vault_dir>/blobs`).
+    /// Photo bytes (`<vault_dir>/blobs`).
     blobs: BlobStore,
 }
 
 impl Vault {
-    /// 새 vault 생성 (salt 생성 + 헤더 기록). 이미 있으면 에러.
+    /// Creates a vault: new salt plus header. Errors if one already exists.
     pub fn create(dir: impl AsRef<Path>, password: &[u8], store: Store) -> Result<Self> {
         let dir = dir.as_ref();
         let header_path = dir.join(HEADER_FILE);
@@ -81,8 +82,8 @@ impl Vault {
         Self::open(dir, password, store)
     }
 
-    /// 기존 vault 열기. 헤더의 key_check 로 암호를 검증하고,
-    /// 모든 기기 로그를 병합해 automerge 문서와 로컬 캐시를 재구성한다.
+    /// Opens a vault: verifies the password against the header canary, then merges every
+    /// device log into the document and rebuilds the cache.
     pub fn open(dir: impl AsRef<Path>, password: &[u8], store: Store) -> Result<Self> {
         let dir = dir.as_ref().to_path_buf();
         let header = read_header(&dir)?;
@@ -97,20 +98,20 @@ impl Vault {
         let device_id = store.device_id()?;
         fs::create_dir_all(dir.join(LOGS_DIR))?;
 
-        // 갈라진 키 자가 치유: 과거에 두 기기가 각자 vault.json(다른 salt)을 만들어
-        // 키가 갈라졌다가, Syncthing 충돌 해소로 vault.json 이 하나(정본)로 수렴한
-        // 상황을 복구한다. 내 로그가 정본 키로 열리지 않으면 sync-conflict 헤더의
-        // salt 에서 옛 키를 찾아 로그를 정본 키로 재암호화한다.
+        // Self-heal a diverged key: two devices could each create a vault.json with its own
+        // salt, and Syncthing's conflict resolution then picks one as canonical. If our log
+        // will not open under the canonical key, look for the old salt in the conflict
+        // headers and re-encrypt.
         heal_divergent_log(&dir, &device_id, password, &key)?;
 
         Self::finish_open(dir, store, key, device_id)
     }
 
-    /// 이미 유도해 둔 키로 열기 ("자동 잠금 해제" 경로 — 마스터 암호를 묻지 않는다).
+    /// Opens with an already-derived key: the "stay unlocked" path, no password prompt.
     ///
-    /// 암호가 없으므로 갈라진 키 자가 치유(`heal_divergent_log`)는 건너뛴다. 그 상황이면
-    /// 여기서 로그가 열리지 않아 에러가 나고, 호출자는 잠금 화면으로 되돌리면 된다 —
-    /// 복구는 사용자가 암호를 입력하는 [`Self::open`] 경로에서 일어난다.
+    /// Without a password there is no `heal_divergent_log`, so a diverged key surfaces as an
+    /// error here and the caller should fall back to the lock screen; healing happens in
+    /// [`Self::open`].
     pub fn open_with_key(dir: impl AsRef<Path>, key: MasterKey, store: Store) -> Result<Self> {
         let dir = dir.as_ref().to_path_buf();
         let header = read_header(&dir)?;
@@ -122,7 +123,7 @@ impl Vault {
         Self::finish_open(dir, store, key, device_id)
     }
 
-    /// 키 검증까지 끝난 뒤의 공통 마무리: 내 로그를 열고 전체를 병합한다.
+    /// Shared tail of both open paths: open our log and merge everything.
     fn finish_open(dir: PathBuf, store: Store, key: MasterKey, device_id: String) -> Result<Self> {
         let own_log = ChangeLog::open(
             dir.join(LOGS_DIR).join(format!("{device_id}.{LOG_EXT}")),
@@ -143,13 +144,12 @@ impl Vault {
         Ok(vault)
     }
 
-    /// 이 vault 를 여는 원시 키. "자동 잠금 해제" 캐시에 쓰라고 있는 것으로,
-    /// 보안상의 의미는 [`MasterKey::to_bytes`] 문서를 볼 것.
+    /// Raw key for the "stay unlocked" cache; see [`MasterKey::to_bytes`] for what that costs.
     pub fn key_bytes(&self) -> [u8; crate::crypto::KEY_LEN] {
         self.key.to_bytes()
     }
 
-    /// 헤더가 있으면 열고, 없으면 새로 만든다.
+    /// Opens the vault, creating it if there is no header yet.
     pub fn open_or_create(dir: impl AsRef<Path>, password: &[u8], store: Store) -> Result<Self> {
         if dir.as_ref().join(HEADER_FILE).exists() {
             Self::open(dir, password, store)
@@ -158,7 +158,7 @@ impl Vault {
         }
     }
 
-    /// 메모 삽입/갱신. 바뀐 필드만 automerge 에 기록해 필드 단위 병합을 살린다.
+    /// Inserts or updates a memo, writing only changed fields so merges stay field-level.
     pub fn upsert(&mut self, memo: &Memo) -> Result<()> {
         let memos = self.memos_obj()?;
         let obj = match self.doc.get(&memos, &memo.id)? {
@@ -177,11 +177,10 @@ impl Vault {
         self.store.upsert(memo)
     }
 
-    /// 사진을 메모에 붙인다. 바이트는 blob 으로 저장하고 첨부 항목만 동기화한다.
+    /// Attaches a photo: bytes go to the blob store, only the record is synced.
     ///
-    /// `width_px`/`height_px` 는 **호출자(UI)가 넘긴다** — 코어에 이미지 디코더를 넣지
-    /// 않기 위해서다(데스크탑·모바일 모두 이미 디코더를 갖고 있다). 모르면 0 을 넘기면
-    /// 되고, 그 경우 표시 비율은 1:1 로 취급된다.
+    /// The UI passes `width_px`/`height_px` so the core needs no image decoder — both UIs
+    /// already have one. Pass 0 when unknown; the aspect ratio then falls back to 1:1.
     pub fn attach(
         &mut self,
         memo_id: &str,
@@ -201,7 +200,7 @@ impl Vault {
         Ok(a)
     }
 
-    /// 첨부 항목 삽입/갱신 (표시 크기 변경도 이 경로).
+    /// Inserts or updates an attachment; display-size changes go through here too.
     pub fn upsert_attachment(&mut self, a: &Attachment) -> Result<()> {
         let attachments = self.attachments_obj()?;
         let obj = match self.doc.get(&attachments, &a.id)? {
@@ -226,7 +225,7 @@ impl Vault {
         self.store.upsert_attachment(a)
     }
 
-    /// 표시 너비만 바꾼다 (em 의 1/1000). 한 기기에서 줄이면 다른 기기도 같은 비율로 보인다.
+    /// Sets just the display width (1/1000 em); resizing on one device carries to the others.
     pub fn set_attachment_width(&mut self, id: &str, width_em_milli: i64) -> Result<()> {
         let Some(mut a) = self.store.get_attachment(id)? else {
             bail!(t!("core.attachment_not_found", id = id));
@@ -235,7 +234,7 @@ impl Vault {
         self.upsert_attachment(&a)
     }
 
-    /// 메모에서 사진을 뗀다. **blob 파일은 남긴다** (GC 없음 — 다른 기기가 아직 볼 수 있다).
+    /// Detaches a photo. **The blob file stays** — no GC, other devices may still show it.
     pub fn detach(&mut self, id: &str) -> Result<()> {
         let attachments = self.attachments_obj()?;
         if self.doc.get(&attachments, id)?.is_some() {
@@ -245,17 +244,17 @@ impl Vault {
         self.store.delete_attachment(id)
     }
 
-    /// 첨부의 사진 바이트(평문). 아직 동기화가 안 됐으면 에러 — UI 는 자리표시자를 보이면 된다.
+    /// Photo bytes. Errors while the blob has not synced yet; the UI shows a placeholder.
     pub fn attachment_bytes(&self, hash: &str) -> Result<Vec<u8>> {
         self.blobs.get(hash)
     }
 
-    /// 이 기기에 사진 파일이 이미 도착했는가.
+    /// Whether the photo has arrived on this device.
     pub fn has_blob(&self, hash: &str) -> bool {
         self.blobs.has(hash)
     }
 
-    /// 그룹 삽입/갱신 (이름 변경·부모 변경 모두 이 경로).
+    /// Inserts or updates a group; renames and re-parenting both go through here.
     pub fn upsert_group(&mut self, group: &Group) -> Result<()> {
         let groups = self.groups_obj()?;
         let obj = match self.doc.get(&groups, &group.id)? {
@@ -271,8 +270,8 @@ impl Vault {
         self.store.upsert_group(group)
     }
 
-    /// 그룹 삭제. 안에 있던 그룹/메모는 지우지 않고 **상위로 끌어올린다**
-    /// (폴더를 지웠다고 메모가 사라지면 곤란하므로).
+    /// Deletes a group and **lifts** its groups and memos to the parent instead of deleting
+    /// them — removing a folder must not remove its memos.
     pub fn delete_group(&mut self, id: &str) -> Result<()> {
         let parent = self
             .store
@@ -280,7 +279,7 @@ impl Vault {
             .map(|g| g.parent_id)
             .unwrap_or_default();
 
-        // 자식 그룹을 상위로.
+        // Lift child groups.
         let children: Vec<Group> = self
             .store
             .list_groups()?
@@ -292,7 +291,7 @@ impl Vault {
             child.updated_at = crate::now_millis();
             self.upsert_group(&child)?;
         }
-        // 속해 있던 메모를 상위로.
+        // Lift the memos.
         let memos: Vec<Memo> = self
             .store
             .list()?
@@ -313,7 +312,7 @@ impl Vault {
         self.store.delete_group(id)
     }
 
-    /// 메모 삭제.
+    /// Deletes a memo.
     pub fn delete(&mut self, id: &str) -> Result<()> {
         let memos = self.memos_obj()?;
         if self.doc.get(&memos, id)?.is_some() {
@@ -323,41 +322,38 @@ impl Vault {
         self.store.delete(id)
     }
 
-    /// `logs/` 의 모든 기기 로그를 복호화해 새 automerge 문서로 병합하고,
-    /// 로컬 SQLite 캐시를 처음부터 재구성한다.
-    ///
-    /// Syncthing 이 다른 기기의 로그 파일을 가져다 놓으면, 이 호출 한 번으로 반영된다.
+    /// Merges every log in `logs/` into a fresh document and rebuilds the SQLite cache from
+    /// scratch. One call picks up whatever Syncthing has delivered.
     pub fn rebuild(&mut self) -> Result<()> {
         let mut doc = AutoCommit::new();
         doc.apply_changes(self.read_all_changes()?)?;
-        // actor = device_id: 이후의 로컬 변경이 자기 로그의 actor 로 이어진다.
-        // (자기 옛 change 들을 이미 적용했으므로 actor seq 도 이어진다.)
+        // actor = device_id, so later local changes continue our own actor sequence.
         doc.set_actor(ActorId::from(self.device_id.as_bytes()));
         self.doc = doc;
         self.materialize()
     }
 
-    /// 읽기용 로컬 캐시 접근 (list/get 등).
+    /// Read-only access to the local cache.
     pub fn store(&self) -> &Store {
         &self.store
     }
 
-    /// 이 기기의 식별자.
+    /// This device's id.
     pub fn device_id(&self) -> &str {
         &self.device_id
     }
 
-    /// 동기화 대상 디렉터리 (Syncthing 공유 폴더로 지정할 경로).
+    /// The synced directory, i.e. the Syncthing shared folder.
     pub fn dir(&self) -> &Path {
         &self.dir
     }
 
-    /// 모든 `.ymlog` 를 복호화해 automerge change 로 파싱한다.
+    /// Decrypts every `.ymlog` and parses the automerge changes.
     ///
-    /// **한 로그가 실패해도 전체 병합을 막지 않는다** — 그 파일만 건너뛴다.
-    /// 실패 원인: 다른 키로 쓰인 로그(기기별 vault 가 갈라진 경우)나 Syncthing 이
-    /// 아직 다 옮기지 못한 부분 파일. 이런 게 하나 있다고 다른 기기의 정상 로그까지
-    /// 못 읽으면 "동기화가 통째로 멈춘 것처럼" 보인다(특히 콘솔 없는 Windows 릴리스).
+    /// **One bad log never blocks the merge** — it is skipped. A log can fail because it was
+    /// written under a diverged key, or because Syncthing has only delivered part of it;
+    /// letting that stop the healthy logs would look like sync had died altogether
+    /// (especially in the console-less Windows build).
     fn read_all_changes(&self) -> Result<Vec<Change>> {
         let logs_dir = self.dir.join(LOGS_DIR);
         let mut changes = Vec::new();
@@ -372,22 +368,22 @@ impl Vault {
             let records = match ChangeLog::open(&path, self.key.clone()).read_all() {
                 Ok(r) => r,
                 Err(e) => {
-                    eprintln!("로그 건너뜀(복호화 실패) {}: {e}", path.display());
+                    eprintln!("skipping log (decrypt failed) {}: {e}", path.display());
                     continue;
                 }
             };
             for record in records {
                 match Change::from_bytes(record) {
                     Ok(c) => changes.push(c),
-                    Err(e) => eprintln!("change 건너뜀(파싱 실패) {}: {e}", path.display()),
+                    Err(e) => eprintln!("skipping change (parse failed) {}: {e}", path.display()),
                 }
             }
         }
         Ok(changes)
     }
 
-    /// 방금의 로컬 변경을 커밋해 자기 로그에 암호화 append 한다.
-    /// (변경이 실제로 없었으면 아무것도 쓰지 않는다.)
+    /// Commits the pending local edit and appends it, encrypted, to our own log. Writes
+    /// nothing when there was no actual change.
     fn append_local_change(&mut self) -> Result<()> {
         if self.doc.commit().is_some() {
             let change = self
@@ -399,11 +395,11 @@ impl Vault {
         Ok(())
     }
 
-    /// automerge 문서를 SQLite 캐시로 실체화한다.
+    /// Materializes the document into the SQLite cache.
     fn materialize(&mut self) -> Result<()> {
         self.store.clear_memos()?;
         let Some((Value::Object(ObjType::Map), memos)) = self.doc.get(ROOT, "memos")? else {
-            return Ok(()); // 아직 메모 없음
+            return Ok(()); // no memos yet
         };
         let ids: Vec<String> = self.doc.keys(&memos).collect();
         for id in ids {
@@ -414,7 +410,7 @@ impl Vault {
                 id: id.clone(),
                 title: get_str(&self.doc, &obj, "title")?,
                 body: get_str(&self.doc, &obj, "body")?,
-                // color/opacity 는 이후에 추가된 필드라 옛 change 엔 없을 수 있다 → 기본값.
+                // color/opacity came later, so old changes may not carry them.
                 color: get_str_or(&self.doc, &obj, "color", crate::DEFAULT_COLOR),
                 opacity: crate::clamp_opacity(get_i64_or(
                     &self.doc,
@@ -435,7 +431,7 @@ impl Vault {
     fn materialize_attachments(&mut self) -> Result<()> {
         let Some((Value::Object(ObjType::Map), attachments)) = self.doc.get(ROOT, "attachments")?
         else {
-            return Ok(()); // 아직 첨부 없음
+            return Ok(()); // no attachments yet
         };
         let ids: Vec<String> = self.doc.keys(&attachments).collect();
         for id in ids {
@@ -458,7 +454,7 @@ impl Vault {
                 )),
                 created_at: get_i64_or(&self.doc, &obj, "created_at", 0),
             };
-            // hash 가 비면 못 쓰는 항목이다 (옛 버전/손상). 조용히 건너뛴다.
+            // No hash means an unusable record (old version or damage); skip it.
             if !a.hash.is_empty() {
                 self.store.upsert_attachment(&a)?;
             }
@@ -466,10 +462,10 @@ impl Vault {
         Ok(())
     }
 
-    /// `ROOT.groups` 를 SQLite 캐시로 실체화한다.
+    /// Materializes `ROOT.groups` into the cache.
     fn materialize_groups(&mut self) -> Result<()> {
         let Some((Value::Object(ObjType::Map), groups)) = self.doc.get(ROOT, "groups")? else {
-            return Ok(()); // 아직 그룹 없음
+            return Ok(()); // no groups yet
         };
         let ids: Vec<String> = self.doc.keys(&groups).collect();
         for id in ids {
@@ -488,7 +484,7 @@ impl Vault {
         Ok(())
     }
 
-    /// `ROOT.memos` 맵을 얻는다 (없으면 생성).
+    /// The `ROOT.memos` map, created on first use.
     fn memos_obj(&mut self) -> Result<ObjId> {
         Ok(match self.doc.get(ROOT, "memos")? {
             Some((Value::Object(ObjType::Map), id)) => id,
@@ -496,7 +492,7 @@ impl Vault {
         })
     }
 
-    /// `ROOT.attachments` 맵을 얻는다 (없으면 생성).
+    /// The `ROOT.attachments` map, created on first use.
     fn attachments_obj(&mut self) -> Result<ObjId> {
         Ok(match self.doc.get(ROOT, "attachments")? {
             Some((Value::Object(ObjType::Map), id)) => id,
@@ -504,7 +500,7 @@ impl Vault {
         })
     }
 
-    /// `ROOT.groups` 맵을 얻는다 (없으면 생성).
+    /// The `ROOT.groups` map, created on first use.
     fn groups_obj(&mut self) -> Result<ObjId> {
         Ok(match self.doc.get(ROOT, "groups")? {
             Some((Value::Object(ObjType::Map), id)) => id,
@@ -513,20 +509,20 @@ impl Vault {
     }
 }
 
-/// 갈라진 vault 키 자가 치유.
+/// Heals a diverged vault key.
 ///
-/// 배경: 예전엔 새 기기가 페어링으로 vault.json 을 받기 전에 암호를 입력하면 각자
-/// 다른 salt 로 vault.json 을 만들어 키가 갈라졌다. Syncthing 은 두 vault.json 을
-/// 충돌로 보고 하나를 정본(vault.json)으로 남기고 진 쪽을 `vault.sync-conflict-*.json`
-/// 으로 이름을 바꾼다 → 모든 기기가 같은 정본 salt 로 수렴한다.
+/// Background: a device that entered its password before pairing had delivered vault.json
+/// used to create its own header with a different salt. Syncthing resolves the two as a
+/// conflict, keeping one as `vault.json` and renaming the loser to
+/// `vault.sync-conflict-*.json`, so every device converges on the canonical salt.
 ///
-/// 이 함수는 정본 키(`canonical_key`, 이미 vault.json 의 key_check 로 검증됨)로 내
-/// 로그가 열리는지 보고, 안 열리면 conflict 헤더들의 salt 로 옛 키를 찾아 내 로그를
-/// 정본 키로 재암호화한다. 남의 로그는 건드리지 않는다(각 기기가 스스로 치유).
+/// If our log does not open under `canonical_key` (already verified against the header),
+/// this looks for the old key among the conflict headers' salts and re-encrypts our log.
+/// Other devices' logs are left alone; each heals itself.
 ///
-/// conflict 파일은 지우지 않는다 — 아직 치유하지 못한 다른 기기가 자기 옛 salt 를
-/// 찾는 데 필요할 수 있고, 지우면 그 삭제가 동기화로 퍼져 복구를 막는다. 일단
-/// 치유되면 내 로그가 정본 키로 바로 열리므로 이 탐색은 다시 돌지 않는다.
+/// Conflict files are never deleted: a device that has not healed yet may still need its
+/// old salt, and the deletion would sync over and strip that away. Once healed, the log
+/// opens under the canonical key and this search never runs again.
 fn heal_divergent_log(
     dir: &Path,
     device_id: &str,
@@ -535,30 +531,30 @@ fn heal_divergent_log(
 ) -> Result<()> {
     let own_path = dir.join(LOGS_DIR).join(format!("{device_id}.{LOG_EXT}"));
     if !own_path.exists() {
-        return Ok(()); // 로컬 로그 없음 → 치유할 것 없음
+        return Ok(()); // no local log, nothing to heal
     }
-    // 정본 키로 이미 열리면 정상(또는 이미 치유됨).
+    // Already opens under the canonical key: healthy, or healed earlier.
     if ChangeLog::open(&own_path, canonical_key.clone()).read_all().is_ok() {
         return Ok(());
     }
-    // 내 로그를 여는 옛 키를 conflict 헤더들의 salt 에서 찾는다.
+    // Look for the old key among the conflict headers' salts.
     for salt in conflict_salts(dir) {
         let old_key = MasterKey::derive(password, &salt)?;
         if ChangeLog::open(&own_path, old_key.clone()).read_all().is_ok() {
             reencrypt_log(&own_path, &old_key, canonical_key)?;
-            eprintln!("갈라진 vault 키 감지 → 내 로그를 정본 키로 재암호화 완료");
+            eprintln!("diverged vault key: re-encrypted our log under the canonical key");
             return Ok(());
         }
     }
-    // 못 찾음: 그대로 두면 rebuild 가 이 로그만 건너뛴다(다른 기기 로그는 정상 병합).
+    // Not found: rebuild will just skip this log and merge the others.
     eprintln!(
-        "경고: 내 로그를 여는 키를 찾지 못함 ({}) — vault.json 이 예기치 않게 바뀌었을 수 있음",
+        "warning: no key opens our log ({}) — vault.json may have changed unexpectedly",
         own_path.display()
     );
     Ok(())
 }
 
-/// `vault.json` 헤더를 읽는다.
+/// Reads the `vault.json` header.
 fn read_header(dir: &Path) -> Result<VaultHeader> {
     let path = dir.join(HEADER_FILE);
     let bytes =
@@ -566,7 +562,7 @@ fn read_header(dir: &Path) -> Result<VaultHeader> {
     Ok(serde_json::from_slice(&bytes)?)
 }
 
-/// 헤더의 카나리(key_check)를 복호화해 키가 맞는지 본다. 실패 = 틀린 암호/키.
+/// Checks the key by decrypting the header canary.
 fn verify_key(header: &VaultHeader, key: &MasterKey) -> Result<()> {
     let check = key
         .decrypt(&from_hex(&header.key_check)?)
@@ -577,7 +573,7 @@ fn verify_key(header: &VaultHeader, key: &MasterKey) -> Result<()> {
     Ok(())
 }
 
-/// `vault.sync-conflict-*.json` 들에서 salt 를 파싱해 반환. 읽기/파싱 실패는 조용히 건너뛴다.
+/// Salts parsed out of the `vault.sync-conflict-*.json` files; unreadable ones are skipped.
 fn conflict_salts(dir: &Path) -> Vec<Salt> {
     let mut salts = Vec::new();
     let Ok(entries) = fs::read_dir(dir) else {
@@ -599,8 +595,7 @@ fn conflict_salts(dir: &Path) -> Vec<Salt> {
     salts
 }
 
-/// 로그를 `old_key` 로 복호화해 `new_key` 로 다시 쓰고 원자적으로 교체한다.
-/// (레코드 순서는 유지되지만 automerge change 는 순서 무관이라 무해하다.)
+/// Rewrites a log from `old_key` to `new_key` and swaps it in atomically.
 fn reencrypt_log(path: &Path, old_key: &MasterKey, new_key: &MasterKey) -> Result<()> {
     let records = ChangeLog::open(path, old_key.clone()).read_all()?;
     let tmp = path.with_extension("ymlog.tmp");
@@ -645,7 +640,7 @@ fn get_str(doc: &AutoCommit, obj: &ObjId, key: &str) -> Result<String> {
     }
 }
 
-/// 문자열 필드를 읽되, 없거나 문자열이 아니면 기본값을 돌려준다.
+/// Reads a string field, falling back to `default` when missing or of another type.
 fn get_str_or(doc: &AutoCommit, obj: &ObjId, key: &str, default: &str) -> String {
     match doc.get(obj, key) {
         Ok(Some((Value::Scalar(s), _))) => match s.as_ref() {
@@ -656,7 +651,7 @@ fn get_str_or(doc: &AutoCommit, obj: &ObjId, key: &str, default: &str) -> String
     }
 }
 
-/// 정수 필드를 읽되, 없거나 정수가 아니면 기본값을 돌려준다.
+/// Reads an integer field, falling back to `default` when missing or of another type.
 fn get_i64_or(doc: &AutoCommit, obj: &ObjId, key: &str, default: i64) -> i64 {
     match doc.get(obj, key) {
         Ok(Some((Value::Scalar(s), _))) => match s.as_ref() {
@@ -695,14 +690,14 @@ fn from_hex(s: &str) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
 
-    /// 테스트별 임시 vault 디렉터리.
+    /// A fresh temporary vault directory.
     fn temp_dir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!("ymemo-vault-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
 
-    /// 사진 첨부: blob 은 파일로, 항목은 로그로 — 그리고 **로그만으로 복원**돼야 한다.
+    /// Blob to a file, record to the log — and the logs alone must restore both.
     #[test]
     fn attachment_survives_a_rebuild_from_logs() {
         let dir = temp_dir();
@@ -710,14 +705,14 @@ mod tests {
         let (memo_id, att_id);
         {
             let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
-            let memo = Memo::new("사진 있는 메모", "");
+            let memo = Memo::new("memo with a photo", "");
             v.upsert(&memo).unwrap();
             let a = v.attach(&memo.id, &photo, "photo.png", "image/png", 4000, 3000).unwrap();
             memo_id = memo.id;
             att_id = a.id;
         }
 
-        // 빈 캐시로 재오픈 = 로그 재생만으로 복원.
+        // Reopening with an empty cache replays the logs.
         let v = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
         let list = v.store().attachments_of(&memo_id).unwrap();
         assert_eq!(list.len(), 1);
@@ -726,77 +721,77 @@ mod tests {
         assert_eq!(a.name, "photo.png");
         assert_eq!((a.width_px, a.height_px), (4000, 3000));
         assert_eq!(a.width_em_milli, crate::DEFAULT_WIDTH_EM_MILLI);
-        // 바이트도 그대로 돌아와야 한다.
+        // The bytes must come back too.
         assert!(v.has_blob(&a.hash));
         assert_eq!(v.attachment_bytes(&a.hash).unwrap(), photo);
 
         fs::remove_dir_all(&dir).ok();
     }
 
-    /// 한 기기에서 바꾼 표시 크기가 다른 기기에도 그대로 온다 (픽셀이 아니라 em 이라
-    /// 폰트 크기가 다른 기기에서도 같은 "글자 몇 자 폭" 으로 보인다).
+    /// A display size set on one device carries to the other: it is em, not pixels, so it
+    /// stays "so many characters wide" whatever the font size.
     #[test]
     fn display_width_syncs_between_devices() {
         let dir = temp_dir();
         let mut phone = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
-        let memo = Memo::new("사진", "");
+        let memo = Memo::new("photo", "");
         phone.upsert(&memo).unwrap();
         let a = phone.attach(&memo.id, b"jpeg", "p.jpg", "image/jpeg", 1000, 500).unwrap();
 
-        // 폰에서 8em 으로 줄인다.
+        // Shrink to 8em on the phone.
         phone.set_attachment_width(&a.id, 8_000).unwrap();
 
-        // 데스크탑(=다른 캐시/기기)이 로그를 병합하면 같은 값을 본다.
+        // The desktop (another cache, another device) merges and sees the same value.
         let desktop = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
         let got = desktop.store().get_attachment(&a.id).unwrap().unwrap();
         assert_eq!(got.width_em_milli, 8_000);
 
-        // 같은 8em 이라도 플랫폼 기본 폰트가 다르면 픽셀은 다르게, 비율은 같게 나온다.
+        // Same 8em, different base fonts: different pixels, same ratio.
         assert_eq!(got.display_size(16.0), (128.0, 64.0));
         assert_eq!(got.display_size(20.0), (160.0, 80.0));
 
         fs::remove_dir_all(&dir).ok();
     }
 
-    /// 사진을 떼어도 blob 파일은 남는다 (GC 없음 — 다른 기기가 아직 참조할 수 있다).
+    /// Detaching keeps the blob file — no GC, another device may still reference it.
     #[test]
     fn detach_keeps_the_blob_file() {
         let dir = temp_dir();
         let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
-        let memo = Memo::new("메모", "");
+        let memo = Memo::new("memo", "");
         v.upsert(&memo).unwrap();
         let a = v.attach(&memo.id, b"bytes", "x.png", "image/png", 10, 10).unwrap();
 
         v.detach(&a.id).unwrap();
         assert!(v.store().attachments_of(&memo.id).unwrap().is_empty());
-        assert!(v.has_blob(&a.hash), "blob 파일은 남아 있어야 한다");
+        assert!(v.has_blob(&a.hash), "the blob file must survive");
 
-        // 재생 후에도 떼어진 상태가 유지돼야 한다 (삭제가 로그에 남았는가).
+        // The detach must survive a replay, i.e. it reached the log.
         let v2 = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
         assert!(v2.store().attachments_of(&memo.id).unwrap().is_empty());
 
         fs::remove_dir_all(&dir).ok();
     }
 
-    /// 다른 키로 쓰인(=기기 vault 가 갈라진) 로그가 섞여 있어도, rebuild 는 실패하지
-    /// 않고 복호화되는 로그만 반영해야 한다.
+    /// A log written under a foreign key must not fail the rebuild; the readable logs still
+    /// apply.
     #[test]
     fn rebuild_skips_undecryptable_foreign_log() {
         let dir = temp_dir();
         let mut a = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
-        let memo = Memo::new("내 메모", "");
+        let memo = Memo::new("my memo", "");
         a.upsert(&memo).unwrap();
 
-        // logs/ 에 다른 키로 암호화된 이질 로그를 심는다.
+        // Plant a log encrypted with a different key.
         let foreign = ChangeLog::open(
             dir.join(LOGS_DIR).join("ffffffff.ymlog"),
-            MasterKey::derive("다른 암호".as_bytes(), &generate_salt()).unwrap(),
+            MasterKey::derive(b"other password", &generate_salt()).unwrap(),
         );
-        foreign.append("automerge change 가 아닌 쓰레기".as_bytes()).unwrap();
+        foreign.append(b"not an automerge change").unwrap();
 
-        // 이질 로그가 있어도 병합은 성공하고 내 메모는 살아 있어야 한다.
+        // The merge still succeeds and our memo survives.
         a.rebuild().unwrap();
-        assert_eq!(a.store().get(&memo.id).unwrap().unwrap().title, "내 메모");
+        assert_eq!(a.store().get(&memo.id).unwrap().unwrap().title, "my memo");
 
         fs::remove_dir_all(&dir).ok();
     }
@@ -809,35 +804,35 @@ mod tests {
         let m1;
         {
             let mut vault = Vault::create(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
-            m1 = Memo::new("살아남을 메모", "본문");
+            m1 = Memo::new("keeper", "body");
             vault.upsert(&m1).unwrap();
-            let dead = Memo::new("지워질 메모", "");
+            let dead = Memo::new("doomed", "");
             vault.upsert(&dead).unwrap();
             vault.delete(&dead.id).unwrap();
-        } // vault 소멸 — 로그 파일이 진실의 원천으로 남는다.
+        } // vault dropped; the log files are the source of truth
 
-        // 같은 캐시(=같은 device_id=actor)로 재오픈: actor seq 가 이어져야 한다.
+        // Reopen with the same cache (same device id, same actor): the seq must continue.
         let m2;
         {
             let mut vault = Vault::open(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
             assert_eq!(vault.store().list().unwrap(), vec![m1.clone()]);
-            m2 = Memo::new("두 번째 세션", "");
+            m2 = Memo::new("second session", "");
             vault.upsert(&m2).unwrap();
         }
 
-        // 완전히 새(빈) 캐시로도 로그만으로 전체 복원.
+        // A brand-new cache restores everything from the logs alone.
         let vault = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
         let mut titles: Vec<String> =
             vault.store().list().unwrap().into_iter().map(|m| m.title).collect();
         titles.sort();
-        assert_eq!(titles, vec!["두 번째 세션", "살아남을 메모"]);
+        assert_eq!(titles, vec!["keeper", "second session"]);
 
         fs::remove_dir_all(&dir).ok();
         fs::remove_file(&db).ok();
     }
 
-    /// 정본 salt 로 vault.json 을 덮어쓴다(테스트에서 Syncthing 충돌 해소를 흉내). 진
-    /// 헤더는 `vault.sync-conflict-*.json` 으로 남겨, 옛 salt 를 찾을 수 있게 한다.
+    /// Writes a header, used to imitate Syncthing's conflict resolution: the canonical salt
+    /// lands in vault.json while the loser stays as `vault.sync-conflict-*.json`.
     fn write_header(dir: &Path, name: &str, password: &[u8], salt: &Salt) {
         let key = MasterKey::derive(password, salt).unwrap();
         let header = VaultHeader {
@@ -848,18 +843,18 @@ mod tests {
         fs::write(dir.join(name), serde_json::to_vec_pretty(&header).unwrap()).unwrap();
     }
 
-    /// 갈라진 키 자가 치유: 내 로그가 옛 salt 로 암호화돼 있고 vault.json 이 정본
-    /// salt 로 수렴하면, open 이 내 로그를 정본 키로 재암호화해 메모를 되살려야 한다.
+    /// With our log under the old salt and vault.json converged on the canonical one, open
+    /// must re-encrypt the log and bring the memos back.
     #[test]
     fn heals_divergent_vault_key_on_open() {
         let dir = temp_dir();
         let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
 
-        // 이 기기가 옛(진) salt 로 vault 를 만들고 메모를 쓴다.
+        // This device creates the vault under the old salt and writes a memo.
         let memo;
         {
             let mut v = Vault::create(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
-            memo = Memo::new("살아남아야 할 메모", "본문");
+            memo = Memo::new("must survive", "body");
             v.upsert(&memo).unwrap();
         }
         let old_salt: Salt = from_hex(
@@ -871,7 +866,7 @@ mod tests {
         .try_into()
         .unwrap();
 
-        // Syncthing 충돌 해소 흉내: 진 헤더는 conflict 로, vault.json 은 정본 salt 로.
+        // Imitate the conflict resolution: loser to conflict, canonical salt to vault.json.
         fs::rename(
             dir.join(HEADER_FILE),
             dir.join("vault.sync-conflict-20260101-120000-AAAAAAA.json"),
@@ -881,11 +876,11 @@ mod tests {
         assert_ne!(canonical_salt, old_salt);
         write_header(&dir, HEADER_FILE, b"pw", &canonical_salt);
 
-        // 같은 암호로 재오픈 → 치유 후 메모가 살아 있어야 한다.
+        // Reopening with the same password heals the log and the memo is back.
         let v = Vault::open(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
-        assert_eq!(v.store().get(&memo.id).unwrap().unwrap().title, "살아남아야 할 메모");
+        assert_eq!(v.store().get(&memo.id).unwrap().unwrap().title, "must survive");
 
-        // 내 로그가 이제 정본 키로 직접 열려야 한다(재암호화 확인).
+        // Our log now opens under the canonical key directly.
         let device_id = Store::open(&db).unwrap().device_id().unwrap();
         let canonical_key = MasterKey::derive(b"pw", &canonical_salt).unwrap();
         let own_log = ChangeLog::open(
@@ -902,18 +897,18 @@ mod tests {
     fn wrong_password_rejected_by_key_check() {
         let dir = temp_dir();
         Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
-        // 로그가 비어 있어도 헤더 카나리만으로 즉시 거부돼야 한다.
+        // The header canary alone rejects it, even with an empty log.
         assert!(Vault::open(&dir, b"wrong", Store::open_in_memory().unwrap()).is_err());
         fs::remove_dir_all(&dir).ok();
     }
 
-    /// "자동 잠금 해제": 캐시해 둔 원시 키만으로 암호 없이 같은 vault 가 열려야 한다.
+    /// "Stay unlocked": the cached raw key alone opens the same vault.
     #[test]
     fn cached_key_opens_vault_without_password() {
         let dir = temp_dir();
         let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
 
-        let memo = Memo::new("자동 해제로 볼 메모", "본문");
+        let memo = Memo::new("seen while unlocked", "body");
         let key_bytes = {
             let mut vault = Vault::create(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
             vault.upsert(&memo).unwrap();
@@ -924,7 +919,7 @@ mod tests {
         let vault = Vault::open_with_key(&dir, key, Store::open(&db).unwrap()).unwrap();
         assert_eq!(vault.store().list().unwrap(), vec![memo]);
 
-        // 엉뚱한 키는 헤더 카나리에서 걸러진다.
+        // A bogus key is caught by the header canary.
         let bogus = MasterKey::from_bytes(&[7u8; crate::crypto::KEY_LEN]).unwrap();
         assert!(Vault::open_with_key(&dir, bogus, Store::open_in_memory().unwrap()).is_err());
 
@@ -932,47 +927,47 @@ mod tests {
         fs::remove_file(&db).ok();
     }
 
-    /// automerge 의 핵심 가치: 두 기기가 같은 메모의 **다른 필드**를 동시에 고치면
-    /// 둘 다 살아남아야 한다. (구 LWW 는 메모 단위라 한쪽이 통째로 사라졌다.)
+    /// The point of automerge: concurrent edits to **different fields** of one memo both
+    /// survive. The old last-write-wins model dropped one side wholesale.
     #[test]
     fn concurrent_field_edits_both_survive() {
         let dir = temp_dir();
 
-        // 기기 A: 메모 생성.
+        // Device A creates the memo.
         let mut a = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
-        let base = Memo::new("원본 제목", "원본 본문");
+        let base = Memo::new("original title", "original body");
         a.upsert(&base).unwrap();
 
-        // 기기 B: 열어서 같은 상태에서 출발.
+        // Device B starts from the same state.
         let mut b = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
         assert_ne!(a.device_id(), b.device_id());
         assert_eq!(b.store().list().unwrap().len(), 1);
 
-        // 동시 편집: A 는 제목만, B 는 본문만 고친다.
+        // Concurrent edits: A the title, B the body.
         let mut a_edit = base.clone();
-        a_edit.title = "A가 고친 제목".into();
+        a_edit.title = "title from A".into();
         a.upsert(&a_edit).unwrap();
 
         let mut b_edit = base.clone();
-        b_edit.body = "B가 고친 본문".into();
+        b_edit.body = "body from B".into();
         b.upsert(&b_edit).unwrap();
 
-        // 양쪽 모두 rebuild 후 같은 병합 결과로 수렴해야 한다.
+        // Both sides must converge on the same merge.
         a.rebuild().unwrap();
         b.rebuild().unwrap();
         for v in [&a, &b] {
             let merged = v.store().get(&base.id).unwrap().unwrap();
-            assert_eq!(merged.title, "A가 고친 제목");
-            assert_eq!(merged.body, "B가 고친 본문");
+            assert_eq!(merged.title, "title from A");
+            assert_eq!(merged.body, "body from B");
         }
 
-        // 로그 파일은 기기당 하나씩 두 개.
+        // One log file per device.
         assert_eq!(fs::read_dir(dir.join(LOGS_DIR)).unwrap().count(), 2);
 
         fs::remove_dir_all(&dir).ok();
     }
 
-    /// 그룹도 로그를 통해 다른 기기로 전파되고, 메모의 소속도 함께 넘어가야 한다.
+    /// Groups propagate through the logs, and so does a memo's membership.
     #[test]
     fn groups_sync_across_devices() {
         let dir = temp_dir();
@@ -981,44 +976,44 @@ mod tests {
         let memo;
         {
             let mut a = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
-            group = Group::new("업무");
+            group = Group::new("Work");
             a.upsert_group(&group).unwrap();
             memo = {
-                let mut m = Memo::new("보고서", "");
+                let mut m = Memo::new("report", "");
                 m.group_id = group.id.clone();
                 m
             };
             a.upsert(&memo).unwrap();
         }
 
-        // 다른 기기(빈 캐시)에서 로그만으로 복원.
+        // Another device with an empty cache restores from the logs.
         let b = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
         let groups = b.store().list_groups().unwrap();
         assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].name, "업무");
+        assert_eq!(groups[0].name, "Work");
         assert_eq!(b.store().get(&memo.id).unwrap().unwrap().group_id, group.id);
 
         fs::remove_dir_all(&dir).ok();
     }
 
-    /// 그룹을 지워도 안에 있던 메모/하위 그룹은 사라지지 않고 상위로 올라와야 한다.
+    /// Deleting a group lifts its memos and subgroups instead of destroying them.
     #[test]
     fn deleting_group_lifts_children_instead_of_destroying() {
         let dir = temp_dir();
         let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
 
-        let outer = Group::new("상위");
+        let outer = Group::new("outer");
         v.upsert_group(&outer).unwrap();
-        let mut inner = Group::new("하위");
+        let mut inner = Group::new("inner");
         inner.parent_id = outer.id.clone();
         v.upsert_group(&inner).unwrap();
-        let mut memo = Memo::new("안에 있던 메모", "");
+        let mut memo = Memo::new("memo inside", "");
         memo.group_id = outer.id.clone();
         v.upsert(&memo).unwrap();
 
         v.delete_group(&outer.id).unwrap();
 
-        // 상위 그룹만 사라지고, 하위 그룹과 메모는 최상위로.
+        // Only the outer group is gone; the rest moved to the top level.
         let groups = v.store().list_groups().unwrap();
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].id, inner.id);
@@ -1029,7 +1024,7 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
-    /// 같은 필드 충돌은 양쪽이 같은 값으로 결정론적으로 수렴해야 한다.
+    /// A conflict on the same field converges to one value on both sides.
     #[test]
     fn same_field_conflict_converges() {
         let dir = temp_dir();
@@ -1041,18 +1036,18 @@ mod tests {
         let mut b = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
 
         let mut a_edit = base.clone();
-        a_edit.title = "A안".into();
+        a_edit.title = "from A".into();
         a.upsert(&a_edit).unwrap();
         let mut b_edit = base.clone();
-        b_edit.title = "B안".into();
+        b_edit.title = "from B".into();
         b.upsert(&b_edit).unwrap();
 
         a.rebuild().unwrap();
         b.rebuild().unwrap();
         let ta = a.store().get(&base.id).unwrap().unwrap().title;
         let tb = b.store().get(&base.id).unwrap().unwrap().title;
-        assert_eq!(ta, tb); // 어느 쪽이 이기든 양쪽이 같아야 한다
-        assert!(ta == "A안" || ta == "B안");
+        assert_eq!(ta, tb); // whoever wins, both must agree
+        assert!(ta == "from A" || ta == "from B");
 
         fs::remove_dir_all(&dir).ok();
     }

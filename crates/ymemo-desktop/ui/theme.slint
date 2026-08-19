@@ -1,17 +1,16 @@
-// 여러 창이 함께 쓰는 조각: 스티커 색 팔레트와 탭 버튼.
-// 색상 키 → 실제 색 변환은 여기서만 한다.
-// 스티커 팔레트: 색상 키("yellow"/"pink"/"green"/"blue"/"purple") → 실제 색.
-// 코어(Memo.color)는 키 문자열만 저장·동기화하고, 실제 색 해석은 여기 한곳에 모은다.
+// Pieces shared by several windows: the sticky palette and the tab button.
+// Palette keys ("yellow"/"pink"/"green"/"blue"/"purple") become real colors only here; the
+// core stores and syncs the key string alone.
 export global Palette {
-    // 스티커 본문 배경 (반투명 — 데스크탑 위젯 느낌)
+    // Body background, translucent so it reads as a desktop widget.
     pure public function bg(key: string) -> color {
         return key == "pink" ? #ffd6e6f2
              : key == "green" ? #d2f0c8f2
              : key == "blue" ? #cfe6fff2
              : key == "purple" ? #e6d6f5f2
-             : #fff9b1f2; // yellow (기본)
+             : #fff9b1f2; // yellow (default)
     }
-    // 제목 바 (본문보다 진한 불투명색)
+    // Title bar: opaque and darker than the body.
     pure public function bar(key: string) -> color {
         return key == "pink" ? #f7b8ce
              : key == "green" ? #b6e0a8
@@ -19,7 +18,7 @@ export global Palette {
              : key == "purple" ? #d0b8ec
              : #f4e98c; // yellow
     }
-    // 제목 바 글자색 (색상별로 대비 유지)
+    // Title bar text, keeping contrast per color.
     pure public function ink(key: string) -> color {
         return key == "pink" ? #7a3350
              : key == "green" ? #35662f
@@ -27,7 +26,7 @@ export global Palette {
              : key == "purple" ? #573377
              : #5c5c25; // yellow
     }
-    // 팔레트 칩/목록 악센트용 채도 높은 대표색 (불투명)
+    // Saturated accent for palette chips and list rows.
     pure public function swatch(key: string) -> color {
         return key == "pink" ? #ff9fc0
              : key == "green" ? #8fd678
@@ -38,11 +37,10 @@ export global Palette {
 }
 
 
-// 기기 페어링 패널.
-//  - 기본: 같은 네트워크에서 6자리 코드로 연결 (이 기기 코드 표시 + 상대 코드 입력).
+// Device pairing panel.
 
-// 페어링 패널 상단의 탭 버튼 하나. 두 연결 방식을 한 번에 한쪽만 보여주기 위한 것으로,
-// 이렇게 나눠야 각 화면이 스크롤 없이 창 안에 다 들어온다.
+// One tab at the top of the pairing panel. Showing a single method at a time is what keeps
+// each view inside the window without scrolling.
 export component TabButton inherits Rectangle {
     in property <string> label;
     in property <bool> active;

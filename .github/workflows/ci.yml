@@ -1,11 +1,11 @@
-# main 에 올라가는 모든 변경에 대해 도는 검사. (릴리스 산출물은 release.yml 이 만든다.)
+# Checks on every change headed for main; release.yml builds the artifacts.
 #
-# release.yml 의 test 잡은 태그를 밀 때만 돌고 코어/FFI 만 본다. 여기서는 **워크스페이스
-# 전체**를 돌린다 — 특히 ymemo-i18n 의 가드 테스트(카탈로그 키 일치, 자리표시자 일치,
-# 코드가 쓰는 t! 키의 존재)는 여기가 아니면 릴리스 직전까지 아무도 돌리지 않는다.
+# release.yml's test job only runs on a tag and only covers the core and FFI. This runs the
+# **whole workspace** — in particular ymemo-i18n's guard tests (matching catalog keys,
+# matching placeholders, every t! key present), which nothing else would run until release.
 #
-# 주의: GitHub 소유 액션(actions/*)만 쓴다 — 서드파티 액션 차단 정책에서도 돌도록.
-# 툴체인은 러너에 내장된 rustup 을 쓴다.
+# Only GitHub-owned actions (actions/*) are used, so this still runs under a policy that
+# blocks third-party ones. The toolchain is the runner's built-in rustup.
 
 name: ci
 
@@ -14,7 +14,7 @@ on:
     branches: [main]
   pull_request:
 
-# 같은 브랜치에 연달아 푸시하면 앞의 실행은 취소한다.
+# A new push to the same branch cancels the previous run.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -25,15 +25,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # slint 의존성이 edition2024 를, clippy 의 일부 제안이 최신 stable 을 요구한다.
+      # Slint's dependencies need edition2024, and some clippy lints need current stable.
       - run: rustup update stable
       - run: rustup component add clippy
 
-      # 데스크탑(slint)까지 빌드하므로 fontconfig 가 필요하다.
+      # The desktop build links fontconfig.
       - name: Install slint deps
         run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
 
-      # 빌드 캐시. 러너 이미지가 바뀌거나 Cargo.lock 이 바뀌면 새로 만든다.
+      # Build cache, rebuilt when the runner image or Cargo.lock changes.
       - uses: actions/cache@v4
         with:
           path: |
@@ -49,7 +49,7 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # 문서 링크가 깨지면(항목 이름을 바꾸고 문서를 안 고친 경우 등) 여기서 잡는다.
+      # Catches broken doc links, e.g. after renaming an item without updating its docs.
       - name: Rustdoc
         run: cargo doc --workspace --no-deps
         env:

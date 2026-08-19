@@ -1,5 +1,4 @@
 [toolchain]
-# Slint 의 일부 트랜지티브 의존성이 edition2024(1.85+)를, 코어가 `usize::is_multiple_of`(1.87)를
-# 요구하므로 Rust 1.87 이상이 필요하다.
-# stable 을 추적하면 항상 그 조건을 만족한다.
+# Rust >= 1.87 is required: some of Slint's transitive dependencies need edition2024 (1.85+)
+# and the core uses `usize::is_multiple_of` (1.87). Tracking stable always satisfies that.
 channel = "stable"

@@ -1,21 +1,20 @@
-# Rust 빌드 산출물
+# Rust build output
 /target
 
-# 로컬 전용 cargo 설정 (fontconfig shim 의 PKG_CONFIG_PATH 등, 머신 종속)
+# Machine-local cargo config (PKG_CONFIG_PATH for the fontconfig shim, ...)
 .cargo/config.toml
 
-# Slint/IME 검증 스파이크 (머신 종속 경로, 커밋하지 않음)
+# Slint/IME spikes: machine-specific paths, never committed
 /experiments
 
-# Flutter (apps/mobile). 빌드 산출물만 제외한다.
+# Flutter (apps/mobile): only build output is ignored.
 #
-# frb 바인딩(`lib/src/rust/`, `crates/ymemo-ffi/src/frb_generated.rs`)은 **커밋한다**:
-# codegen 은 그 파일들과 함께 `ymemo-ffi` 의 lib.rs·Cargo.toml 도 고치므로, 생성물을
-# 빼 두면 Flutter 가 없는 곳(=CI 의 cargo test --workspace)에서 컴파일이 깨진다.
-# 커밋해 두면 CI 가 바인딩까지 함께 검증해 준다.
+# The frb bindings (`lib/src/rust/`, `crates/ymemo-ffi/src/frb_generated.rs`) ARE committed:
+# codegen also edits ymemo-ffi's lib.rs and Cargo.toml, so leaving them out breaks the build
+# wherever Flutter is absent (CI's `cargo test --workspace`). Committed, CI checks them too.
 #
-# `android/` 도 커밋한다 — applicationId·minSdk·권한·(장차) cargokit gradle 훅이 사는 곳이라
-# 매번 다시 만들면 그 설정이 날아간다. iOS 도 착수할 때 같은 이유로 커밋 대상이 된다.
+# `android/` is committed as well — applicationId, minSdk, permissions and the future
+# cargokit gradle hooks live there and would be lost on every regeneration. iOS will follow.
 apps/mobile/ios/
 apps/mobile/build/
 apps/mobile/.dart_tool/
@@ -27,17 +26,17 @@ apps/mobile/android/**/build/
 apps/mobile/android/.kotlin/
 apps/mobile/**/*.iml
 
-# 패키징 빌드 산출물 (에셋 packaging/assets/* 는 커밋, 아래 결과물은 제외)
+# Packaging output (packaging/assets/* is committed; the artifacts below are not)
 /dist/
 /packaging/windows/Output/
 /packaging/windows/Ymemo.exe
 /packaging/windows/ymemo-sync.exe
-# CI 에서 내려받는 syncthing 아카이브/전개물
+# syncthing archives CI downloads and unpacks
 /st/
 /st.zip
 /st.tar.gz
 /syncthing-*/
 
-# OS / 에디터 잡동사니
+# OS and editor clutter
 .DS_Store
 *.swp

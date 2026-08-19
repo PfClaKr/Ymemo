@@ -1,5 +1,5 @@
-//! 메모 목록 창의 모델 만들기: 그룹 트리를 평탄화해 행으로 내보내고,
-//! 드래그로 옮긴 행을 코어에 반영한다.
+//! Model for the memo list window: flattens the group tree into rows and applies dragged
+//! rows back to the core.
 
 use std::collections::{HashMap, HashSet};
 
@@ -9,36 +9,36 @@ use ymemo_core::{now_millis, vault::Vault, Memo};
 use crate::state::Ctx;
 use crate::ListRow;
 
-/// vault 캐시의 그룹 트리 + 메모를 평탄화해 목록 모델에 반영한다.
+/// Flattens the cached groups and memos into the list model.
 ///
-/// Slint 에 트리 뷰가 없으므로 여기서 깊이 우선으로 펼쳐 `depth` 를 붙인 행 목록을
-/// 만든다. 접힌 그룹의 내용은 아예 행으로 내보내지 않는다.
+/// Slint has no tree view, so the tree is walked depth-first into rows carrying a `depth`.
+/// A collapsed group's contents produce no rows at all.
 pub(crate) fn refresh_list(vault: &Vault, model: &VecModel<ListRow>, collapsed: &HashSet<String>) {
     let (groups, memos) = match (vault.store().list_groups(), vault.store().list()) {
         (Ok(g), Ok(m)) => (g, m),
         (Err(e), _) | (_, Err(e)) => {
-            eprintln!("목록 조회 실패: {e}");
+            eprintln!("could not read the list: {e}");
             return;
         }
     };
-    // 순환/유실 부모는 코어가 최상위로 끌어올려 준다.
+    // The core lifts cyclic and orphaned groups to the top level.
     let children = ymemo_core::group_children(&groups);
     let valid: HashSet<&str> = groups.iter().map(|g| g.id.as_str()).collect();
 
     let mut rows = Vec::new();
     push_group_rows("", 0, &children, &memos, collapsed, &mut rows);
-    // 그룹에 속하지 않은(또는 그룹이 사라진) 메모는 최상위에 둔다.
+    // Memos with no group, or whose group is gone, sit at the top level.
     for m in memos.iter().filter(|m| !valid.contains(m.group_id.as_str())) {
         rows.push(memo_row(m, 0));
     }
     model.set_vec(rows);
 }
 
-/// 드래그로 행을 옮긴다: `src` 행을 `dst` 행이 가리키는 그룹 안으로 넣는다.
+/// Moves row `src` into the group implied by row `dst`.
 ///
-/// - 그룹 행에 놓으면 그 그룹 안으로.
-/// - 메모 행에 놓으면 그 메모와 같은 그룹으로 (옆에 두는 느낌).
-/// - 목록 위/아래로 벗어나게 놓으면 최상위로 뺀다.
+/// - Dropped on a group: into that group.
+/// - Dropped on a memo: into that memo's group, i.e. beside it.
+/// - Dropped past either end of the list: out to the top level.
 pub(crate) fn move_row(ctx: &Ctx, src: i32, dst: i32) {
     use slint::Model;
     let rows = &ctx.model;
@@ -49,28 +49,28 @@ pub(crate) fn move_row(ctx: &Ctx, src: i32, dst: i32) {
     let mut guard = ctx.vault.borrow_mut();
     let Some(v) = guard.as_mut() else { return };
 
-    // 놓은 자리에서 새 부모 그룹 id 를 정한다 (범위 밖 = 최상위).
+    // Derive the new parent from the drop target; out of range means top level.
     let target_parent = match usize::try_from(dst).ok().and_then(|i| rows.row_data(i)) {
         Some(t) if t.is_group => t.id.to_string(),
         Some(t) => match v.store().get(t.id.as_str()) {
             Ok(Some(m)) => m.group_id,
             _ => String::new(),
         },
-        None => String::new(), // 위/아래로 벗어남 → 최상위
+        None => String::new(), // dropped past the list
     };
 
     let res = if source.is_group {
         let id = source.id.to_string();
-        // 자기 자신이나 자손 밑으로는 못 넣는다 (넣으면 트리가 순환한다).
+        // Never into itself or its own subtree; that would make the tree cyclic.
         let groups = match v.store().list_groups() {
             Ok(g) => g,
             Err(e) => {
-                eprintln!("그룹 조회 실패: {e}");
+                eprintln!("could not read the groups: {e}");
                 return;
             }
         };
         if ymemo_core::is_descendant(&groups, &target_parent, &id) {
-            return; // 조용히 무시 — 드롭이 안 먹은 것처럼 보인다
+            return; // ignored, so the drop simply looks like it did not take
         }
         match v.store().get_group(&id) {
             Ok(Some(mut g)) if g.parent_id != target_parent => {
@@ -91,13 +91,13 @@ pub(crate) fn move_row(ctx: &Ctx, src: i32, dst: i32) {
         }
     };
     if let Err(e) = res {
-        eprintln!("이동 실패: {e}");
+        eprintln!("move failed: {e}");
         return;
     }
     refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
 }
 
-/// `parent` 밑의 그룹들을 재귀적으로 행에 담는다 (그룹 먼저, 그 다음 그 그룹의 메모).
+/// Recursively emits the groups under `parent`: subgroups first, then that group's memos.
 pub(crate) fn push_group_rows(
     parent: &str,
     depth: i32,
@@ -163,10 +163,10 @@ mod tests {
         m
     }
 
-    /// 트리가 깊이 우선으로 평탄화되고, 중첩 그룹이 들여쓰기를 갖는지.
+    /// The tree flattens depth-first and nested groups are indented.
     #[test]
     fn flattens_nested_groups_depth_first() {
-        let groups = vec![group("outer", "바깥", ""), group("inner", "안쪽", "outer")];
+        let groups = vec![group("outer", "Outer", ""), group("inner", "Inner", "outer")];
         let memos = vec![memo_in("m-in", "inner"), memo_in("m-out", "outer")];
         let children = ymemo_core::group_children(&groups);
 
@@ -177,7 +177,7 @@ mod tests {
             .iter()
             .map(|r| (r.id.as_str(), r.depth, r.is_group))
             .collect();
-        // 그룹 먼저, 자식 그룹 재귀, 그 다음 그 그룹의 메모.
+        // Group, then its subgroups recursively, then its own memos.
         assert_eq!(
             got,
             vec![
@@ -187,14 +187,14 @@ mod tests {
                 ("m-out", 1, false),
             ]
         );
-        // 바깥 그룹의 자식 수 = 하위 그룹 1 + 메모 1
+        // The outer group counts one subgroup plus one memo.
         assert_eq!(rows[0].child_count, 2);
     }
 
-    /// 접은 그룹은 내용이 아예 행으로 나오지 않아야 한다.
+    /// A collapsed group emits no rows for its contents.
     #[test]
     fn collapsed_group_hides_its_contents() {
-        let groups = vec![group("outer", "바깥", ""), group("inner", "안쪽", "outer")];
+        let groups = vec![group("outer", "Outer", ""), group("inner", "Inner", "outer")];
         let memos = vec![memo_in("m-out", "outer")];
         let children = ymemo_core::group_children(&groups);
         let collapsed = HashSet::from(["outer".to_string()]);
@@ -205,6 +205,6 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id.as_str(), "outer");
         assert!(!rows[0].expanded);
-        assert_eq!(rows[0].child_count, 2); // 접혀 있어도 개수는 보여준다
+        assert_eq!(rows[0].child_count, 2); // the count still shows while collapsed
     }
 }

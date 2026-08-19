@@ -1,26 +1,26 @@
-# Ymemo 모바일 (Flutter). Rust 코어는 crates/ymemo-ffi 를 flutter_rust_bridge 로 사용.
+# Ymemo mobile (Flutter). The Rust core is reached through crates/ymemo-ffi.
 name: ymemo_mobile
 description: Local-first encrypted memo app (mobile).
 publish_to: "none"
 version: 0.1.0
 
 environment:
-  # PopScope.onPopInvokedWithResult 를 쓰므로 Flutter 3.24(Dart 3.5) 이상이 필요하다.
+  # PopScope.onPopInvokedWithResult needs Flutter 3.24 (Dart 3.5) or newer.
   sdk: ">=3.5.0 <4.0.0"
   flutter: ">=3.24.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  # Rust FFI 바인딩 런타임 (생성 코드가 사용).
-  # **codegen CLI 와 정확히 같은 버전이어야 한다** (다르면 generate 가 거부한다):
+  # Runtime for the generated Rust FFI bindings.
+  # **Must match the codegen CLI exactly**, or generate refuses to run:
   #   cargo install flutter_rust_bridge_codegen --version 2.11.1
-  # 그래서 캐럿(^) 없이 못 박는다 — pub 이 2.12 로 올려 버리면 CLI 와 어긋난다.
+  # Hence no caret: pub bumping this to 2.12 would break the match.
   flutter_rust_bridge: 2.11.1
-  # 페어링 코드 QR 스캔 (카메라). 권한은 플러그인이 런타임에 요청한다.
+  # QR scanning for pairing codes; the plugin requests the permission at runtime.
   image_picker: ^1.2.3
   mobile_scanner: ^7.4.0
-  # 플랫폼별 앱 데이터 디렉터리 (vault/캐시 경로)
+  # Per-platform app data directory (vault and cache paths).
   path_provider: ^2.1.0
 
 dev_dependencies:

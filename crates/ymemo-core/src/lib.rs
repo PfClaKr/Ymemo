@@ -1,11 +1,10 @@
-//! Ymemo 공유 코어.
+//! Ymemo shared core: a pure Rust library used by the Slint desktop app and, through
+//! `ymemo-ffi`, by the Flutter mobile app.
 //!
-//! 데스크탑(Slint)과 모바일(Flutter, `ymemo-ffi` 경유)이 함께 쓰는 순수 Rust 라이브러리.
-//!
-//! 이 파일은 데이터 모델([`Memo`]·[`Group`])과 로컬 SQLite 캐시([`Store`])를 담는다.
-//! 그 위 계층은 형제 모듈에 있다 — [`crypto`] (키 유도·AEAD), [`changelog`] (암호화 append-only 로그),
-//! [`vault`] (automerge 병합 + 캐시 재구축), [`sync`] (Syncthing 제어),
-//! [`pairing`]·[`lan_pair`] (기기 연결).
+//! This file holds the data model ([`Memo`], [`Group`]) and the local SQLite cache
+//! ([`Store`]). The layers above live in sibling modules: [`crypto`] (key derivation and
+//! AEAD), [`changelog`] (encrypted append-only log), [`vault`] (automerge merge and cache
+//! rebuild), [`sync`] (Syncthing control), [`pairing`] and [`lan_pair`] (device linking).
 
 pub mod blob;
 pub mod changelog;
@@ -20,41 +19,40 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-/// 스티커 기본 색상 키. 팔레트 키는 UI 가 실제 색으로 매핑한다(코어는 문자열만 저장).
+/// Default palette key. The core only stores the string; the UI maps it to a real color.
 pub const DEFAULT_COLOR: &str = "yellow";
 
-/// 스티커 기본 불투명도(%). 100 = 완전 불투명.
+/// Default sticky opacity in percent; 100 is fully opaque.
 pub const DEFAULT_OPACITY: i64 = 100;
-/// 불투명도 하한(%). 너무 투명해져 창을 못 찾는 일이 없도록 막는다.
+/// Lower bound, so a window can never become too transparent to find.
 pub const MIN_OPACITY: i64 = 20;
 
-/// 첨부 사진의 기본 표시 너비 (em 의 1/1000 단위). 20em = 폰트 20글자 폭.
+/// Default display width of a photo, in 1/1000 em (20em = 20 characters wide).
 pub const DEFAULT_WIDTH_EM_MILLI: i64 = 20_000;
-/// 표시 너비 하한/상한 (em 의 1/1000). 너무 작으면 안 보이고, 너무 크면 창을 넘는다.
+/// Display-width bounds in 1/1000 em: too small is invisible, too large overflows.
 pub const MIN_WIDTH_EM_MILLI: i64 = 4_000;
 pub const MAX_WIDTH_EM_MILLI: i64 = 80_000;
 
-/// 메모 한 건. 첨부 사진은 [`Attachment`] 로 따로 매달린다.
+/// A single memo. Photos hang off it as separate [`Attachment`]s.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Memo {
     pub id: String,
     pub title: String,
     pub body: String,
-    /// 스티커 색상 팔레트 키 ("yellow"/"pink"/"green"/"blue"/"purple").
-    /// 값 해석은 UI 몫이고 코어는 불투명 문자열로 저장·동기화만 한다.
+    /// Palette key ("yellow"/"pink"/"green"/"blue"/"purple"), opaque to the core.
     pub color: String,
-    /// 스티커 창 불투명도 (백분율, [`MIN_OPACITY`]~100).
+    /// Window opacity in percent, [`MIN_OPACITY`]..=100.
     pub opacity: i64,
-    /// 속한 그룹(폴더) id. 빈 문자열이면 최상위.
+    /// Owning group (folder) id; empty means top level.
     pub group_id: String,
-    /// 생성 시각 (Unix epoch millis)
+    /// Unix epoch millis.
     pub created_at: i64,
-    /// 마지막 수정 시각 (Unix epoch millis)
+    /// Unix epoch millis.
     pub updated_at: i64,
 }
 
 impl Memo {
-    /// 새 메모 생성 (UUID v4 id 부여, 생성/수정 시각 = 현재, 기본 색상·불투명도).
+    /// New memo with a UUID v4 id, current timestamps and default color/opacity.
     pub fn new(title: impl Into<String>, body: impl Into<String>) -> Self {
         let now = now_millis();
         Self {
@@ -70,37 +68,34 @@ impl Memo {
     }
 }
 
-/// 메모에 붙은 사진 한 장.
+/// A photo attached to a memo. The bytes live content-addressed in [`blob`]; this record
+/// only carries the hash and **how to display it**.
 ///
-/// 바이트 자체는 [`blob`] 에 내용해시로 저장되고, 여기엔 그 해시와
-/// **표시 방법**만 담는다.
-///
-/// 표시 크기를 픽셀로 두지 않는 것이 요점이다. 폰이 300px 로 보이게 맞춰 놓으면
-/// 데스크탑에서는 우표만 해지고, 반대도 마찬가지다. 그래서 **그 플랫폼 기본 폰트 크기의
-/// 배수(em)** 로 저장한다 — "본문 글자 20자 폭" 은 어느 기기에서나 같은 느낌으로 보인다.
-/// 실제 픽셀은 각 UI 가 `width_em * 자기 기본 폰트 px` 로 환산하고, 높이는 원본 비율
-/// (`height_px / width_px`)로 따라간다.
+/// Display size is stored in **em** (multiples of the platform's body font), not pixels:
+/// 300px sized on a phone would be a postage stamp on the desktop, and vice versa.
+/// "20 characters wide" reads the same everywhere. Each UI converts with
+/// `width_em * its own base font px`, and derives the height from the original aspect
+/// ratio (`height_px / width_px`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Attachment {
     pub id: String,
-    /// 어느 메모에 붙었는가.
     pub memo_id: String,
-    /// blob 내용해시(hex) = 파일 이름.
+    /// Content hash (hex) of the blob, which is also its file name.
     pub hash: String,
-    /// 원래 파일 이름 (표시·내려받기용).
+    /// Original file name, for display and export.
     pub name: String,
-    /// `image/jpeg` 등. 모르면 빈 문자열.
+    /// `image/jpeg` and friends; empty when unknown.
     pub mime: String,
-    /// 원본 픽셀 크기. 비율 계산에만 쓰고 표시 크기와는 무관하다. 모르면 0.
+    /// Original pixel size, used only for the aspect ratio; 0 when unknown.
     pub width_px: i64,
     pub height_px: i64,
-    /// 표시 너비 (em 의 1/1000). [`clamp_width_em_milli`] 로 범위를 지킨다.
+    /// Display width in 1/1000 em; keep it inside [`clamp_width_em_milli`].
     pub width_em_milli: i64,
     pub created_at: i64,
 }
 
 impl Attachment {
-    /// 새 첨부 (기본 표시 크기).
+    /// New attachment at the default display size.
     pub fn new(memo_id: impl Into<String>, hash: impl Into<String>) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
@@ -115,8 +110,8 @@ impl Attachment {
         }
     }
 
-    /// 이 플랫폼에서의 표시 크기(논리 px). `base_font_px` 는 그 UI 의 기본 본문 폰트 크기.
-    /// 원본 비율을 모르면(0) 높이는 너비와 같게 둔다 — 정사각 자리표시자.
+    /// Display size in logical px for this platform, where `base_font_px` is the UI's body
+    /// font size. Without an aspect ratio the result is square — a placeholder.
     pub fn display_size(&self, base_font_px: f64) -> (f64, f64) {
         let w = clamp_width_em_milli(self.width_em_milli) as f64 / 1000.0 * base_font_px;
         let ratio = if self.width_px > 0 && self.height_px > 0 {
@@ -128,27 +123,27 @@ impl Attachment {
     }
 }
 
-/// 표시 너비를 유효 범위로 자른다 (다른 기기/버전이 이상한 값을 써도 UI 가 깨지지 않게).
+/// Clamps a display width, so a bad value from another device or version cannot break the UI.
 pub fn clamp_width_em_milli(v: i64) -> i64 {
     v.clamp(MIN_WIDTH_EM_MILLI, MAX_WIDTH_EM_MILLI)
 }
 
-/// 메모를 담는 그룹(폴더). `parent_id` 로 폴더 안의 폴더를 표현한다.
+/// A folder of memos; `parent_id` nests them.
 ///
-/// 동시 편집으로 부모 관계가 순환할 수 있으므로(A→B, B→A), 트리를 구성하는 쪽에서
-/// 순환을 감지해 끊어야 한다 — [`group_children`] 참고.
+/// Concurrent edits can make parenthood cyclic (A -> B, B -> A), so whoever builds the
+/// tree has to break cycles — see [`group_children`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Group {
     pub id: String,
     pub name: String,
-    /// 상위 그룹 id. 빈 문자열이면 최상위.
+    /// Parent group id; empty means top level.
     pub parent_id: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
 
 impl Group {
-    /// 새 그룹 생성 (최상위, 이름 지정).
+    /// New top-level group with the given name.
     pub fn new(name: impl Into<String>) -> Self {
         let now = now_millis();
         Self {
@@ -161,22 +156,21 @@ impl Group {
     }
 }
 
-/// 불투명도를 유효 범위로 자른다. 저장 전 항상 통과시킨다
-/// (다른 기기/버전이 이상한 값을 써 넣어도 UI 가 깨지지 않도록).
+/// Clamps opacity to the valid range; always run values through this before storing.
 pub fn clamp_opacity(v: i64) -> i64 {
     v.clamp(MIN_OPACITY, 100)
 }
 
-/// 로컬 메모 저장소 (SQLite).
+/// Local SQLite memo store.
 ///
-/// 주의: `rusqlite::Connection` 은 단일 스레드용이다. 데스크탑 UI 스레드에서
-/// `Rc<RefCell<Store>>` 로 쓰는 것을 전제로 한다.
+/// `rusqlite::Connection` is single-threaded; the desktop uses this as
+/// `Rc<RefCell<Store>>` on the UI thread.
 pub struct Store {
     conn: Connection,
 }
 
 impl Store {
-    /// 파일 경로로 저장소 열기 (없으면 생성).
+    /// Opens (and creates if needed) a store at `path`.
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self> {
         let store = Self {
             conn: Connection::open(path)?,
@@ -185,7 +179,7 @@ impl Store {
         Ok(store)
     }
 
-    /// 인메모리 저장소 (테스트용).
+    /// In-memory store, for tests.
     pub fn open_in_memory() -> Result<Self> {
         let store = Self {
             conn: Connection::open_in_memory()?,
@@ -206,7 +200,7 @@ impl Store {
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
-            -- 그룹(폴더). parent_id 로 중첩을 표현한다 (빈 문자열 = 최상위).
+            -- Folders; parent_id nests them (empty = top level).
             CREATE TABLE IF NOT EXISTS groups (
                 id         TEXT PRIMARY KEY,
                 name       TEXT NOT NULL,
@@ -214,7 +208,7 @@ impl Store {
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
-            -- 메모에 붙은 사진. 바이트는 vault 의 blobs/ 에 있고 여기엔 참조만 둔다.
+            -- Photos on a memo. The bytes live in vault blobs/; this is just a reference.
             CREATE TABLE IF NOT EXISTS attachments (
                 id             TEXT PRIMARY KEY,
                 memo_id        TEXT NOT NULL,
@@ -227,15 +221,14 @@ impl Store {
                 created_at     INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS attachments_memo ON attachments(memo_id);
-            -- 기기 로컬 메타데이터 (device_id 등). 동기화되지 않는 기기별 값.
+            -- Device-local metadata (device_id, ...). Never synced.
             CREATE TABLE IF NOT EXISTS meta (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );",
         )?;
-        // 마이그레이션: 초기 스키마 이후에 추가된 컬럼을 기존 캐시에 채워 넣는다.
-        // (캐시는 로그에서 재구성 가능하지만, 재빌드 없이도 열리도록 무해하게 보강)
-        // 새 컬럼을 추가할 땐 위 CREATE TABLE 과 이 목록 양쪽에 넣는다.
+        // Migration: add columns introduced after the initial schema, so an old cache opens
+        // without a full rebuild. A new column goes both in the CREATE TABLE above and here.
         for (name, ddl) in [
             ("color", "ALTER TABLE memos ADD COLUMN color TEXT NOT NULL DEFAULT 'yellow'"),
             ("opacity", "ALTER TABLE memos ADD COLUMN opacity INTEGER NOT NULL DEFAULT 100"),
@@ -252,11 +245,10 @@ impl Store {
         Ok(())
     }
 
-    /// 이 저장소(=이 기기)의 고유 식별자. 없으면 생성해 meta 에 영속화한다.
+    /// Unique id of this device, generated and persisted on first use.
     ///
-    /// SQLite 캐시는 기기별 자산이므로 device_id 를 여기 두면 동기화 대상에서
-    /// 자연히 제외된다. (캐시를 지우면 새 id 가 나오지만, 옛 로그는 남고
-    /// 새 append 가 새 로그 파일로 갈 뿐이라 무해하다.)
+    /// It lives in the cache, which is device-local, so it is never synced. Deleting the
+    /// cache yields a new id; old logs stay and new appends just go to a new log file.
     pub fn device_id(&self) -> Result<String> {
         if let Some(id) = self.meta_get("device_id")? {
             return Ok(id);
@@ -281,7 +273,7 @@ impl Store {
         Ok(())
     }
 
-    /// 메모/그룹 테이블 비우기 (로그 재생 전 초기화용; meta 는 유지).
+    /// Empties the memo/group/attachment tables before replaying the log; keeps `meta`.
     pub fn clear_memos(&self) -> Result<()> {
         self.conn.execute("DELETE FROM memos", [])?;
         self.conn.execute("DELETE FROM groups", [])?;
@@ -289,7 +281,7 @@ impl Store {
         Ok(())
     }
 
-    /// 첨부 삽입/갱신 (id 기준).
+    /// Inserts or updates an attachment by id.
     pub fn upsert_attachment(&self, a: &Attachment) -> Result<()> {
         self.conn.execute(
             "INSERT INTO attachments
@@ -313,7 +305,7 @@ impl Store {
         Ok(())
     }
 
-    /// 한 메모의 첨부들 (붙인 순서).
+    /// Attachments of one memo, in the order they were added.
     pub fn attachments_of(&self, memo_id: &str) -> Result<Vec<Attachment>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, memo_id, hash, name, mime, width_px, height_px, width_em_milli, created_at
@@ -323,7 +315,7 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// 첨부 하나 조회.
+    /// Looks up a single attachment.
     pub fn get_attachment(&self, id: &str) -> Result<Option<Attachment>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, memo_id, hash, name, mime, width_px, height_px, width_em_milli, created_at
@@ -333,13 +325,13 @@ impl Store {
         Ok(rows.next().transpose()?)
     }
 
-    /// 첨부 레코드 삭제. **blob 파일은 지우지 않는다** (GC 없음 — blob 모듈 문서 참조).
+    /// Deletes the attachment record. **The blob file stays** (no GC — see [`blob`]).
     pub fn delete_attachment(&self, id: &str) -> Result<()> {
         self.conn.execute("DELETE FROM attachments WHERE id = ?1", [id])?;
         Ok(())
     }
 
-    /// 삽입 또는 갱신 (id 기준).
+    /// Inserts or updates a memo by id.
     pub fn upsert(&self, memo: &Memo) -> Result<()> {
         self.conn.execute(
             "INSERT INTO memos (id, title, body, color, opacity, group_id, created_at, updated_at)
@@ -360,7 +352,7 @@ impl Store {
         Ok(())
     }
 
-    /// 최근 수정순 전체 목록.
+    /// All memos, most recently updated first.
     pub fn list(&self) -> Result<Vec<Memo>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, title, body, color, opacity, group_id, created_at, updated_at
@@ -370,7 +362,7 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// id 로 한 건 조회.
+    /// Looks up one memo by id.
     pub fn get(&self, id: &str) -> Result<Option<Memo>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, title, body, color, opacity, group_id, created_at, updated_at
@@ -380,9 +372,9 @@ impl Store {
         Ok(rows.next().transpose()?)
     }
 
-    // ---- 그룹 ----
+    // ---- groups ----
 
-    /// 그룹 삽입 또는 갱신 (id 기준).
+    /// Inserts or updates a group by id.
     pub fn upsert_group(&self, group: &Group) -> Result<()> {
         self.conn.execute(
             "INSERT INTO groups (id, name, parent_id, created_at, updated_at)
@@ -393,7 +385,7 @@ impl Store {
         Ok(())
     }
 
-    /// 이름순 전체 그룹 목록.
+    /// All groups, sorted by name.
     pub fn list_groups(&self) -> Result<Vec<Group>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, name, parent_id, created_at, updated_at FROM groups ORDER BY name",
@@ -402,7 +394,7 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// id 로 그룹 한 건 조회.
+    /// Looks up one group by id.
     pub fn get_group(&self, id: &str) -> Result<Option<Group>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, name, parent_id, created_at, updated_at FROM groups WHERE id = ?1",
@@ -411,20 +403,20 @@ impl Store {
         Ok(rows.next().transpose()?)
     }
 
-    /// id 로 그룹 삭제. (자식을 상위로 올리는 건 `Vault::delete_group` 이 한다)
+    /// Deletes a group; re-parenting its children is `Vault::delete_group`'s job.
     pub fn delete_group(&self, id: &str) -> Result<()> {
         self.conn.execute("DELETE FROM groups WHERE id = ?1", [id])?;
         Ok(())
     }
 
-    /// id 로 삭제.
+    /// Deletes a memo by id.
     pub fn delete(&self, id: &str) -> Result<()> {
         self.conn.execute("DELETE FROM memos WHERE id = ?1", [id])?;
         Ok(())
     }
 }
 
-/// memos 테이블 한 행 → Memo. (list/get 공용)
+/// One `memos` row to a [`Memo`].
 fn row_to_memo(row: &rusqlite::Row) -> rusqlite::Result<Memo> {
     Ok(Memo {
         id: row.get(0)?,
@@ -438,7 +430,7 @@ fn row_to_memo(row: &rusqlite::Row) -> rusqlite::Result<Memo> {
     })
 }
 
-/// groups 테이블 한 행 → Group.
+/// One `groups` row to a [`Group`].
 fn row_to_attachment(row: &rusqlite::Row) -> rusqlite::Result<Attachment> {
     Ok(Attachment {
         id: row.get(0)?,
@@ -463,12 +455,12 @@ fn row_to_group(row: &rusqlite::Row) -> rusqlite::Result<Group> {
     })
 }
 
-/// 순환하거나 부모가 사라진 그룹을 최상위로 끌어올려, 안전한 부모→자식 맵을 만든다.
-/// 키는 부모 id (`""` = 최상위), 값은 이름순 자식 그룹.
+/// Safe parent -> children map, keyed by parent id (`""` = top level) with children sorted
+/// by name.
 ///
-/// 두 기기가 동시에 부모를 바꾸면 A→B, B→A 같은 **순환**이 생길 수 있다(CRDT 는 둘 다
-/// 살린다). 그대로 트리를 그리면 무한 재귀가 되므로, 조상 사슬이 최상위에 닿지 못하는
-/// 그룹은 최상위로 올려 항상 그릴 수 있는 트리를 보장한다.
+/// Concurrent re-parenting on two devices can produce a cycle (A -> B, B -> A); the CRDT
+/// keeps both. Rendering that as-is would recurse forever, so any group whose ancestor
+/// chain never reaches the root is lifted to the top level.
 pub fn group_children(groups: &[Group]) -> HashMap<String, Vec<Group>> {
     let by_id: HashMap<&str, &Group> = groups.iter().map(|g| (g.id.as_str(), g)).collect();
     let mut out: HashMap<String, Vec<Group>> = HashMap::new();
@@ -486,24 +478,24 @@ pub fn group_children(groups: &[Group]) -> HashMap<String, Vec<Group>> {
     out
 }
 
-/// 조상 사슬을 따라가 최상위에 도달하면 true. 순환이거나 부모가 없으면 false.
+/// True when the ancestor chain reaches the top level; false on a cycle or missing parent.
 fn reaches_root(by_id: &HashMap<&str, &Group>, g: &Group) -> bool {
     let mut seen: HashSet<&str> = HashSet::from([g.id.as_str()]);
     let mut cur = g.parent_id.as_str();
     while !cur.is_empty() {
         if !seen.insert(cur) {
-            return false; // 순환
+            return false; // cycle
         }
         match by_id.get(cur) {
             Some(parent) => cur = parent.parent_id.as_str(),
-            None => return false, // 부모가 사라짐
+            None => return false, // parent is gone
         }
     }
     true
 }
 
-/// `id` 가 `ancestor` 자신이거나 그 자손인가. 그룹을 자기 자손 밑으로 넣어
-/// 순환을 만드는 드롭을 막는 데 쓴다.
+/// Whether `id` is `ancestor` itself or below it — used to reject a drop that would put a
+/// group inside its own subtree.
 pub fn is_descendant(groups: &[Group], id: &str, ancestor: &str) -> bool {
     if id == ancestor {
         return true;
@@ -513,7 +505,7 @@ pub fn is_descendant(groups: &[Group], id: &str, ancestor: &str) -> bool {
     let mut cur = id;
     while let Some(g) = by_id.get(cur) {
         if !seen.insert(cur) {
-            return false; // 순환 — 더 볼 것 없음
+            return false; // cycle
         }
         if g.parent_id == ancestor {
             return true;
@@ -526,7 +518,7 @@ pub fn is_descendant(groups: &[Group], id: &str, ancestor: &str) -> bool {
     false
 }
 
-/// 현재 시각 (Unix epoch millis). FFI 등 코어 밖에서도 같은 시계를 쓰도록 공개.
+/// Current time in Unix epoch millis; public so FFI callers share the same clock.
 pub fn now_millis() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
@@ -544,12 +536,12 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         assert_eq!(store.list().unwrap().len(), 0);
 
-        let memo = Memo::new("제목", "내용");
+        let memo = Memo::new("title", "body");
         store.upsert(&memo).unwrap();
 
         let all = store.list().unwrap();
         assert_eq!(all.len(), 1);
-        assert_eq!(all[0].title, "제목");
+        assert_eq!(all[0].title, "title");
         assert_eq!(store.get(&memo.id).unwrap().unwrap(), memo);
 
         store.delete(&memo.id).unwrap();
@@ -570,7 +562,7 @@ mod tests {
         assert_eq!(all[0].title, "v2");
     }
 
-    /// 불투명도는 항상 유효 범위로 잘려 저장된다 (다른 기기가 이상한 값을 써도 안전).
+    /// Opacity is always clamped on store, so a bad value from another device is harmless.
     #[test]
     fn opacity_is_clamped_on_store() {
         assert_eq!(clamp_opacity(0), MIN_OPACITY);
@@ -580,7 +572,7 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let mut memo = Memo::new("t", "");
         assert_eq!(memo.opacity, DEFAULT_OPACITY);
-        memo.opacity = 5; // 하한 미만
+        memo.opacity = 5; // below the floor
         store.upsert(&memo).unwrap();
         assert_eq!(store.get(&memo.id).unwrap().unwrap().opacity, MIN_OPACITY);
     }
@@ -598,32 +590,32 @@ mod tests {
     #[test]
     fn group_children_nests_and_sorts() {
         let groups = vec![
-            group_at("b", "일", ""),
-            group_at("a", "가", ""),
-            group_at("c", "안쪽", "a"),
+            group_at("b", "Work", ""),
+            group_at("a", "Home", ""),
+            group_at("c", "Inner", "a"),
         ];
         let tree = group_children(&groups);
         let roots: Vec<&str> = tree[""].iter().map(|g| g.id.as_str()).collect();
-        assert_eq!(roots, vec!["a", "b"]); // 이름순 (가 < 일)
+        assert_eq!(roots, vec!["a", "b"]); // by name: Home < Work
         assert_eq!(tree["a"].len(), 1);
         assert_eq!(tree["a"][0].id, "c");
     }
 
-    /// 두 기기가 서로를 부모로 지정하면 순환이 생긴다. 그리기가 불가능해지지 않도록
-    /// 순환에 걸린 그룹은 최상위로 끌어올려야 한다.
+    /// Two devices making each other the parent forms a cycle; both must be rescued to the
+    /// top level so the tree stays renderable.
     #[test]
     fn group_children_breaks_parent_cycles() {
         let groups = vec![group_at("a", "A", "b"), group_at("b", "B", "a")];
         let tree = group_children(&groups);
         let mut roots: Vec<&str> = tree[""].iter().map(|g| g.id.as_str()).collect();
         roots.sort();
-        assert_eq!(roots, vec!["a", "b"]); // 둘 다 최상위로 구제
+        assert_eq!(roots, vec!["a", "b"]); // both rescued
     }
 
-    /// 부모가 (다른 기기에서) 삭제된 그룹도 사라지지 않고 최상위로 올라온다.
+    /// A group whose parent was deleted elsewhere surfaces at the top level, not nowhere.
     #[test]
     fn group_children_rescues_orphans() {
-        let groups = vec![group_at("a", "A", "없는부모")];
+        let groups = vec![group_at("a", "A", "missing-parent")];
         let tree = group_children(&groups);
         assert_eq!(tree[""].len(), 1);
         assert_eq!(tree[""][0].id, "a");
@@ -632,15 +624,15 @@ mod tests {
     #[test]
     fn is_descendant_detects_self_and_nested() {
         let groups = vec![group_at("a", "A", ""), group_at("b", "B", "a"), group_at("c", "C", "b")];
-        assert!(is_descendant(&groups, "a", "a")); // 자기 자신
-        assert!(is_descendant(&groups, "c", "a")); // 손자
-        assert!(!is_descendant(&groups, "a", "c")); // 반대 방향은 아님
+        assert!(is_descendant(&groups, "a", "a")); // itself
+        assert!(is_descendant(&groups, "c", "a")); // grandchild
+        assert!(!is_descendant(&groups, "a", "c")); // not the other way
     }
 
     #[test]
     fn group_crud_roundtrip() {
         let store = Store::open_in_memory().unwrap();
-        let g = Group::new("업무");
+        let g = Group::new("Work");
         store.upsert_group(&g).unwrap();
         assert_eq!(store.get_group(&g.id).unwrap().unwrap(), g);
         assert_eq!(store.list_groups().unwrap().len(), 1);
@@ -648,11 +640,11 @@ mod tests {
         assert!(store.list_groups().unwrap().is_empty());
     }
 
-    /// color/opacity 없이 만들어진 구버전 캐시를 열면 컬럼이 추가되고 기본값을 갖는다.
+    /// Opening a pre-color cache adds the columns with their defaults.
     #[test]
     fn migrates_pre_color_cache() {
         let path = std::env::temp_dir().join(format!("ymemo-mig-{}.db", uuid::Uuid::new_v4()));
-        // 구버전 스키마(color 없음)로 직접 만들고 한 행을 넣는다.
+        // Build the old schema (no color) by hand and insert a row.
         {
             let conn = Connection::open(&path).unwrap();
             conn.execute_batch(
@@ -660,18 +652,18 @@ mod tests {
                     id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL,
                     created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
                 );
-                INSERT INTO memos VALUES ('old1', '옛 메모', '본문', 1, 2);",
+                INSERT INTO memos VALUES ('old1', 'old memo', 'body', 1, 2);",
             )
             .unwrap();
         }
-        // 새 Store 로 열면 init() 마이그레이션이 color 컬럼을 더한다.
+        // Opening with the current Store runs init()'s migration.
         let store = Store::open(&path).unwrap();
         let m = store.get("old1").unwrap().unwrap();
-        assert_eq!(m.title, "옛 메모");
+        assert_eq!(m.title, "old memo");
         assert_eq!(m.color, DEFAULT_COLOR);
         assert_eq!(m.opacity, DEFAULT_OPACITY);
 
-        // 색 갱신도 정상 저장된다.
+        // Updating the color still persists.
         let mut m2 = m.clone();
         m2.color = "blue".into();
         store.upsert(&m2).unwrap();

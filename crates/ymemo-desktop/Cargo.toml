@@ -1,6 +1,6 @@
 [package]
 name = "ymemo-desktop"
-description = "Ymemo 데스크탑 앱 (Slint). 스티커 메모 UI. ymemo-core 를 사용한다."
+description = "Ymemo desktop app (Slint): the sticky-note UI on top of ymemo-core."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -19,7 +19,7 @@ anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
-# 트레이 백엔드는 플랫폼별로 갈린다 (src/tray.rs 의 cfg 분기와 짝).
+# Tray backend differs per platform; matches the cfg split in src/tray.rs.
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni.workspace = true
 
@@ -28,10 +28,10 @@ tray-icon.workspace = true
 
 [build-dependencies]
 slint-build.workspace = true
-# build.rs 가 i18n 카탈로그를 읽어 Slint 전역 + setter 를 생성한다.
+# build.rs turns the i18n catalog into a Slint global plus its setter.
 serde_json.workspace = true
 ymemo-i18n.workspace = true
 
-# Windows 전용: exe 에 아이콘/버전 리소스를 박는다 (build.rs 의 cfg(windows) 분기와 짝).
+# Windows only: embeds the icon and version resources into the exe (see build.rs).
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"

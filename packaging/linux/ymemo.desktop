@@ -1,10 +1,12 @@
 [Desktop Entry]
 Type=Application
 Name=Ymemo
-Comment=로컬 우선 · P2P 암호화 스티커 메모
+Comment=Local-first, P2P encrypted sticky notes
+Comment[ko]=로컬 우선 · P2P 암호화 스티커 메모
 Exec=ymemo
 Icon=ymemo
 Terminal=false
 Categories=Utility;Office;
 StartupNotify=false
-Keywords=memo;notes;sticky;sync;메모;
+Keywords=memo;notes;sticky;sync;
+Keywords[ko]=memo;notes;sticky;sync;메모;

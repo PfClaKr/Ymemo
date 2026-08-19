@@ -1,15 +1,15 @@
-//! 기기별 append-only 암호화 레코드 로그.
+//! Per-device append-only log of encrypted records.
 //!
-//! 데이터 모델의 핵심(재론 금지 결정): 각 기기는 자기 로그 파일 끝에만 덧붙인다.
-//! 파일을 되쓰지 않으므로 동기화 시 파일 충돌이 0 이다. 각 레코드는 XChaCha20-Poly1305
-//! 로 개별 암호화된다.
+//! Core of the data model: a device only ever appends to its own log and never rewrites
+//! it, so syncing produces no file conflicts. Every record is encrypted separately with
+//! XChaCha20-Poly1305.
 //!
-//! 레코드 내용은 이 계층에선 불투명한 바이트다 — 현재는 automerge change 바이너리가
-//! 들어간다(actor·seq·타임스탬프·의존성은 automerge change 에 내장). 해석은 vault 몫.
+//! Record payloads are opaque here — today they are automerge change binaries (actor,
+//! seq, timestamp and dependencies live inside the change). The vault interprets them.
 //!
-//! 온디스크 포맷(레코드 반복):
+//! On-disk format, repeated per record:
 //! ```text
-//! [u32 LE 레코드 길이][nonce(24B) || ciphertext+tag] ...
+//! [u32 LE record length][nonce(24B) || ciphertext+tag] ...
 //! ```
 
 use anyhow::{anyhow, Result};
@@ -20,16 +20,14 @@ use std::path::{Path, PathBuf};
 
 use crate::crypto::MasterKey;
 
-/// 암호화된 append-only 레코드 로그 파일.
-///
-/// 키를 소유하며, append/read 시 자동으로 암·복호화한다.
+/// An encrypted append-only record log file. Owns the key and en/decrypts on the fly.
 pub struct ChangeLog {
     path: PathBuf,
     key: MasterKey,
 }
 
 impl ChangeLog {
-    /// 경로에 로그를 연다 (파일은 첫 append 때 생성). 키는 이 로그가 소유한다.
+    /// Opens a log; the file is created on the first append.
     pub fn open(path: impl AsRef<Path>, key: MasterKey) -> Self {
         Self {
             path: path.as_ref().to_path_buf(),
@@ -37,7 +35,7 @@ impl ChangeLog {
         }
     }
 
-    /// 레코드(평문 바이트) 하나를 암호화해 파일 끝에 덧붙인다.
+    /// Encrypts one record and appends it.
     pub fn append(&self, plaintext: &[u8]) -> Result<()> {
         let record = self.key.encrypt(plaintext)?;
         let len = u32::try_from(record.len())
@@ -49,9 +47,7 @@ impl ChangeLog {
         Ok(())
     }
 
-    /// 로그를 처음부터 끝까지 읽어 복호화한 레코드들을 순서대로 반환.
-    ///
-    /// 파일이 없으면 빈 벡터.
+    /// Reads and decrypts every record in order. Missing file yields an empty vec.
     pub fn read_all(&self) -> Result<Vec<Vec<u8>>> {
         if !self.path.exists() {
             return Ok(Vec::new());
@@ -94,11 +90,11 @@ mod tests {
         log.append(b"record-1").unwrap();
         log.append("두 번째 🦀".as_bytes()).unwrap();
 
-        // 파일엔 평문이 없어야 한다.
+        // The file must not contain plaintext.
         let raw = std::fs::read(&path).unwrap();
         assert!(!raw.windows(8).any(|w| w == b"record-1"));
 
-        // 별도 인스턴스(같은 키)로 읽어도 순서대로 복원.
+        // A separate instance with the same key restores the order.
         let log2 = ChangeLog::open(&path, MasterKey::derive(b"pw", &salt).unwrap());
         let records = log2.read_all().unwrap();
         assert_eq!(records, vec![b"record-1".to_vec(), "두 번째 🦀".as_bytes().to_vec()]);

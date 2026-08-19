@@ -1,155 +1,162 @@
 # Ymemo
 
-여러 기기(Linux · Windows · Android)에서 쓰고 서로 **동기화**되는 메모 앱.
-텍스트 메모와 사진을 저장하며, **자체 서버 없이(serverless)** 동작하는 것을 목표로 한다.
+A memo app that runs on several devices (Linux, Windows, Android) and **syncs between them
+with no server of its own**. It stores text notes and photos.
 
-## 설계 철학: Local-first
+## Design: local-first
 
-각 기기가 **완전한 로컬 사본**을 갖고, 그 위에 동기화를 얹는다.
+Every device holds a **complete local copy**, and syncing sits on top of that.
 
-- **Local-first** — 오프라인에서도 완전히 동작, 데이터는 내 기기에
-- **P2P** — 기기끼리 직접 동기화 (중앙 서버 없음)
-- **E2E 암호화** — 동기화 경로에 올라가는 데이터는 항상 암호문
-- **CRDT** — 여러 기기에서 동시 수정해도 자동 병합, 손실 없음
+- **Local-first** — fully usable offline; the data is on your own devices.
+- **P2P** — devices sync directly, with no central server.
+- **E2E encrypted** — anything that travels the sync path is ciphertext.
+- **CRDT** — concurrent edits on several devices merge automatically, losing nothing.
 
-## 기술 스택
+## Stack
 
-| 계층 | 선택 | 비고 |
+| Layer | Choice | Notes |
 |---|---|---|
-| 공유 코어 | **Rust** (`ymemo-core`) | 데이터 모델·저장소·CRDT·암호화·동기화 |
-| 데스크탑 UI | **Slint** (`ymemo-desktop`) | 순수 Rust GUI, 웹뷰 없음(저메모리), 트레이 상주 스티커 메모 |
-| 모바일 UI | **Flutter** (`apps/mobile`, 진행 중) | Android/iOS, `flutter_rust_bridge` 로 코어 FFI (`ymemo-ffi`) |
-| 로컬 저장소 | **SQLite** (`rusqlite`, bundled) | 각 기기의 materialized view |
-| CRDT | **Automerge** | 순서 무관 변경 병합 — P2P 와 궁합 |
-| 암호화 | **RustCrypto** | XChaCha20-Poly1305 + Argon2id. 순수 Rust라 크로스컴파일에 시스템 라이브러리가 필요 없다 |
-| 다국어 | **자체 카탈로그** (`ymemo-i18n`) | `i18n/*.json` 한 벌을 코어·UI·모바일이 공유 (ko/en) |
-| 동기화 전송 | **Syncthing 번들** | 발견·NAT 통과·relay 를 위임. 바이너리/gomobile 라이브러리로 동봉하고 REST API 로 제어 |
+| Shared core | **Rust** (`ymemo-core`) | data model, storage, CRDT, crypto, sync |
+| Desktop UI | **Slint** (`ymemo-desktop`) | pure Rust GUI, no webview, tray-resident sticky notes |
+| Mobile UI | **Flutter** (`apps/mobile`, in progress) | Android/iOS, core over `flutter_rust_bridge` (`ymemo-ffi`) |
+| Local store | **SQLite** (`rusqlite`, bundled) | a materialized view per device |
+| CRDT | **Automerge** | order-independent merging, which is what P2P needs |
+| Crypto | **RustCrypto** | XChaCha20-Poly1305 + Argon2id; pure Rust, so cross-compiling needs no system libraries |
+| i18n | **own catalog** (`ymemo-i18n`) | one set of `i18n/*.json` shared by core, desktop and mobile (ko/en) |
+| Sync transport | **bundled Syncthing** | delegates discovery, NAT traversal and relaying; shipped as a binary (gomobile library on mobile) and driven over its REST API |
 
-### 동기화 구조
+### How syncing works
 
-Syncthing 은 **암호화된 파일을 나르는 운반책**일 뿐이고, 그 위 로직은 전부 `ymemo-core` 가 담당한다.
+Syncthing is only the **courier for encrypted files**; everything above it is `ymemo-core`.
 
 ```
-[ymemo-core / Rust]  메모 · CRDT 병합 · E2E 암호화
-        ↓  암호화된 change 로그를 vault 폴더에 기록
-[Syncthing]          그 폴더를 기기 간 P2P 로 운반 (발견 · NAT 통과 · relay · 전송 TLS)
+[ymemo-core / Rust]  memos, CRDT merging, E2E encryption
+        |  writes encrypted change logs into the vault directory
+[Syncthing]          carries that directory between devices (discovery, NAT, relay, TLS)
 ```
 
-vault 폴더 구조:
+Vault layout:
 
 ```
 vault/
-├── vault.json              # Argon2id salt + 키 확인용 카나리. 생성 시 1회만 기록(불변)
-├── logs/<device-id>.ymlog  # 기기별 append-only 암호화 로그 (레코드 = automerge change)
-└── blobs/<sha256>.ymblob   # 첨부 사진 원본 (암호화). 이름이 내용해시라 불변 → 충돌 없음
+├── vault.json              # Argon2id salt + key-check canary. Written once, then immutable.
+├── logs/<device-id>.ymlog  # per-device append-only encrypted log; a record is an automerge change
+└── blobs/<sha256>.ymblob   # attached photos, encrypted. The name is the content hash, so nothing conflicts.
 ```
 
-각 기기는 **자기 로그 파일 끝에만** 덧붙이므로 두 기기가 같은 파일을 건드릴 일이 없다
-→ 파일 레벨 충돌 0, 내용 병합은 CRDT 가 담당. 사진도 같은 원리다 — 이름이 내용해시라
-불변이고, 암호화가 convergent 해서 두 기기가 같은 사진을 붙여도 바이트까지 같은 파일 하나가 된다.
+A device only ever appends to **its own** log file, so two devices never touch the same file:
+zero file-level conflicts, with the CRDT merging the contents. Photos work the same way —
+named by content hash and therefore immutable, and encrypted convergently, so the same photo
+attached on two devices ends up as one byte-identical file.
 
-암호화가 어디까지를 지키는지(그리고 **로컬 캐시는 평문**이라는 점)는 [SECURITY.md](SECURITY.md) 참조.
+For what the encryption does and does not cover — including that **the local cache is
+plaintext** — see [SECURITY.md](SECURITY.md).
 
-## 저장소 구조
+## Repository layout
 
 ```
 Ymemo/
-├── Cargo.toml            # Rust 워크스페이스
-├── rust-toolchain.toml   # stable (>= 1.87 필요)
-├── i18n/                 # 번역 카탈로그 ko.json(정본) · en.json
+├── Cargo.toml            # Rust workspace
+├── rust-toolchain.toml   # stable (>= 1.87 required)
+├── i18n/                 # translation catalog: ko.json (source) and en.json
 ├── crates/
-│   ├── ymemo-core/       # 공유 코어: 모델·SQLite 캐시·암호화·automerge vault·Syncthing·페어링
-│   ├── ymemo-desktop/    # Slint 데스크탑 앱
-│   │   ├── ui/           # 화면별 .slint (app=진입, lock/list/sticky/settings/pairing/theme)
-│   │   └── src/          # main(배선) · state · sticky · list · lock · pairing · sync · tray
-│   ├── ymemo-i18n/       # 카탈로그 로더 (t! 매크로)
-│   └── ymemo-ffi/        # 모바일용 FFI (flutter_rust_bridge)
-├── apps/mobile/          # Flutter 앱 (Android 착수 단계)
-└── packaging/            # .deb / .rpm / Inno Setup 스크립트 + 아이콘
+│   ├── ymemo-core/       # shared core: model, SQLite cache, crypto, automerge vault, Syncthing, pairing
+│   ├── ymemo-desktop/    # Slint desktop app
+│   │   ├── ui/           # one .slint per screen (app = entry; lock/list/sticky/settings/pairing/theme)
+│   │   └── src/          # main (wiring), state, sticky, list, lock, pairing, sync, tray
+│   ├── ymemo-i18n/       # catalog loader (the t! macro)
+│   └── ymemo-ffi/        # FFI for mobile (flutter_rust_bridge)
+├── apps/mobile/          # Flutter app (Android in progress)
+└── packaging/            # .deb / .rpm / Inno Setup scripts and icons
 ```
 
-## 빌드 & 실행
+## Build and run
 
-사전 요구: **Rust ≥ 1.87** (`rustup update stable`).
+Requires **Rust >= 1.87** (`rustup update stable`).
 
-### Linux 시스템 의존성
+### Linux system dependencies
 
-Slint 는 리눅스에서 `fontconfig` 를 링크한다:
+Slint links `fontconfig` on Linux:
 
 ```bash
 sudo apt install libfontconfig1-dev
 ```
 
-> dev 패키지를 못 깔면, 이미 설치된 `libfontconfig.so.1` 을 가리키는 pkg-config shim 을
-> 만들고 `PKG_CONFIG_PATH` 로 지정하는 우회법도 있다 (로컬 `.cargo/config.toml`, gitignore 됨).
+> Without the dev package, a pkg-config shim pointing at an installed `libfontconfig.so.1`
+> plus `PKG_CONFIG_PATH` also works (local `.cargo/config.toml`, gitignored).
 
-한글 등 CJK 표시에는 폰트가 필요하다: `sudo apt install fonts-noto-cjk`
+Displaying CJK text needs fonts: `sudo apt install fonts-noto-cjk`
 
-### 명령
+### Commands
 
 ```bash
-cargo test --workspace       # 전체 테스트
-cargo run -p ymemo-desktop   # 데스크탑 앱 실행
+cargo test --workspace
 ```
 
-첫 실행에서 마스터 암호를 정하면 vault 가 만들어진다. 앱 데이터는 플랫폼 데이터 디렉터리
-(Linux 는 `~/.local/share/Ymemo`)에 있고, 암호화된 vault(`vault/`)만 동기화된다.
+```bash
+cargo run -p ymemo-desktop
+```
 
-개발 중에는 PATH 에 설치된 `syncthing` 을 그대로 쓴다. 릴리스에서는 syncthing 을
-`ymemo-sync` 로 리네임해 인스톨러에 함께 넣는다 (아래 참조).
+Choosing a master password on first run creates the vault. App data lives in the platform
+data directory (`~/.local/share/Ymemo` on Linux), and only the encrypted `vault/` is synced.
 
-### 패키징 (인스톨러)
+During development the `syncthing` on your PATH is used as-is; releases ship it renamed to
+`ymemo-sync` inside the installer (see below).
 
-syncthing 을 인스톨러 안에 번들해 **사용자가 별도로 설치하지 않고**, 앱을 제거하면
-syncthing 도 함께 지워진다. 사용자는 syncthing 사용 사실을 알 필요가 없다
-(GUI 를 열지 않고, 프로세스도 `ymemo-sync` 로 뜬다).
+### Packaging
+
+syncthing is bundled inside the installer, so **users never install it separately** and it is
+removed with the app. They never have to know it is there: no GUI is opened and the process
+shows up as `ymemo-sync`.
 
 ```bash
-# Debian/Ubuntu .deb (로컬 테스트). syncthing 바이너리 경로를 넘긴다.
+# Debian/Ubuntu .deb (local test); pass the path to a syncthing binary.
 packaging/linux/build-deb.sh \
   --app target/release/ymemo-desktop --sync /path/to/syncthing \
   --version 0.1.0 --outdir dist
-# → dist/ymemo_0.1.0_amd64.deb  (syncthing 은 /usr/lib/ymemo/ymemo-sync 로 설치)
+```
 
-# Fedora .rpm — rpmbuild 가 필요하므로 Fedora 컨테이너에서 빌드한다.
+```bash
+# Fedora .rpm — needs rpmbuild, so build it in a Fedora container.
 packaging/linux/build-rpm.sh \
   --app target/release/ymemo-desktop --sync /path/to/syncthing \
   --version 0.1.0 --outdir dist
-# → dist/ymemo-0.1.0-1.fc*.x86_64.rpm
 ```
 
-Windows 는 Inno Setup(`packaging/windows/ymemo.iss`)으로 `ymemo-setup-x86_64.exe` 를
-만든다. 셋 다 릴리스 태그(`v*`)에서 CI 가 자동 생성한다 (`.github/workflows/release.yml`).
-같은 태그에서 **Android APK** 도 함께 만들어 붙인다 — ABI 별로 나뉘며 요즘 폰은
-`ymemo-<버전>-android-arm64-v8a.apk` 를 받으면 된다. 아직 디버그 키로 서명되므로
-Play 스토어용이 아니다 (`apps/mobile/README.md` 참조).
-Fedora 잡은 Fedora 컨테이너 안에서 데스크탑을 빌드해 라이브러리 호환을 맞춘다.
+Windows uses Inno Setup (`packaging/windows/ymemo.iss`) to produce
+`ymemo-setup-x86_64.exe`. CI builds all three from a release tag (`v*`), see
+`.github/workflows/release.yml`. The same tag also produces **Android APKs**, split per ABI —
+most phones want `ymemo-<version>-android-arm64-v8a.apk`. They are still signed with a debug
+key, so they are not for the Play Store (see `apps/mobile/README.md`). The Fedora job builds
+the desktop inside a Fedora container for library compatibility.
 
-## 기능 (데스크탑)
+## Features (desktop)
 
-- **트레이 상주 스티커** — 트레이 아이콘으로 목록을 토글하고, 메모마다 무프레임 스티커 창이 뜬다.
-  본문이 곧 편집칸(자동 저장), 제목 바 더블클릭으로 접기, 창을 끌면 화면·다른 스티커에 자석 스냅.
-- **꾸미기** — 메모별 색상 팔레트와 창 불투명도.
-- **사진 첨부** — 📎 로 붙이고 −/＋ 로 크기 조절. 표시 크기는 픽셀이 아니라 **폰트 크기 배수(em)**
-  로 동기화돼, 폰에서 줄이면 데스크탑에서도 같은 비율로 보인다.
-- **그룹** — 중첩 가능한 폴더 트리, 드래그&드롭으로 이동.
-- **잠금** — 마스터 암호로 열고, 트레이에서 즉시 잠금, 자리 비움 시 자동 잠금,
-  원하면 정해진 기간 동안 암호 없이 열기(기기 로컬 세션 키, 동기화 안 됨).
-- **기기 연결** — QR/페어링 코드 또는 같은 LAN 에서 **6자리 코드**로 연결. 연결된 기기 목록/해제 제공.
-- **한국어 · 영어** — 시스템 로캘 자동 감지, 설정에서 변경.
+- **Tray-resident stickies** — the tray icon toggles the list, and each memo gets a frameless
+  sticky window. The body is the editor (autosaved), double-clicking the title bar folds it,
+  and dragging a window snaps it to the screen edges and to other stickies.
+- **Appearance** — per-memo color palette and window opacity.
+- **Photos** — attach one and resize it. The display size syncs in **em (font multiples)**
+  rather than pixels, so shrinking it on a phone shrinks it proportionally on the desktop.
+- **Groups** — a nestable folder tree with drag and drop.
+- **Locking** — master password, instant lock from the tray, idle auto-lock, and optionally
+  staying unlocked for a set period (a device-local session key, never synced).
+- **Device linking** — by QR/pairing code, or by a **6-digit code** on the same LAN. Linked
+  devices can be listed and revoked.
+- **Korean and English** — detected from the system locale, changeable in settings.
 
-## 현재 상태 (로드맵)
+## Roadmap
 
-- [x] **Phase 0** — 워크스페이스 스캐폴딩, `ymemo-core` SQLite CRUD, Slint 스티커 창 연결
-- [x] **Phase 1** — Argon2id 키 유도 + change 로그 암호화 저장 (RustCrypto)
-- [x] **Phase 2** — CRDT(Automerge) 병합 → SQLite 캐시 재구축 → UI 반영
-- [x] **Phase 3** — Syncthing 번들 + REST 제어로 자동 동기화, 기기 페어링
-- [x] **Phase 4a** — 데스크탑 잠금(수동·자리비움·기간 자동 해제), 설정 창, ko/en 다국어
-- [x] 패키징/CI — `.deb` · `.rpm` · Windows 인스톨러를 릴리스 태그에서 자동 생성
-- [x] **Phase 4b** — 사진 첨부 (암호화 blob + 플랫폼 공통 표시 크기)
-- [ ] Flutter 모바일 앱 구현 (FFI 계층 `ymemo-ffi` 는 준비됨) + 모바일 Syncthing(gomobile `.aar`)
-- [ ] macOS 지원 (트레이·패키징)
+- [x] **Phase 0** — workspace scaffolding, `ymemo-core` SQLite CRUD, Slint sticky windows
+- [x] **Phase 1** — Argon2id key derivation and encrypted change-log storage (RustCrypto)
+- [x] **Phase 2** — CRDT (Automerge) merging into the SQLite cache and the UI
+- [x] **Phase 3** — bundled Syncthing with REST control, device pairing
+- [x] **Phase 4a** — desktop locking (manual, idle, timed auto-unlock), settings, ko/en
+- [x] Packaging and CI — `.deb`, `.rpm` and a Windows installer from a release tag
+- [x] **Phase 4b** — photo attachments (encrypted blobs, platform-independent display size)
+- [ ] Flutter mobile app (the `ymemo-ffi` layer is ready) plus mobile Syncthing (gomobile `.aar`)
+- [ ] macOS support (tray, packaging)
 
-## 라이선스
+## License
 
 GPL-3.0-only
