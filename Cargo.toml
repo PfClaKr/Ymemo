@@ -27,7 +27,9 @@ qrcode = { version = "0.14", default-features = false } # 페어링 QR (렌더�
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 # 사진 고르기 대화상자. Linux 는 xdg-desktop-portal(순수 Rust, 시스템 GTK 불필요),
 # Windows 는 네이티브 대화상자를 쓴다 — CI 에 새 시스템 패키지를 요구하지 않기 위한 선택.
-rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+# async-std 여야 한다 (tokio 로 켜면 rfd→ashpd→zbus/tokio 가 켜지고, 기능 통합 때문에
+# ksni 가 쓰는 zbus 까지 tokio 백엔드가 되어 런타임 없는 메인 스레드에서 트레이가 패닉한다).
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "async-std"] }
 # 트레이 아이콘 (플랫폼별, ymemo-desktop 에서 cfg 로 갈라 쓴다)
 #  - Linux: ksni — StatusNotifierItem (zbus 기반 순수 Rust, libdbus/gtk 불필요)
 #  - Windows: tray-icon — Shell_NotifyIcon. default-features off 로 gtk/libxdo(리눅스 C 의존) 제외
