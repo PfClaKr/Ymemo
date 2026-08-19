@@ -97,6 +97,8 @@ impl Codes {
 /// 백그라운드로 페어링 요청을 듣는 호스트. 살아 있는 동안만 코드를 노출하고 수신한다
 /// (페어링 모드를 켤 때 start, 끌 때 drop — 노출 창을 최소화).
 pub struct PairListener {
+    /// 실제로 바인드된 주소. 임의 포트(0)로 띄웠을 때 어디로 보내야 하는지 알려준다.
+    local_addr: SocketAddr,
     codes: Arc<Mutex<Codes>>,
     peers_rx: Receiver<String>,
     running: Arc<AtomicBool>,
@@ -112,6 +114,7 @@ impl PairListener {
     fn start_on(device_id: impl Into<String>, bind: SocketAddr) -> Result<Self> {
         let device_id = device_id.into();
         let socket = UdpSocket::bind(bind)?;
+        let local_addr = socket.local_addr()?;
         socket.set_broadcast(true).ok();
         socket.set_read_timeout(Some(Duration::from_millis(500)))?;
 
@@ -125,7 +128,12 @@ impl PairListener {
             std::thread::spawn(move || recv_loop(socket, device_id, codes, running, peers_tx))
         };
 
-        Ok(Self { codes, peers_rx, running, handle: Some(handle) })
+        Ok(Self { local_addr, codes, peers_rx, running, handle: Some(handle) })
+    }
+
+    /// 이 리스너가 실제로 바인드된 주소.
+    pub fn local_addr(&self) -> SocketAddr {
+        self.local_addr
     }
 
     /// 화면에 띄울 현재 6자리 코드.
@@ -214,7 +222,9 @@ fn join_to(
     }
     let socket = UdpSocket::bind(("0.0.0.0", 0))?;
     socket.set_broadcast(true)?;
-    socket.set_read_timeout(Some(Duration::from_millis(700)))?;
+    // 응답 대기 간격 = 재시도 주기. HELLO 하나가 호스트에게 Argon2 **두 번**(수신 복호 +
+    // 응답 암호화)을 시키므로, 느린 기기를 재촉하면 오히려 더 밀린다. 넉넉히 기다린다.
+    socket.set_read_timeout(Some(Duration::from_millis(1500)))?;
 
     let deadline = Instant::now() + timeout;
     let mut buf = [0u8; 2048];
@@ -273,25 +283,25 @@ mod tests {
     /// device-id 를 얻어야 한다.
     #[test]
     fn udp_exchange_with_matching_code() {
-        // 호스트를 임의 포트로 띄우고, 그 코드를 알아낸 뒤 그 포트로 조인한다.
-        let host = PairListener::start_on("HOST-DEVICE-ID", (Ipv4Addr::LOCALHOST, 0).into()).unwrap();
-        // 리스너의 실제 포트를 알아야 조인 대상이 된다 → codes 는 있지만 포트는 소켓이 가짐.
-        // start_on 은 포트를 노출하지 않으므로, 테스트용으로 고정 포트를 쓴다.
-        drop(host);
-
-        let port = 21999u16;
-        let host = PairListener::start_on("HOST-DEVICE-ID", (Ipv4Addr::LOCALHOST, port).into()).unwrap();
+        // 임의 포트(0)로 띄우고 실제 주소를 물어본다 — 고정 포트를 쓰면 이 기기에서 앱이
+        // 돌고 있거나 포트가 남아 있을 때 엉뚱하게 깨진다.
+        let host =
+            PairListener::start_on("HOST-DEVICE-ID", (Ipv4Addr::LOCALHOST, 0).into()).unwrap();
         let code = host.code();
+        let target = host.local_addr();
 
-        let target: SocketAddr = (Ipv4Addr::LOCALHOST, port).into();
-        let host_id = join_to(&code, "JOIN-DEVICE-ID", Duration::from_secs(3), &[target])
+        // 예산을 크게 잡는다. 이 왕복에는 Argon2 유도가 **네 번** 들어가고(조인 encode →
+        // 호스트 decode → 호스트 encode → 조인 decode), 한 번이 수백 ms 다. CI 러너처럼
+        // 느린 2코어에서 다른 테스트(역시 Argon2)와 함께 돌면 몇 초로 늘어난다.
+        // 성공하면 즉시 반환하므로 예산을 키워도 평소 실행 시간은 그대로다.
+        let host_id = join_to(&code, "JOIN-DEVICE-ID", Duration::from_secs(60), &[target])
             .unwrap()
             .expect("호스트가 응답해야 한다");
         assert_eq!(host_id, "HOST-DEVICE-ID");
 
         // 호스트도 조인의 id 를 받아 등록 큐에 넣었어야 한다.
         let mut got = None;
-        for _ in 0..20 {
+        for _ in 0..100 {
             if let Some(p) = host.next_paired_peer() {
                 got = Some(p);
                 break;
@@ -304,13 +314,13 @@ mod tests {
     /// 틀린 코드로 조인하면 호스트가 응답하지 않아 시간 초과(None)여야 한다.
     #[test]
     fn udp_exchange_wrong_code_times_out() {
-        let port = 21998u16;
-        let host = PairListener::start_on("HOST", (Ipv4Addr::LOCALHOST, port).into()).unwrap();
+        let host = PairListener::start_on("HOST", (Ipv4Addr::LOCALHOST, 0).into()).unwrap();
         let real = host.code();
         // 실제 코드와 다른 코드를 만든다.
         let wrong = if real == "000000" { "111111" } else { "000000" };
-        let target: SocketAddr = (Ipv4Addr::LOCALHOST, port).into();
-        let res = join_to(wrong, "JOIN", Duration::from_millis(800), &[target]).unwrap();
+        let target = host.local_addr();
+        // 여긴 반대로 짧게 — "응답이 없다" 를 확인하는 것이라 오래 기다릴 이유가 없다.
+        let res = join_to(wrong, "JOIN", Duration::from_millis(1600), &[target]).unwrap();
         assert_eq!(res, None);
     }
 }
