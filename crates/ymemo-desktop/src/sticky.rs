@@ -7,6 +7,8 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -18,7 +20,7 @@ use ymemo_i18n::t;
 
 use crate::icon::set_window_icon;
 use crate::list::refresh_list;
-use crate::state::{touch, Ctx, StickyEntry, Stickies};
+use crate::state::{touch, Ctx, StickyEntry, Stickies, APP};
 use crate::{apply_strings, PhotoRow, StickyWindow, Strings};
 
 /// 사진 표시 크기(em)의 기준이 되는 본문 폰트 크기(논리 px).
@@ -172,6 +174,84 @@ pub(crate) fn refresh_photos(ctx: &Ctx, memo_id: &str) {
     }
 }
 
+/// 워커 스레드가 고른 사진. 이벤트 루프로 넘겨야 하므로 `Send` 인 값만 담는다.
+struct PhotoPick {
+    bytes: Vec<u8>,
+    name: String,
+    mime: &'static str,
+    width: i64,
+    height: i64,
+}
+
+/// 파일 대화상자를 워커 스레드에서 띄우고, 고른 사진만 이벤트 루프로 돌려보낸다.
+///
+/// `rfd` 의 동기 API 는 Linux(xdg-portal)에서 포털 응답을 블로킹으로 기다린다 — UI
+/// 스레드에서 부르면 대화상자가 떠 있는 내내 이벤트 루프가 멈춰 다른 스티커도, 병합·자리
+/// 비움 타이머도 전부 정지한다. 그래서 고르기와 디코딩은 워커에서 하고 결과만 넘긴다.
+/// `Ctx` 는 `Rc` 라 스레드를 못 넘으므로 되돌아온 쪽에서 `APP` 으로 되찾는다.
+///
+/// `picking` 은 대화상자 중복 방지용이다. 예전엔 UI 가 멈춰 있어 📎 를 두 번 누를 수
+/// 없었지만, 이제는 누를 수 있어 대화상자가 겹쳐 뜬다.
+fn spawn_photo_picker(memo_id: String, title: String, picking: Arc<AtomicBool>) {
+    if picking.swap(true, Ordering::SeqCst) {
+        return; // 이미 대화상자가 떠 있다
+    }
+    std::thread::spawn(move || {
+        let pick = pick_photo(&title);
+        let _ = slint::invoke_from_event_loop(move || {
+            picking.store(false, Ordering::SeqCst);
+            if let Some(pick) = pick {
+                attach_photo(&memo_id, pick);
+            }
+        });
+    });
+}
+
+/// (워커 스레드) 사진을 고르고 읽어 온다. 취소하거나 읽을 수 없으면 `None`.
+fn pick_photo(title: &str) -> Option<PhotoPick> {
+    let path = rfd::FileDialog::new()
+        .add_filter("image", &["png", "jpg", "jpeg"])
+        .set_title(title)
+        .pick_file()?; // 사용자가 취소
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("사진 읽기 실패: {e}");
+            return None;
+        }
+    };
+    // 원본 픽셀 크기는 여기서 재서 코어에 넘긴다(코어엔 디코더가 없다).
+    let (width, height) = image::load_from_memory(&bytes)
+        .map(|img| (img.width() as i64, img.height() as i64))
+        .unwrap_or((0, 0));
+    let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let mime = match path.extension().and_then(|e| e.to_str()) {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        _ => "",
+    };
+    Some(PhotoPick { bytes, name, mime, width, height })
+}
+
+/// (이벤트 루프) 고른 사진을 vault 에 붙이고 스티커를 다시 그린다.
+///
+/// 대화상자가 떠 있는 동안 자리 비움 잠금이 걸렸을 수 있다 — 그러면 vault 가 없으니
+/// 조용히 버린다(잠긴 뒤에 몰래 쓰지 않는다).
+fn attach_photo(memo_id: &str, pick: PhotoPick) {
+    let ctx = APP.with(|a| a.borrow().as_ref().map(|app| app.ctx.clone()));
+    let Some(ctx) = ctx else { return };
+    {
+        let mut guard = ctx.vault.borrow_mut();
+        let Some(v) = guard.as_mut() else { return };
+        if let Err(e) = v.attach(memo_id, &pick.bytes, &pick.name, pick.mime, pick.width, pick.height)
+        {
+            eprintln!("사진 붙이기 실패: {e}");
+            return;
+        }
+    }
+    refresh_photos(&ctx, memo_id);
+}
+
 /// 메모의 스티커 창을 연다 (이미 열려 있으면 앞으로 가져오기만).
 pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     if let Some(entry) = ctx.stickies.borrow().get(&memo.id) {
@@ -189,45 +269,14 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     window.set_sticky_opacity(memo.opacity as f32);
     window.set_photos(slint::ModelRc::new(slint::VecModel::from(photo_rows(ctx, &memo.id))));
 
-    // 📎 → 파일 대화상자에서 사진을 골라 붙인다.
+    // 📎 → 파일 대화상자에서 사진을 골라 붙인다 (대화상자는 워커 스레드에서).
     {
         let ctx = ctx.clone();
         let id = memo.id.clone();
+        let picking = Arc::new(AtomicBool::new(false));
         window.on_add_photo(move || {
             touch(&ctx);
-            let Some(path) = rfd::FileDialog::new()
-                .add_filter("image", &["png", "jpg", "jpeg"])
-                .set_title(t!("ui.sticky_pick_photo"))
-                .pick_file()
-            else {
-                return; // 사용자가 취소
-            };
-            let bytes = match std::fs::read(&path) {
-                Ok(b) => b,
-                Err(e) => {
-                    eprintln!("사진 읽기 실패: {e}");
-                    return;
-                }
-            };
-            // 원본 픽셀 크기는 여기서 재서 코어에 넘긴다(코어엔 디코더가 없다).
-            let (w, h) = image::load_from_memory(&bytes)
-                .map(|img| (img.width() as i64, img.height() as i64))
-                .unwrap_or((0, 0));
-            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-            let mime = match path.extension().and_then(|e| e.to_str()) {
-                Some("png") => "image/png",
-                Some("jpg") | Some("jpeg") => "image/jpeg",
-                _ => "",
-            };
-            {
-                let mut guard = ctx.vault.borrow_mut();
-                let Some(v) = guard.as_mut() else { return };
-                if let Err(e) = v.attach(&id, &bytes, &name, mime, w, h) {
-                    eprintln!("사진 붙이기 실패: {e}");
-                    return;
-                }
-            }
-            refresh_photos(&ctx, &id);
+            spawn_photo_picker(id.clone(), t!("ui.sticky_pick_photo"), picking.clone());
         });
     }
 
