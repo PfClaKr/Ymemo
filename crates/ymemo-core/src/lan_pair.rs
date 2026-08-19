@@ -1,14 +1,17 @@
-//! LAN 페어링: 같은 네트워크에서 **6자리 코드**로 기기끼리 device-id 를 교환한다.
+//! LAN pairing: exchange device ids over a **6-digit code** on the same network.
 //!
-//! 긴 Syncthing device-id 를 직접 입력하는 대신:
-//!  1. 모든 기기는 페어링 모드일 때 1분마다 도는 6자리 코드를 띄우고 UDP 로 요청을 듣는다.
-//!  2. 상대 코드를 입력하면 브로드캐스트로 그 코드를 아는 기기를 찾아 device-id 를 주고받는다.
-//!  3. 얻은 device-id 로 기존 [`crate::sync::Syncthing::share_folder_with`] 를 호출해 등록한다.
+//! Instead of typing a long Syncthing device id:
+//!  1. In pairing mode every device shows a 6-digit code (rotating every minute) and
+//!     listens for UDP requests.
+//!  2. Entering the other side's code broadcasts for whoever knows it and the two swap
+//!     device ids.
+//!  3. The result is handed to [`crate::sync::Syncthing::share_folder_with`].
 //!
-//! 6자리는 엔트로피가 낮으므로(100만) 코드로 Argon2 키를 유도해 교환 자체를 암호화한다
-//! ([`crate::crypto::MasterKey`] 재사용). 복호화 성공 = 상대가 코드를 안다는 증명.
-//! 무차별 대입 방어: Argon2 가 느림 + 1분 만료 + 처리율 제한 + "페어링 모드일 때만 수신".
-//! (설령 잘못 붙어도 vault 는 E2E 암호문이라 마스터 암호 없이는 아무것도 못 읽는다.)
+//! Six digits is only a million possibilities, so the code itself derives an Argon2 key
+//! ([`crate::crypto::MasterKey`]) that encrypts the exchange: a successful decrypt proves
+//! the peer knows the code. Brute force is held off by Argon2's cost, the one-minute
+//! expiry, a rate limit, and listening only while pairing mode is on. Even a wrong pairing
+//! reads nothing, since the vault stays E2E encrypted.
 
 use anyhow::{anyhow, Result};
 use ymemo_i18n::t;
@@ -22,25 +25,25 @@ use std::time::{Duration, Instant};
 
 use crate::crypto::{generate_salt, MasterKey, Salt, SALT_LEN};
 
-/// 페어링 UDP 포트 (Syncthing 의 21027/22000 과 겹치지 않게 고른 값).
+/// Pairing UDP port, chosen to avoid Syncthing's 21027/22000.
 pub const PAIR_PORT: u16 = 21029;
-/// 코드 유효 시간. 지나면 새 코드로 회전한다.
+/// Code lifetime; a new code is rotated in afterwards.
 const CODE_TTL: Duration = Duration::from_secs(60);
-/// Argon2(느림) 남용을 막는 최소 처리 간격 — 무차별 대입 속도도 함께 제한한다.
+/// Minimum gap between attempts: caps Argon2 abuse and brute-force speed alike.
 const MIN_ATTEMPT_GAP: Duration = Duration::from_millis(200);
 
 const MAGIC: &[u8; 6] = b"YMLAN1";
-const MSG_HELLO: u8 = 1; // 조인 → 호스트: "이 코드 아는 기기 있나요? 내 id 는 이거"
-const MSG_WELCOME: u8 = 2; // 호스트 → 조인: "네, 내 id 는 이거"
+const MSG_HELLO: u8 = 1; // joiner -> host: "anyone know this code? here is my id"
+const MSG_WELCOME: u8 = 2; // host -> joiner: "yes, here is mine"
 const HEADER_LEN: usize = MAGIC.len() + 1 + SALT_LEN; // magic + type + salt
 
-/// 6자리 코드 문자열 생성 (앞자리 0 유지, 예: "042913").
+/// Generates a 6-digit code, leading zeros kept (e.g. "042913").
 pub fn gen_code() -> String {
     format!("{:06}", rand::rngs::OsRng.gen_range(0..1_000_000))
 }
 
-/// `magic || type || salt || encrypt_code(device_id)`.
-/// 복호화하려면 같은 코드를 알아야 하므로, 성공 자체가 코드 인증이 된다.
+/// `magic || type || salt || encrypt_code(device_id)`. Decrypting requires the same code,
+/// so success is the authentication.
 fn encode(msg_type: u8, code: &str, device_id: &str) -> Result<Vec<u8>> {
     let salt = generate_salt();
     let key = MasterKey::derive(code.as_bytes(), &salt)?;
@@ -53,8 +56,8 @@ fn encode(msg_type: u8, code: &str, device_id: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// 코드로 복호화해 상대 device-id 를 꺼낸다. 프레이밍/타입/코드가 안 맞으면 None.
-/// (Argon2 를 돌리므로 호출 측에서 반드시 처리율을 제한할 것)
+/// Decrypts a peer's device id with the code; `None` on bad framing, type or code.
+/// Runs Argon2, so callers must rate-limit.
 fn decode(expected_type: u8, code: &str, buf: &[u8]) -> Option<String> {
     if buf.len() <= HEADER_LEN || &buf[..MAGIC.len()] != MAGIC || buf[MAGIC.len()] != expected_type {
         return None;
@@ -67,12 +70,12 @@ fn decode(expected_type: u8, code: &str, buf: &[u8]) -> Option<String> {
     (!id.is_empty()).then_some(id)
 }
 
-/// 프레이밍(magic+type)만 싸게 검사 — Argon2 전에 명백한 쓰레기를 버린다.
+/// Cheap framing check, to drop obvious garbage before paying for Argon2.
 fn framed_as(buf: &[u8], msg_type: u8) -> bool {
     buf.len() > HEADER_LEN && &buf[..MAGIC.len()] == MAGIC && buf[MAGIC.len()] == msg_type
 }
 
-/// 회전하는 코드 상태. 회전 경계 경쟁을 위해 직전 코드도 잠깐 받아준다.
+/// Rotating code state; the previous code stays valid briefly to cover the rotation race.
 struct Codes {
     current: String,
     previous: Option<String>,
@@ -94,10 +97,10 @@ impl Codes {
     }
 }
 
-/// 백그라운드로 페어링 요청을 듣는 호스트. 살아 있는 동안만 코드를 노출하고 수신한다
-/// (페어링 모드를 켤 때 start, 끌 때 drop — 노출 창을 최소화).
+/// Background host for pairing requests. It only shows a code and listens while alive —
+/// started when pairing mode turns on, dropped when it turns off.
 pub struct PairListener {
-    /// 실제로 바인드된 주소. 임의 포트(0)로 띄웠을 때 어디로 보내야 하는지 알려준다.
+    /// The address actually bound, which matters when started on port 0.
     local_addr: SocketAddr,
     codes: Arc<Mutex<Codes>>,
     peers_rx: Receiver<String>,
@@ -106,7 +109,7 @@ pub struct PairListener {
 }
 
 impl PairListener {
-    /// 고정 포트로 리스너를 띄운다. 같은 기기의 내 device-id 를 응답에 쓴다.
+    /// Starts a listener on the fixed port, answering with this device's id.
     pub fn start(device_id: impl Into<String>) -> Result<Self> {
         Self::start_on(device_id, (Ipv4Addr::UNSPECIFIED, PAIR_PORT).into())
     }
@@ -131,20 +134,20 @@ impl PairListener {
         Ok(Self { local_addr, codes, peers_rx, running, handle: Some(handle) })
     }
 
-    /// 이 리스너가 실제로 바인드된 주소.
+    /// Address this listener is bound to.
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
 
-    /// 화면에 띄울 현재 6자리 코드.
+    /// Current 6-digit code to display.
     pub fn code(&self) -> String {
         let mut c = self.codes.lock().unwrap();
         c.maybe_rotate();
         c.current.clone()
     }
 
-    /// 이번에 새로 페어링된 상대 device-id 를 하나 꺼낸다 (없으면 None). 호출 측이
-    /// 폴링해 `share_folder_with` 로 등록한다. 여러 건이면 반복 호출한다.
+    /// Pops one newly paired peer id. Callers poll this and register each with
+    /// `share_folder_with`.
     pub fn next_paired_peer(&self) -> Option<String> {
         self.peers_rx.try_recv().ok()
     }
@@ -159,7 +162,7 @@ impl Drop for PairListener {
     }
 }
 
-/// 호스트 수신 루프: HELLO 를 받으면 코드로 복호화해 상대 id 를 얻고 WELCOME 으로 답한다.
+/// Host loop: decrypt an incoming HELLO with the code, then answer with WELCOME.
 fn recv_loop(
     socket: UdpSocket,
     device_id: String,
@@ -175,10 +178,10 @@ fn recv_loop(
         }
         let (n, src) = match socket.recv_from(&mut buf) {
             Ok(v) => v,
-            Err(_) => continue, // read timeout → 회전/종료 확인 후 다시 듣는다
+            Err(_) => continue, // read timeout: re-check rotation and shutdown
         };
         let packet = &buf[..n];
-        // Argon2 전에 싸게 거른다 + 처리율 제한 (CPU DoS·무차별 대입 방어).
+        // Filter cheaply and rate-limit before Argon2 (CPU DoS and brute force).
         if !framed_as(packet, MSG_HELLO) || last_attempt.elapsed() < MIN_ATTEMPT_GAP {
             continue;
         }
@@ -193,24 +196,24 @@ fn recv_loop(
             .or_else(|| previous.and_then(|p| decode(MSG_HELLO, &p, packet).map(|id| (id, p))));
 
         let Some((peer_id, code)) = matched else { continue };
-        // 성공: 상대에게 내 id 를 (같은 코드로) 답하고, 앱에 등록을 넘긴다.
+        // Matched: answer with our id under the same code and hand the peer to the app.
         if let Ok(welcome) = encode(MSG_WELCOME, &code, &device_id) {
             let _ = socket.send_to(&welcome, src);
         }
         let _ = peers_tx.send(peer_id);
-        // 코드를 바로 회전시켜 재사용/재생을 막는다.
+        // Rotate immediately, so the code cannot be reused or replayed.
         codes.lock().unwrap().rotate();
     }
 }
 
-/// 조인 측: 코드를 알고 브로드캐스트로 호스트를 찾는다. 성공 시 호스트 device-id 반환,
-/// 시간 안에 못 찾으면 `Ok(None)`.
+/// Joiner side: broadcast for the host that knows `code`. Returns its device id, or
+/// `Ok(None)` on timeout.
 pub fn join(code: &str, my_device_id: &str, timeout: Duration) -> Result<Option<String>> {
     let targets: [SocketAddr; 1] = [(Ipv4Addr::BROADCAST, PAIR_PORT).into()];
     join_to(code, my_device_id, timeout, &targets)
 }
 
-/// 브로드캐스트 주소를 주입할 수 있는 join (테스트는 127.0.0.1 로 직접 보낸다).
+/// `join` with injectable targets, so tests can send straight to 127.0.0.1.
 fn join_to(
     code: &str,
     my_device_id: &str,
@@ -222,8 +225,9 @@ fn join_to(
     }
     let socket = UdpSocket::bind(("0.0.0.0", 0))?;
     socket.set_broadcast(true)?;
-    // 응답 대기 간격 = 재시도 주기. HELLO 하나가 호스트에게 Argon2 **두 번**(수신 복호 +
-    // 응답 암호화)을 시키므로, 느린 기기를 재촉하면 오히려 더 밀린다. 넉넉히 기다린다.
+    // The read timeout is also the retry period. One HELLO costs the host two Argon2
+    // derivations (decrypt, then encrypt the answer), so retrying fast only piles work on a
+    // slow device.
     socket.set_read_timeout(Some(Duration::from_millis(1500)))?;
 
     let deadline = Instant::now() + timeout;
@@ -233,7 +237,7 @@ fn join_to(
         for t in targets {
             let _ = socket.send_to(&hello, t);
         }
-        // WELCOME 을 기다린다 (read timeout 마다 다시 보낸다).
+        // Wait for WELCOME; resend on every read timeout.
         match socket.recv_from(&mut buf) {
             Ok((n, _src)) => {
                 if let Some(host_id) = decode(MSG_WELCOME, code, &buf[..n]) {
@@ -268,38 +272,38 @@ mod tests {
     #[test]
     fn wrong_code_fails_to_decode() {
         let msg = encode(MSG_HELLO, "123456", "DEVICE-ID-ABC").unwrap();
-        assert_eq!(decode(MSG_HELLO, "000000", &msg), None); // 코드 불일치
-        assert_eq!(decode(MSG_WELCOME, "123456", &msg), None); // 타입 불일치
-        assert_eq!(decode(MSG_HELLO, "123456", b"garbage"), None); // 프레이밍 깨짐
+        assert_eq!(decode(MSG_HELLO, "000000", &msg), None); // wrong code
+        assert_eq!(decode(MSG_WELCOME, "123456", &msg), None); // wrong type
+        assert_eq!(decode(MSG_HELLO, "123456", b"garbage"), None); // bad framing
     }
 
     #[test]
     fn join_rejects_bad_code() {
-        assert!(join("12345", "id", Duration::from_millis(1)).is_err()); // 5자리
-        assert!(join("abcdef", "id", Duration::from_millis(1)).is_err()); // 숫자 아님
+        assert!(join("12345", "id", Duration::from_millis(1)).is_err()); // too short
+        assert!(join("abcdef", "id", Duration::from_millis(1)).is_err()); // not digits
     }
 
-    /// 실제 소켓 왕복 (같은 호스트, 127.0.0.1 로 직접). 코드가 맞으면 양쪽이 서로의
-    /// device-id 를 얻어야 한다.
+    /// Real socket round-trip over 127.0.0.1: with a matching code both sides must end up
+    /// with the other's device id.
     #[test]
     fn udp_exchange_with_matching_code() {
-        // 임의 포트(0)로 띄우고 실제 주소를 물어본다 — 고정 포트를 쓰면 이 기기에서 앱이
-        // 돌고 있거나 포트가 남아 있을 때 엉뚱하게 깨진다.
+        // Bind port 0 and ask for the real address; the fixed port breaks the test when the
+        // app is running on this machine.
         let host =
             PairListener::start_on("HOST-DEVICE-ID", (Ipv4Addr::LOCALHOST, 0).into()).unwrap();
         let code = host.code();
         let target = host.local_addr();
 
-        // 예산을 크게 잡는다. 이 왕복에는 Argon2 유도가 **네 번** 들어가고(조인 encode →
-        // 호스트 decode → 호스트 encode → 조인 decode), 한 번이 수백 ms 다. CI 러너처럼
-        // 느린 2코어에서 다른 테스트(역시 Argon2)와 함께 돌면 몇 초로 늘어난다.
-        // 성공하면 즉시 반환하므로 예산을 키워도 평소 실행 시간은 그대로다.
+        // Generous budget: the round-trip runs four Argon2 derivations (joiner encode, host
+        // decode, host encode, joiner decode) at hundreds of ms each, and a slow two-core CI
+        // runner sharing time with the other Argon2 tests stretches that to seconds. Success
+        // returns immediately, so the usual run time is unaffected.
         let host_id = join_to(&code, "JOIN-DEVICE-ID", Duration::from_secs(60), &[target])
             .unwrap()
-            .expect("호스트가 응답해야 한다");
+            .expect("host must answer");
         assert_eq!(host_id, "HOST-DEVICE-ID");
 
-        // 호스트도 조인의 id 를 받아 등록 큐에 넣었어야 한다.
+        // The host must have queued the joiner's id too.
         let mut got = None;
         for _ in 0..100 {
             if let Some(p) = host.next_paired_peer() {
@@ -311,15 +315,15 @@ mod tests {
         assert_eq!(got.as_deref(), Some("JOIN-DEVICE-ID"));
     }
 
-    /// 틀린 코드로 조인하면 호스트가 응답하지 않아 시간 초과(None)여야 한다.
+    /// A wrong code gets no answer, so the join must time out.
     #[test]
     fn udp_exchange_wrong_code_times_out() {
         let host = PairListener::start_on("HOST", (Ipv4Addr::LOCALHOST, 0).into()).unwrap();
         let real = host.code();
-        // 실제 코드와 다른 코드를 만든다.
+        // Any code other than the real one.
         let wrong = if real == "000000" { "111111" } else { "000000" };
         let target = host.local_addr();
-        // 여긴 반대로 짧게 — "응답이 없다" 를 확인하는 것이라 오래 기다릴 이유가 없다.
+        // Short budget here: we are only confirming that nothing answers.
         let res = join_to(wrong, "JOIN", Duration::from_millis(1600), &[target]).unwrap();
         assert_eq!(res, None);
     }

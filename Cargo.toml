@@ -9,55 +9,56 @@ license = "GPL-3.0-only"
 repository = "https://github.com/PfClaKr/Ymemo"
 authors = ["PfClaKr"]
 
-# 공용 의존성. 각 crate 는 `xxx.workspace = true` 로 참조한다.
+# Shared dependencies; crates pull them in with `xxx.workspace = true`.
 [workspace.dependencies]
 ymemo-core = { path = "crates/ymemo-core" }
 ymemo-i18n = { path = "crates/ymemo-i18n" }
 
-# GUI (데스크탑)
-# slint 와 i-slint-backend-winit 은 반드시 같은 버전이어야 한다 (내부 크레이트 공유).
-# renderer-software: OpenGL 없이 CPU 로 그리는 폴백 렌더러. GL 드라이버가 부실한
-# 환경(특히 Windows VM/RDP/구형 드라이버)에서 femtovg 대신 쓴다.
+# Desktop GUI.
+# slint and i-slint-backend-winit must stay on the same version (shared internal crates).
+# renderer-software is the CPU fallback renderer, used instead of femtovg where the GL
+# driver is weak (Windows VMs, RDP, old drivers).
 slint = { version = "1.17", features = ["renderer-software"] }
 slint-build = "1.17"
-i-slint-backend-winit = "1.17" # 무프레임 창의 네이티브 드래그(drag_window) 접근용
-qrcode = { version = "0.14", default-features = false } # 페어링 QR (렌더링은 slint 이미지로 직접)
-# 첨부 사진 디코딩 (슬린트에 넘길 RGBA 로). 코덱은 폰·카메라가 내놓는 두 가지만 켠다 —
-# 기본 기능을 다 켜면 빌드가 무거워지고 쓰지 않는 포맷까지 딸려온다.
+i-slint-backend-winit = "1.17" # native drag_window for frameless windows
+qrcode = { version = "0.14", default-features = false } # pairing QR, rendered into a slint image
+# Decodes attached photos to RGBA for Slint. Only the two codecs phones and cameras
+# produce; the default feature set drags in formats we never use.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
-# 사진 고르기 대화상자. Linux 는 xdg-desktop-portal(순수 Rust, 시스템 GTK 불필요),
-# Windows 는 네이티브 대화상자를 쓴다 — CI 에 새 시스템 패키지를 요구하지 않기 위한 선택.
-# async-std 여야 한다 (tokio 로 켜면 rfd→ashpd→zbus/tokio 가 켜지고, 기능 통합 때문에
-# ksni 가 쓰는 zbus 까지 tokio 백엔드가 되어 런타임 없는 메인 스레드에서 트레이가 패닉한다).
+# File picker: xdg-desktop-portal on Linux (pure Rust, no system GTK) and the native
+# dialog on Windows, so CI needs no extra system packages.
+# It must be async-std: with tokio, rfd -> ashpd -> zbus pulls in the tokio backend, and
+# feature unification gives ksni's zbus the same backend, so the tray panics on the main
+# thread where there is no runtime.
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "async-std"] }
-# 트레이 아이콘 (플랫폼별, ymemo-desktop 에서 cfg 로 갈라 쓴다)
-#  - Linux: ksni — StatusNotifierItem (zbus 기반 순수 Rust, libdbus/gtk 불필요)
-#  - Windows: tray-icon — Shell_NotifyIcon. default-features off 로 gtk/libxdo(리눅스 C 의존) 제외
+# Tray icon, selected by cfg in ymemo-desktop:
+#  - Linux: ksni, a StatusNotifierItem over zbus (pure Rust, no libdbus/gtk)
+#  - Windows: tray-icon (Shell_NotifyIcon); default features off to drop gtk/libxdo
 ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
 tray-icon = { version = "0.24", default-features = false }
 
-# 저장소 / 데이터
-rusqlite = { version = "0.32", features = ["bundled"] } # bundled: 시스템 libsqlite3 불필요, 소스에서 컴파일
+# Storage and data
+rusqlite = { version = "0.32", features = ["bundled"] } # compiled from source, no system libsqlite3
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 directories = "5"
 
-# CRDT: 순서 무관 병합 (P2P 다기기 동기화의 핵심)
+# CRDT: order-independent merging, the heart of P2P multi-device sync
 automerge = "0.10"
 
-# 암호화 (순수 Rust RustCrypto: 시스템 libsodium 불필요, 크로스컴파일 용이)
+# Crypto (pure Rust RustCrypto: no system libsodium, easy cross-compilation)
 chacha20poly1305 = "0.10" # XChaCha20-Poly1305 AEAD (24B nonce)
-argon2 = "0.5"            # Argon2id 키 유도
-rand = "0.8"              # salt/nonce 생성 (OsRng)
-sha2 = "0.10"             # blob 내용해시 (파일 이름 + convergent nonce 유도)
+argon2 = "0.5"            # Argon2id key derivation
+rand = "0.8"              # OsRng for salts and nonces
+sha2 = "0.10"             # blob content hashes (file name + convergent nonce)
 
-# Syncthing REST 제어용 HTTP 클라이언트 (localhost 전용이라 TLS 불필요)
+# HTTP client for Syncthing's REST API (localhost only, so no TLS)
 ureq = { version = "3", default-features = false, features = ["json"] }
 
-# Flutter 바인딩 런타임. 생성기(CLI)·Dart 패키지와 **세 곳의 버전이 같아야** 하므로
-# 캐럿 없이 못 박는다 (apps/mobile/pubspec.yaml 참조).
+# Flutter binding runtime. The runtime, the codegen CLI and the Dart package must all be
+# the exact same version, hence the pin (see apps/mobile/pubspec.yaml).
 flutter_rust_bridge = "=2.11.1"
 
-# 공통 유틸
+# Common utilities
 anyhow = "1"

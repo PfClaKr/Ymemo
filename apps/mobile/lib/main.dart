@@ -1,11 +1,11 @@
-// Ymemo 모바일: 잠금 화면 → 메모 목록 → 메모 편집.
-// `lib/src/rust/` 는 flutter_rust_bridge codegen 생성물이다 (커밋한다 — README 참조).
-// api.rs 를 고쳤으면 `flutter_rust_bridge_codegen generate` 를 먼저 돌려야 한다.
+// Ymemo mobile: lock screen, memo list, memo editor.
+// `lib/src/rust/` is flutter_rust_bridge codegen output and is committed; see the README.
+// After changing api.rs, run `flutter_rust_bridge_codegen generate` first.
 //
-// 문구는 여기 쓰지 않는다. 데스크탑과 **같은 카탈로그**(저장소 루트 i18n/*.json)에서
-// `mobileStrings()` 로 한 벌 받아 쓴다 — 코어 에러 메시지와 언어가 갈라지지 않게 하기
-// 위함이다. 문구를 늘리려면 i18n/ko.json·en.json 에 `mobile.*` 키를 넣고
-// crates/ymemo-ffi 의 FfiStrings 에 필드를 추가한다 (ymemo-i18n 테스트가 키를 검사한다).
+// No strings are written here. They come from the **same catalog** as the desktop
+// (i18n/*.json at the repo root) through `mobileStrings()`, so the UI never drifts from the
+// language of the core's error messages. To add one, put a `mobile.*` key in ko.json and
+// en.json and a field in FfiStrings in crates/ymemo-ffi; the ymemo-i18n tests check it.
 
 import 'dart:io' show Platform;
 import 'dart:typed_data';
@@ -22,7 +22,7 @@ import 'src/rust/frb_generated.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await RustLib.init();
-  // 코어 에러와 UI 문구를 같은 언어로 맞춘다. 모르는 로캘이면 코어가 시스템 로캘로 떨어진다.
+  // Keep core errors and UI text in one language; an unknown locale falls back to the system one.
   await setLanguage(code: Platform.localeName);
   runApp(YmemoApp(strings: await mobileStrings()));
 }
@@ -45,7 +45,7 @@ class YmemoApp extends StatelessWidget {
   }
 }
 
-/// 잠금 화면: 마스터 암호로 vault 를 연다 (없으면 생성).
+/// Lock screen: opens the vault with the master password, creating it if needed.
 class LockScreen extends StatefulWidget {
   const LockScreen({super.key, required this.strings});
 
@@ -65,7 +65,7 @@ class _LockScreenState extends State<LockScreen> {
     setState(() => _busy = true);
     try {
       final docs = await getApplicationDocumentsDirectory();
-      // vault/ 는 동기화 대상 디렉터리 (Syncthing 연동 전까지는 로컬 전용).
+      // vault/ is the directory that will be synced; local-only until Syncthing lands.
       await vaultOpen(
         vaultDir: '${docs.path}/vault',
         cacheDbPath: '${docs.path}/ymemo.db',
@@ -76,7 +76,7 @@ class _LockScreenState extends State<LockScreen> {
         MaterialPageRoute(builder: (_) => MemoListScreen(strings: widget.strings)),
       );
     } catch (e) {
-      // 코어 에러는 이미 카탈로그를 거쳐 현재 언어로 온다.
+      // Core errors already arrive in the current language.
       setState(() => _error = '$e');
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -118,7 +118,7 @@ class _LockScreenState extends State<LockScreen> {
   }
 }
 
-/// 메모 목록 + 추가/열기/삭제.
+/// Memo list, with add, open and delete.
 class MemoListScreen extends StatefulWidget {
   const MemoListScreen({super.key, required this.strings});
 
@@ -142,7 +142,7 @@ class _MemoListScreenState extends State<MemoListScreen> {
     if (mounted) setState(() => _memos = memos);
   }
 
-  /// 빈 메모를 만들고 바로 편집 화면으로 — 목록에서 제목만 묻는 것보다 손이 덜 간다.
+  /// Creates an empty memo and opens the editor; fewer taps than asking for a title first.
   Future<void> _add() async {
     final id = await memoUpsert(title: '', body: '');
     if (!mounted) return;
@@ -181,7 +181,7 @@ class _MemoListScreenState extends State<MemoListScreen> {
             icon: const Icon(Icons.sync),
             tooltip: widget.strings.syncNow,
             onPressed: () async {
-              // 다른 기기의 로그가 vault 디렉터리에 도착해 있으면 여기서 반영된다.
+              // Picks up any logs other devices have delivered to the vault directory.
               await syncRebuild();
               await _reload();
             },
@@ -223,7 +223,7 @@ class _MemoListScreenState extends State<MemoListScreen> {
   }
 }
 
-/// 메모 편집: 제목 + 본문. 나갈 때 저장한다.
+/// Memo editor: title and body, saved on the way out.
 class MemoEditScreen extends StatefulWidget {
   const MemoEditScreen({
     super.key,
@@ -258,11 +258,11 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
     if (mounted) setState(() => _photos = list);
   }
 
-  /// 사진첩/카메라에서 한 장 골라 붙인다.
+  /// Picks one photo from the gallery or camera.
   ///
-  /// 원본 바이트를 그대로 코어에 넘긴다(리사이즈하지 않는 것이 결정 사항). 다만
-  /// **원본 픽셀 크기는 여기서 재서 넘긴다** — 코어에 이미지 디코더를 두지 않기 때문이고,
-  /// 그 값으로 표시 높이 비율이 정해진다.
+  /// The original bytes go to the core untouched — resizing is deliberately not done — but
+  /// the **original pixel size is measured here**, because the core has no image decoder and
+  /// that size sets the display aspect ratio.
   Future<void> _addPhoto(ImageSource source) async {
     final picked = await ImagePicker().pickImage(source: source);
     if (picked == null) return;
@@ -279,7 +279,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
     await _reloadPhotos();
   }
 
-  /// 원본 픽셀 크기. 디코딩에 실패하면 null (코어는 0 을 받고 1:1 로 취급한다).
+  /// Original pixel size, or null when decoding fails; the core then assumes 1:1.
   Future<ui.Size?> _decodeSize(Uint8List bytes) async {
     try {
       final codec = await ui.instantiateImageCodec(bytes);
@@ -324,7 +324,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
     super.dispose();
   }
 
-  /// 바뀐 게 없으면 쓰지 않는다 — 빈 change 를 로그에 남기면 동기화 트래픽만 는다.
+  /// Skips the write when nothing changed; an empty change is pure sync traffic.
   Future<void> _save() async {
     if (_title.text == widget.title && _body.text == widget.body) return;
     await memoUpsert(id: widget.id, title: _title.text, body: _body.text);
@@ -333,16 +333,16 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      // 뒤로 가기 = 저장. 별도 저장 버튼도 두되, 눌러야만 저장되는 방식은 쓰지 않는다.
+      // Going back saves. There is a save button too, but saving never requires it.
       //
-      // `canPop: false` 로 두고 **저장한 뒤 직접 pop** 한다. 기본값(true)이면 라우트가
-      // 먼저 사라지고 컨트롤러가 dispose 된 다음에 이 콜백이 도는데, 그때 `_title.text`
-      // 를 읽으면 "used after being disposed" 로 저장이 조용히 실패한다.
-      // (에뮬레이터에서 실제로 겪은 버그 — 뒤로 나가면 편집분이 사라졌다.)
+      // `canPop: false` and pop by hand **after** saving. With the default the route is
+      // gone and the controllers disposed before this callback runs, so reading `_title.text`
+      // throws "used after being disposed" and the save fails silently — a real bug seen on
+      // the emulator, where going back lost the edit.
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
-        // await 를 건너면 context 를 다시 쓸 수 없으므로 navigator 를 미리 잡아 둔다.
+        // Grab the navigator up front; context cannot be used across the await.
         final navigator = Navigator.of(context);
         await _save();
         navigator.pop();
@@ -404,12 +404,12 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   }
 }
 
-/// 상대 기기의 페어링 QR 을 카메라로 읽는다.
+/// Scans another device's pairing QR.
 ///
-/// 코드 형식 검증은 코어(`pairingDecode`)가 한다 — 형식이 바뀌어도 Dart 는 그대로다.
-/// 다만 **읽은 기기를 실제로 등록하지는 못한다**: 모바일 Syncthing(gomobile) 이 아직
-/// 없어서 공유 폴더에 상대를 추가할 수단이 없다. 그래서 지금은 확인만 하고 그 사실을
-/// 화면에 밝힌다 (조용히 실패해 "연결됐나?" 하게 만들지 않는다).
+/// The core validates the format (`pairingDecode`), so a format change leaves Dart alone.
+/// The scanned device **cannot actually be registered** yet: without mobile Syncthing
+/// (gomobile) there is no way to add a peer to the shared folder. So this only validates and
+/// says so on screen, rather than failing quietly and leaving the user guessing.
 class ScanScreen extends StatefulWidget {
   const ScanScreen({super.key, required this.strings});
 
@@ -421,11 +421,11 @@ class ScanScreen extends StatefulWidget {
 
 class _ScanScreenState extends State<ScanScreen> {
   final _controller = MobileScannerController(
-    // 페어링 QR 만 보면 되므로 다른 바코드 형식은 아예 무시한다(오탐·배터리 둘 다 이득).
+    // Only pairing QRs matter, so other barcode formats are ignored: fewer false hits, less battery.
     formats: const [BarcodeFormat.qrCode],
     detectionSpeed: DetectionSpeed.noDuplicates,
   );
-  // 한 번 읽으면 더 처리하지 않는다 — 카메라는 같은 코드를 계속 흘려보낸다.
+  // Stop after the first hit; the camera keeps streaming the same code.
   bool _handled = false;
 
   @override
@@ -474,7 +474,7 @@ class _ScanScreenState extends State<ScanScreen> {
       );
       navigator.pop();
     } catch (e) {
-      // 코어가 돌려준 문구(현재 언어)를 그대로 보여주고 다시 읽을 수 있게 푼다.
+      // Show the core's message as-is and allow another scan.
       messenger.showSnackBar(SnackBar(content: Text('$e')));
       _handled = false;
     }
@@ -490,7 +490,7 @@ class _ScanScreenState extends State<ScanScreen> {
           MobileScanner(
             controller: _controller,
             onDetect: _onDetect,
-            // 카메라를 못 여는 경우(권한 거부·카메라 없음)를 빈 화면으로 두지 않는다.
+            // A camera that cannot open (denied, or absent) must not leave a blank screen.
             errorBuilder: (context, error) => Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
@@ -520,10 +520,11 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 }
 
-/// 첨부 사진 한 장: 표시 + 크기 조절 + 떼기.
+/// One attached photo: display, resize, detach.
 ///
-/// 표시 크기는 **폰트 크기 배수(em)** 로 동기화된다. 여기서 슬라이더로 줄이면 데스크탑에서도
-/// 같은 배수로 줄어들고, 실제 픽셀은 각 플랫폼이 자기 기본 폰트로 환산한다.
+/// The display size syncs in **em**, multiples of the font size. Shrinking it here shrinks it
+/// by the same factor on the desktop, where the pixels are computed from that platform's own
+/// base font.
 class AttachmentView extends StatefulWidget {
   const AttachmentView({
     super.key,
@@ -552,7 +553,7 @@ class _AttachmentViewState extends State<AttachmentView> {
   }
 
   Future<void> _load() async {
-    // 아직 동기화 전이면 바이트가 없다 — 그 사실을 그대로 보여준다.
+    // Before it syncs there are no bytes; say so rather than showing nothing.
     if (!await attachmentHasBlob(hash: widget.attachment.hash)) {
       if (mounted) setState(() => _missing = true);
       return;
@@ -563,7 +564,7 @@ class _AttachmentViewState extends State<AttachmentView> {
 
   @override
   Widget build(BuildContext context) {
-    // 이 플랫폼의 기본 본문 폰트 크기 = em 의 기준.
+    // This platform's body font size is what em is measured against.
     final baseFont = DefaultTextStyle.of(context).style.fontSize ?? 14.0;
     final width = _widthEm * baseFont;
     final a = widget.attachment;
@@ -593,13 +594,13 @@ class _AttachmentViewState extends State<AttachmentView> {
               Text(widget.strings.photoSize, style: Theme.of(context).textTheme.bodySmall),
               Expanded(
                 child: Slider(
-                  // 코어의 허용 범위(4~80em)와 같은 값. 벗어나면 코어가 어차피 자른다.
+                  // The core's own range (4-80em); it clamps anything outside anyway.
                   min: 4,
                   max: 80,
                   value: _widthEm.clamp(4, 80),
                   onChanged: (v) => setState(() => _widthEm = v),
-                  // 드래그하는 내내 쓰지 않고 손을 뗄 때 한 번만 기록한다
-                  // (슬라이더 한 번에 change 를 수십 개 남기면 로그가 부푼다).
+                  // Written once on release, not throughout the drag; one slide would
+                  // otherwise leave dozens of changes in the log.
                   onChangeEnd: (v) async {
                     await attachmentSetWidth(id: a.id, widthEmMilli: (v * 1000).round());
                     await widget.onChanged();

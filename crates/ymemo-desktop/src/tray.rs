@@ -1,15 +1,14 @@
-//! 트레이 아이콘. 플랫폼별 백엔드를 cfg 로 나눈다.
+//! Tray icon, with one backend per platform behind cfg:
 //!
-//!  - **Linux**: `ksni` (StatusNotifierItem, D-Bus 기반 순수 Rust — gtk/libdbus 불필요)
-//!  - **Windows**: `tray-icon` (Shell_NotifyIcon; gtk 를 끌어오지 않도록 default-features off)
-//!  - **그 외(macOS 등)**: 미구현 → 트레이 없이 동작 (핸들만 반환)
+//!  - **Linux**: `ksni` (StatusNotifierItem over D-Bus, pure Rust — no gtk/libdbus)
+//!  - **Windows**: `tray-icon` (Shell_NotifyIcon, default features off to avoid gtk)
+//!  - **Anything else (macOS, ...)**: not implemented; the app runs without a tray
 //!
-//! 공통 진입점 [`start`] 는 살아 있는 동안 트레이를 유지하는 핸들을 돌려준다
-//! (핸들이 drop 되면 트레이도 사라진다). 클릭/메뉴는 백엔드가 아래 `request_*` 로
-//! 이벤트 루프에 위임한다 — 트레이 콜백은 UI 스레드가 아니고, slint 컴포넌트는
-//! `Send` 가 아니라 클로저에 직접 캡처할 수 없기 때문이다.
+//! [`start`] returns a handle that keeps the tray alive; dropping it removes the tray.
+//! Clicks and menu items go through the `request_*` functions below, because tray callbacks
+//! do not run on the UI thread and slint components are not `Send`.
 
-// TrayHandle 은 start() 의 반환 타입이라 공개하되, main 은 이름 없이 추론해 쓴다.
+// TrayHandle is public as start()'s return type, but main only ever infers it.
 #[allow(unused_imports)]
 pub use imp::{start, TrayHandle};
 
@@ -19,8 +18,8 @@ use crate::icon::set_window_icon;
 use crate::lock::lock_now;
 use crate::state::{touch, APP};
 
-/// 트레이 클릭/메뉴: 잠겨 있으면 잠금 창, 아니면 목록 창 토글.
-/// (트레이 콜백이 어느 스레드에서 오든 이벤트 루프로 넘긴 뒤 thread_local 로 UI 접근)
+/// Tray click or menu: raise the lock window while locked, otherwise toggle the list. The
+/// call is handed to the event loop first, whatever thread it came from.
 pub(crate) fn request_toggle() {
     let _ = slint::invoke_from_event_loop(|| {
         APP.with(|a| {
@@ -36,15 +35,15 @@ pub(crate) fn request_toggle() {
             } else {
                 let _ = app.list.show();
                 set_window_icon(app.list.window());
-                // Windows 소프트웨어 렌더러는 다시 띄운 창을 바로 안 그려서 리프레시 전까지
-                // 하얗게 남는다 → 표시 직후 강제로 다시 그린다.
+                // The Windows software renderer leaves a re-shown window blank until
+                // something else repaints it.
                 app.list.window().request_redraw();
             }
         });
     });
 }
 
-/// 트레이 "잠금": 지금 잠근다 (목록 창의 🔒 와 같은 동작).
+/// Tray "lock": same as the list window's lock button.
 pub(crate) fn request_lock() {
     let _ = slint::invoke_from_event_loop(|| {
         APP.with(|a| {
@@ -55,7 +54,7 @@ pub(crate) fn request_lock() {
     });
 }
 
-/// 트레이 "종료": 이벤트 루프를 끝내 앱을 종료한다.
+/// Tray "quit": ends the event loop.
 pub(crate) fn request_quit() {
     let _ = slint::invoke_from_event_loop(|| {
         let _ = slint::quit_event_loop();
@@ -83,7 +82,7 @@ mod imp {
         }
 
         fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-            // ksni 는 ARGB32(네트워크 바이트 순서) 를 요구 → RGBA 를 ARGB 로 변환.
+            // ksni wants ARGB32 in network byte order, so convert from RGBA.
             let (rgba, w, h) = tray_icon_rgba();
             let mut data = vec![0u8; rgba.len()];
             for (px, out) in rgba.chunks_exact(4).zip(data.chunks_exact_mut(4)) {
@@ -129,11 +128,11 @@ mod imp {
         }
     }
 
-    /// 살아 있는 동안 트레이를 유지하는 핸들. (spawn 실패 시 None)
+    /// Handle keeping the tray alive; `None` inside when spawning failed.
     pub struct TrayHandle(Option<ksni::blocking::Handle<YmemoTray>>);
 
     impl TrayHandle {
-        /// 메뉴를 다시 그리게 한다 (언어가 바뀌었을 때).
+        /// Redraws the menu, e.g. after a language change.
         pub fn refresh(&self) {
             if let Some(h) = &self.0 {
                 h.update(|_| {});
@@ -146,7 +145,7 @@ mod imp {
         match YmemoTray.spawn() {
             Ok(handle) => TrayHandle(Some(handle)),
             Err(e) => {
-                eprintln!("트레이 아이콘 등록 실패 (트레이 없이 계속): {e}");
+                eprintln!("could not register the tray icon, continuing without it: {e}");
                 TrayHandle(None)
             }
         }
@@ -167,17 +166,17 @@ mod imp {
     use crate::icon::tray_icon_rgba;
     use ymemo_i18n::t;
 
-    /// 트레이 아이콘 + 메뉴/클릭 이벤트를 폴링하는 타이머를 함께 들고 있는 핸들.
-    /// (둘 다 살아 있어야 트레이가 유지되고 이벤트가 처리된다)
+    /// Holds the tray icon together with the timer that polls its events; both must stay
+    /// alive for the tray to work.
     pub struct TrayHandle {
         _tray: Option<TrayIcon>,
         _poll: slint::Timer,
-        /// 언어가 바뀔 때 문구를 갈아 끼우기 위해 항목을 들고 있는다.
+        /// Kept so the labels can be rewritten on a language change.
         items: Vec<MenuItem>,
     }
 
     impl TrayHandle {
-        /// 메뉴 문구를 현재 언어로 다시 쓴다. 순서는 start() 의 append 순서와 같다.
+        /// Rewrites the labels in the current language, in start()'s append order.
         pub fn refresh(&self) {
             let labels = [t!("tray.memo_list"), t!("tray.lock"),
                           t!("tray.quit")];
@@ -188,7 +187,7 @@ mod imp {
     }
 
     pub fn start() -> TrayHandle {
-        // 메뉴: "메모 목록" / "잠금" / --- / "종료". 각 항목 id 로 이벤트를 분기한다.
+        // Menu: list, lock, separator, quit. Events are dispatched by item id.
         let list_item = MenuItem::new(t!("tray.memo_list"), true, None);
         let lock_item = MenuItem::new(t!("tray.lock"), true, None);
         let quit_item = MenuItem::new(t!("tray.quit"), true, None);
@@ -197,7 +196,7 @@ mod imp {
         let quit_id: MenuId = quit_item.id().clone();
 
         let menu = Menu::new();
-        // append 는 muda(=tray_icon::menu) 의 Result 를 돌려준다 (tray_icon::Result 아님).
+        // append returns muda's Result (tray_icon::menu), not tray_icon::Result.
         let build_menu = || -> tray_icon::menu::Result<()> {
             menu.append(&list_item)?;
             menu.append(&lock_item)?;
@@ -208,29 +207,29 @@ mod imp {
 
         let (rgba, w, h) = tray_icon_rgba();
         let tray = Icon::from_rgba(rgba, w, h)
-            .map_err(|e| format!("아이콘 생성 실패: {e}"))
-            .and_then(|icon| build_menu().map(|_| icon).map_err(|e| format!("메뉴 구성 실패: {e}")))
+            .map_err(|e| format!("could not create the icon: {e}"))
+            .and_then(|icon| build_menu().map(|_| icon).map_err(|e| format!("could not build the menu: {e}")))
             .and_then(|icon| {
                 TrayIconBuilder::new()
                     .with_menu(Box::new(menu))
-                    // 좌클릭은 목록 토글, 우클릭은 메뉴. (메뉴가 좌클릭을 가로채지 않게)
+                    // Left click toggles the list, right click opens the menu.
                     .with_menu_on_left_click(false)
                     .with_tooltip("Ymemo")
                     .with_icon(icon)
                     .build()
-                    .map_err(|e| format!("트레이 생성 실패: {e}"))
+                    .map_err(|e| format!("could not create the tray: {e}"))
             });
 
         let tray = match tray {
             Ok(t) => Some(t),
             Err(e) => {
-                eprintln!("트레이 아이콘 등록 실패 (트레이 없이 계속): {e}");
+                eprintln!("could not register the tray icon, continuing without it: {e}");
                 None
             }
         };
 
-        // 이벤트 루프 스레드에서 주기적으로 채널을 비우며 클릭/메뉴를 처리한다.
-        // (Windows 는 트레이 메시지를 winit 메시지 펌프가 넘겨주고, 여기서 수신)
+        // Drain the event channels from the event-loop thread; on Windows the winit message
+        // pump delivers the tray messages that show up here.
         let poll = slint::Timer::default();
         poll.start(slint::TimerMode::Repeated, Duration::from_millis(120), move || {
             while let Ok(ev) = MenuEvent::receiver().try_recv() {
@@ -243,7 +242,7 @@ mod imp {
                 }
             }
             while let Ok(ev) = TrayIconEvent::receiver().try_recv() {
-                // 좌클릭 한 번(버튼을 뗀 순간) → 목록 토글.
+                // One left click, on release, toggles the list.
                 if let TrayIconEvent::Click {
                     button: MouseButton::Left,
                     button_state: MouseButtonState::Up,
@@ -264,7 +263,7 @@ mod imp {
 }
 
 // ===========================================================================
-// 그 외 플랫폼 (macOS 등): 트레이 미구현
+// Other platforms (macOS, ...): no tray backend
 // ===========================================================================
 #[cfg(not(any(target_os = "linux", windows)))]
 mod imp {
@@ -275,7 +274,7 @@ mod imp {
     }
 
     pub fn start() -> TrayHandle {
-        eprintln!("이 플랫폼에는 트레이 백엔드가 없어 트레이 없이 동작합니다.");
+        eprintln!("no tray backend on this platform, running without a tray");
         TrayHandle
     }
 }

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Ymemo .rpm 패키지 빌더 (Fedora). build-deb.sh 의 RPM 판.
+# Ymemo .rpm builder (Fedora), the RPM counterpart of build-deb.sh.
 #
-# 앱과 (감춘) syncthing 을 한 패키지에 넣고, `dnf remove ymemo` 시 함께 지운다.
-# 미리 빌드한 바이너리를 담으므로 rpmbuild 의 %build 는 없다 (ymemo.spec 참고).
+# The app and a hidden copy of syncthing go in one package and leave together on
+# `dnf remove ymemo`. The binaries are prebuilt, so there is no %build (see ymemo.spec).
 #
-# 사용법:
+# Usage:
 #   build-rpm.sh --app <ymemo-desktop> --sync <syncthing> --version <x.y.z> \
 #                --outdir <dir> [--arch x86_64]
 set -euo pipefail
@@ -17,12 +17,12 @@ while [ $# -gt 0 ]; do
     --version) VERSION="$2"; shift 2;;
     --outdir) OUTDIR="$2"; shift 2;;
     --arch) ARCH="$2"; shift 2;;
-    *) echo "알 수 없는 인자: $1" >&2; exit 2;;
+    *) echo "unknown argument: $1" >&2; exit 2;;
   esac
 done
-[ -n "$APP" ] && [ -f "$APP" ] || { echo "--app 바이너리 없음: $APP" >&2; exit 2; }
-[ -n "$SYNC" ] && [ -f "$SYNC" ] || { echo "--sync 바이너리 없음: $SYNC" >&2; exit 2; }
-[ -n "$VERSION" ] || { echo "--version 필요" >&2; exit 2; }
+[ -n "$APP" ] && [ -f "$APP" ] || { echo "no --app binary: $APP" >&2; exit 2; }
+[ -n "$SYNC" ] && [ -f "$SYNC" ] || { echo "no --sync binary: $SYNC" >&2; exit 2; }
+[ -n "$VERSION" ] || { echo "--version is required" >&2; exit 2; }
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ASSETS="$HERE/../assets"
@@ -43,4 +43,4 @@ rpmbuild -bb \
 
 mkdir -p "$OUTDIR"
 cp "$TOP"/RPMS/"$ARCH"/ymemo-*.rpm "$OUTDIR"/
-echo "생성: $(ls "$OUTDIR"/ymemo-*."$ARCH".rpm)"
+echo "built: $(ls "$OUTDIR"/ymemo-*."$ARCH".rpm)"

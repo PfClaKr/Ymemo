@@ -1,28 +1,31 @@
-# 릴리스 태그(v*)가 올라오면 데스크탑/모바일 바이너리를 빌드해 GitHub Release 에 첨부한다.
+# On a release tag (v*), build the desktop and mobile binaries and attach them to a GitHub
+# Release.
 #
-# 산출물:
-#  - ymemo_<ver>_amd64.deb               (Debian/Ubuntu 패키지 — syncthing 포함, 제거 시 함께 삭제)
-#  - ymemo-<ver>-1.fc*.x86_64.rpm        (Fedora 패키지 — syncthing 포함, 제거 시 함께 삭제)
-#  - ymemo-setup-x86_64.exe              (Windows 인스톨러 — syncthing 포함, 제거 시 함께 삭제)
-#  - ymemo-<ver>-android-<abi>.apk       (Android 앱. ABI 별로 나눈다 — 아래 설명 참조)
-#  - ymemo-ffi-ios.zip                   (aarch64 기기·시뮬레이터 .a)
+# Artifacts:
+#  - ymemo_<ver>_amd64.deb         Debian/Ubuntu package, syncthing included and removed with it
+#  - ymemo-<ver>-1.fc*.x86_64.rpm  Fedora package, likewise
+#  - ymemo-setup-x86_64.exe        Windows installer, likewise
+#  - ymemo-<ver>-android-<abi>.apk Android app, one per ABI (see below)
+#  - ymemo-ffi-ios.zip             aarch64 device and simulator .a
 #
-# 데스크탑은 syncthing 을 인스톨러 안에 번들해 `ymemo-sync`(.exe) 로 리네임 설치한다.
-# 사용자는 syncthing 을 별도로 받지 않고, 앱 제거 시 함께 지워진다 (packaging/ 참조).
+# The desktop installers bundle syncthing, renamed to `ymemo-sync`(.exe): the user never
+# installs it separately and it goes away with the app (see packaging/).
 #
-# Android 는 APK 까지 만든다. frb 바인딩과 android/ 프로젝트를 저장소에 커밋해 두었으므로
-# CI 에서 codegen 없이 그대로 빌드된다.
-#   ABI 별로 쪼갠다(--split-per-abi): 셋을 한 APK 에 담으면 76MB 가 되는데, 어느 기기든
-#   자기 ABI 하나만 쓰므로 나누면 23~32MB 다. 요즘 폰은 거의 전부 arm64-v8a 이고,
-#   armeabi-v7a 는 구형 32비트, x86_64 는 에뮬레이터용이다.
-#   **서명 주의:** flutter create 기본 설정대로 릴리스 APK 가 *디버그 키* 로 서명된다
-#   (apps/mobile/android/app/build.gradle.kts 의 signingConfig). 설치·배포는 되지만
-#   Play 스토어에는 올릴 수 없고, 기기에서 "출처를 알 수 없는 앱" 허용이 필요하다.
-#   정식 서명은 keystore 를 secrets 로 받아 붙이면 된다 (windows-desktop 잡의 인증서 처리와 같은 방식).
-# iOS 는 아직 라이브러리까지만 — IPA 는 서명 설정이 갖춰지면 추가한다.
+# Android builds all the way to an APK. The frb bindings and the android/ project are
+# committed, so CI needs no codegen.
+#   --split-per-abi: one fat APK would be 76MB while a device only ever uses its own ABI, so
+#   split it into 23-32MB each. Modern phones are almost all arm64-v8a; armeabi-v7a covers
+#   older 32-bit devices and x86_64 the emulator.
+#   **Signing:** as flutter create leaves it, the release APK is signed with the *debug* key
+#   (see signingConfig in apps/mobile/android/app/build.gradle.kts). It installs and
+#   distributes fine, but cannot go to the Play Store and needs "unknown sources" enabled.
+#   Real signing means a keystore from secrets, as the windows-desktop job does with its
+#   certificate.
+# iOS stops at the library; an IPA follows once signing is set up.
 #
-# 주의: GitHub 소유 액션(actions/*)만 쓴다 — 서드파티 액션 차단 정책에서도 돌도록.
-# 툴체인은 러너에 내장된 rustup, 릴리스 생성은 내장 gh CLI 를 쓴다.
+# Only GitHub-owned actions (actions/*) are used, so this still runs under a policy that
+# blocks third-party ones. The toolchain is the runner's rustup and releases go through its
+# gh CLI.
 
 name: release
 
@@ -31,12 +34,12 @@ on:
     tags: ["v*"]
 
 env:
-  # 데스크탑에 번들할 syncthing 버전 (통째 번들 결정 사항)
+  # syncthing version bundled with the desktop packages
   SYNCTHING_VERSION: v2.1.2
-  # Android 빌드에 쓰는 Flutter. 로컬에서 검증한 버전을 못 박는다(stable 은 계속 움직인다).
+  # Flutter for the Android build, pinned to the version verified locally
   FLUTTER_VERSION: 3.47.0
-  # **apps/mobile/android/app/build.gradle.kts 의 ndkVersion 과 같아야 한다.**
-  # gradle 과 cargo-ndk 가 서로 다른 NDK 를 쓰면 찾기 어려운 링크 오류가 난다.
+  # **Must match ndkVersion in apps/mobile/android/app/build.gradle.kts.**
+  # Different NDKs in gradle and cargo-ndk produce link errors that are hard to trace.
   ANDROID_NDK_VERSION: 28.2.13676358
 
 jobs:
@@ -44,19 +47,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # 태그 버전과 워크스페이스 버전이 어긋나면 인스톨러 파일명과 앱이 표시하는 버전이
-      # 달라진다 (설정 창의 버전은 CARGO_PKG_VERSION). 빌드 전에 여기서 막는다.
+      # A tag that disagrees with the workspace version would put one number in the
+      # installer's name and another in the app (CARGO_PKG_VERSION). Stop before building.
       - name: Check tag matches workspace version
         run: |
           tag="${GITHUB_REF_NAME#v}"
           crate=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           if [ "$tag" != "$crate" ]; then
-            echo "::error::태그 v$tag 와 Cargo.toml 의 $crate 가 다릅니다. workspace.package.version 을 맞추고 태그를 다시 미세요."
+            echo "::error::tag v$tag does not match $crate in Cargo.toml; fix workspace.package.version and re-push the tag."
             exit 1
           fi
-      # slint 의존성이 edition2024 를 요구 → 최신 stable 로 갱신
+      # Slint's dependencies need edition2024
       - run: rustup update stable
-      # GUI(slint) 를 빌드하지 않으므로 fontconfig 불필요
+      # No GUI build here, so no fontconfig needed
       - run: cargo test -p ymemo-core -p ymemo-ffi -p ymemo-i18n
 
   linux-desktop:
@@ -73,7 +76,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           curl -sL -o st.tar.gz "https://github.com/syncthing/syncthing/releases/download/${SYNCTHING_VERSION}/syncthing-linux-amd64-${SYNCTHING_VERSION}.tar.gz"
           tar xzf st.tar.gz
-          # build-deb.sh 가 syncthing 을 ymemo-sync 로 리네임해 /usr/lib/ymemo 에 넣는다.
+          # build-deb.sh renames syncthing to ymemo-sync under /usr/lib/ymemo.
           bash packaging/linux/build-deb.sh \
             --app target/release/ymemo-desktop \
             --sync "syncthing-linux-amd64-${SYNCTHING_VERSION}/syncthing" \
@@ -83,14 +86,14 @@ jobs:
           name: linux-desktop
           path: dist/*.deb
 
-  # Fedora .rpm — 데스크탑을 Fedora 컨테이너 안에서 빌드해 glibc/라이브러리를
-  # 그 배포판에 맞춘다. (ubuntu 러너 위의 container: 는 GitHub 내장 기능이라 액션 정책과 무관)
+  # Fedora .rpm: build the desktop inside a Fedora container so glibc and the libraries match
+  # that distribution. `container:` is built into GitHub Actions, so no action policy applies.
   fedora-desktop:
     needs: test
     runs-on: ubuntu-latest
     container: fedora:latest
     steps:
-      # checkout 이 제대로 되도록 git/tar 를 먼저 깐다.
+      # git and tar first, so checkout works properly.
       - run: dnf install -y git tar curl >/dev/null
       - uses: actions/checkout@v4
       - name: Install build deps
@@ -105,7 +108,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           curl -sL -o st.tar.gz "https://github.com/syncthing/syncthing/releases/download/${SYNCTHING_VERSION}/syncthing-linux-amd64-${SYNCTHING_VERSION}.tar.gz"
           tar xzf st.tar.gz
-          # build-rpm.sh 도 syncthing 을 ymemo-sync 로 리네임해 /usr/lib/ymemo 에 넣는다.
+          # build-rpm.sh does the same rename into /usr/lib/ymemo.
           bash packaging/linux/build-rpm.sh \
             --app target/release/ymemo-desktop \
             --sync "syncthing-linux-amd64-${SYNCTHING_VERSION}/syncthing" \
@@ -125,41 +128,42 @@ jobs:
       - name: Build installer (bundles hidden syncthing)
         shell: pwsh
         env:
-          # 선택: 이 시크릿들이 있으면 바이너리·인스톨러를 코드 서명한다. 없으면 미서명 빌드.
-          #   WINDOWS_CERT_PFX_BASE64 : PFX 인증서를 base64 로 인코딩한 값
-          #   WINDOWS_CERT_PASSWORD   : PFX 암호
+          # Optional: with these secrets the binaries and installer are code-signed;
+          # without them the build is unsigned.
+          #   WINDOWS_CERT_PFX_BASE64 : the PFX certificate, base64 encoded
+          #   WINDOWS_CERT_PASSWORD   : its password
           WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
           curl.exe -sL -o st.zip "https://github.com/syncthing/syncthing/releases/download/$env:SYNCTHING_VERSION/syncthing-windows-amd64-$env:SYNCTHING_VERSION.zip"
           Expand-Archive st.zip -DestinationPath st -Force
-          # 인스톨러(.iss)가 참조하는 이름으로 리네임해 .iss 옆에 둔다.
+          # Rename to the names the .iss expects and put them beside it.
           Copy-Item target/release/ymemo-desktop.exe packaging/windows/Ymemo.exe -Force
           Copy-Item "st/syncthing-windows-amd64-$env:SYNCTHING_VERSION/syncthing.exe" packaging/windows/ymemo-sync.exe -Force
 
-          # ---- 코드 서명 (인증서 시크릿이 있을 때만) ----
+          # ---- Code signing, only with the certificate secrets ----
           $signArgs = @()
           if ($env:WINDOWS_CERT_PFX_BASE64) {
-            Write-Host "인증서 발견 → 바이너리·인스톨러 서명."
+            Write-Host "certificate found, signing the binaries and installer"
             [IO.File]::WriteAllBytes("$PWD/cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
             $signtool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
                          Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1).FullName
             $ts = "http://timestamp.digicert.com"
-            # 앱·sync 바이너리 먼저 서명 (인스톨러 안에 들어가기 전에).
+            # Sign the app and sync binaries before they go into the installer.
             & $signtool sign /fd sha256 /f "$PWD/cert.pfx" /p $env:WINDOWS_CERT_PASSWORD /tr $ts /td sha256 `
               packaging/windows/Ymemo.exe packaging/windows/ymemo-sync.exe
-            if ($LASTEXITCODE -ne 0) { throw "바이너리 서명 실패" }
-            # 인스톨러/언인스톨러 서명은 ISCC 에 위임 ($f = 서명할 파일 자리표시자).
+            if ($LASTEXITCODE -ne 0) { throw "signing the binaries failed" }
+            # ISCC signs the installer and uninstaller ($f is its file placeholder).
             $signCmd = "`"$signtool`" sign /fd sha256 /f `"$PWD/cert.pfx`" /p $env:WINDOWS_CERT_PASSWORD /tr $ts /td sha256 `$f"
             $signArgs = @("/DSign", "/Symemosign=$signCmd")
           } else {
-            Write-Host "인증서 시크릿 없음 → 미서명 빌드 (SmartScreen 경고가 뜰 수 있음)."
+            Write-Host "no certificate secrets, building unsigned (SmartScreen may warn)"
           }
 
           choco install innosetup --no-progress -y
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" @signArgs packaging/windows/ymemo.iss
-          if ($LASTEXITCODE -ne 0) { throw "ISCC 실패" }
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
           Remove-Item -Force "$PWD/cert.pfx" -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item packaging/windows/Output/ymemo-setup-x86_64.exe dist/
@@ -173,7 +177,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Gradle 8 은 JDK 17 을 요구한다 (러너 기본 JDK 는 더 높을 수 있다).
+      # Gradle 8 wants JDK 17; the runner's default may be newer.
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -186,7 +190,7 @@ jobs:
           echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
       - name: Install the pinned NDK
         run: |
-          # 러너 이미지마다 sdkmanager 위치가 다를 수 있어 두 곳을 다 본다.
+          # sdkmanager sits in different places across runner images.
           sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           [ -x "$sdkmanager" ] || sdkmanager="$(command -v sdkmanager)"
           "$sdkmanager" "ndk;$ANDROID_NDK_VERSION" > /dev/null
@@ -196,7 +200,7 @@ jobs:
           rustup update stable
           rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
           cargo install cargo-ndk
-      # gradle 은 Rust 를 모른다 (cargokit 미적용) → .so 를 먼저 구워 jniLibs 에 넣어 준다.
+      # Gradle knows nothing about Rust (no cargokit), so build the .so files into jniLibs first.
       - name: Build the rust library for all ABIs
         run: |
           cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \

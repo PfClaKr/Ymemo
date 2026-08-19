@@ -1,8 +1,8 @@
-//! 스티커 창: 생성·편집 저장·닫기와 자석 스냅.
+//! Sticky windows: creating them, saving edits, closing them, and magnetic snapping.
 //!
-//! 스티커는 메모 하나당 창 하나이고, 본문이 곧 편집칸이다(디바운스 자동 저장).
-//! 스냅은 창 좌표를 읽고 쓸 수 있는 환경(X11·Windows)에서만 동작하며, 못 읽으면
-//! 조용히 아무 일도 하지 않는다(네이티브 Wayland).
+//! One window per memo, with the body doubling as the editor (debounced autosave). Snapping
+//! only works where window coordinates can be read and written (X11, Windows); elsewhere
+//! (native Wayland) it silently does nothing.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -23,20 +23,20 @@ use crate::list::refresh_list;
 use crate::state::{touch, Ctx, StickyEntry, Stickies, APP};
 use crate::{apply_strings, PhotoRow, StickyWindow, Strings};
 
-/// 사진 표시 크기(em)의 기준이 되는 본문 폰트 크기(논리 px).
-/// **`ui/sticky.slint` 의 본문 `font-size` 와 같아야 한다** — 이 값으로 em 을 픽셀로 바꾼다.
+/// Body font size (logical px) that photo sizes in em are measured against.
+/// **Must match the body `font-size` in `ui/sticky.slint`.**
 const BODY_FONT_PX: f64 = 13.0;
 
-/// 본문 편집 후 자동 저장까지의 디바운스.
+/// Debounce between an edit and the autosave.
 pub(crate) const SAVE_DEBOUNCE: Duration = Duration::from_millis(800);
-/// 스티커 제목 바 높이 (접힌 상태의 창 높이, app.slint 와 일치해야 함).
+/// Title bar height, i.e. the collapsed window height; must match app.slint.
 pub(crate) const BAR_HEIGHT: f32 = 28.0;
-/// 자석 스냅 거리 (논리 px). 이 거리 안이면 화면/다른 스티커 테두리에 달라붙는다.
+/// Snap distance in logical px; within it, edges stick to the screen or another sticky.
 pub(crate) const SNAP_DIST: f32 = 12.0;
-/// 스티커 위치 감시(스냅 판정) 주기.
+/// How often sticky positions are polled for snapping.
 pub(crate) const SNAP_INTERVAL: Duration = Duration::from_millis(90);
 
-/// 스티커 창에 띄울 본문. 구버전 메모(제목만 있고 본문이 빈)는 제목을 본문으로 승격.
+/// Body text for the window; an older memo with only a title promotes it to the body.
 pub(crate) fn sticky_text(memo: &Memo) -> String {
     if memo.body.is_empty() && !memo.title.is_empty() {
         memo.title.clone()
@@ -45,7 +45,7 @@ pub(crate) fn sticky_text(memo: &Memo) -> String {
     }
 }
 
-/// 본문 첫 비어있지 않은 줄 → 목록/제목 바에 쓸 제목.
+/// First non-empty line of the body, used as the title in the list and title bar.
 pub(crate) fn derive_title(text: &str) -> String {
     text.lines()
         .find(|l| !l.trim().is_empty())
@@ -56,13 +56,13 @@ pub(crate) fn derive_title(text: &str) -> String {
         .collect()
 }
 
-/// 편집된 본문을 vault 에 저장한다 (제목은 첫 줄에서 유도).
+/// Saves an edited body to the vault, deriving the title from its first line.
 pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) {
     let mut guard = ctx.vault.borrow_mut();
     let Some(v) = guard.as_mut() else { return };
     let mut memo = match v.store().get(id) {
         Ok(Some(m)) => m,
-        _ => return, // 삭제된 메모의 잔여 편집은 버린다
+        _ => return, // drop leftover edits of a deleted memo
     };
     let title = derive_title(text);
     if memo.body == text && memo.title == title {
@@ -72,22 +72,22 @@ pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) {
     memo.body = text.to_string();
     memo.updated_at = now_millis();
     if let Err(e) = v.upsert(&memo) {
-        eprintln!("메모 저장 실패: {e}");
+        eprintln!("could not save the memo: {e}");
         return;
     }
     refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
-    // 제목 바에도 새 제목 반영.
+    // Reflect the new title in the title bar.
     if let Some(entry) = ctx.stickies.borrow().get(id) {
         entry.window.set_memo_title(SharedString::from(memo.title));
     }
 }
 
-/// 새 메모를 만들고 그 스티커 창을 연다. (목록 ＋ 버튼, 스티커 ＋ 버튼 공용)
+/// Creates a memo and opens its sticky; shared by the + button in both windows.
 pub(crate) fn new_memo(ctx: &Ctx) {
     touch(ctx);
     let mut memo = Memo::new("", "");
     {
-        // 새 메모의 색/투명도 기본값은 환경설정에서 온다.
+        // Color and opacity defaults come from the settings.
         let s = ctx.settings.borrow();
         memo.color = s.default_color.clone();
         memo.opacity = s.default_opacity as i64;
@@ -96,18 +96,18 @@ pub(crate) fn new_memo(ctx: &Ctx) {
         let mut guard = ctx.vault.borrow_mut();
         let Some(v) = guard.as_mut() else { return };
         if let Err(e) = v.upsert(&memo) {
-            eprintln!("메모 생성 실패: {e}");
+            eprintln!("could not create the memo: {e}");
             return;
         }
         refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
     }
     if let Err(e) = open_sticky(ctx, &memo, true) {
-        eprintln!("스티커 창 열기 실패: {e}");
+        eprintln!("could not open the sticky window: {e}");
     }
 }
 
-/// 스티커 창을 숨기고 레지스트리에서 제거를 예약한다.
-/// (창 자신의 콜백 안에서 즉시 drop 하면 위험하므로 이벤트 루프 다음 턴으로 미룬다)
+/// Hides a sticky and schedules its removal from the registry; dropping the window inside
+/// its own callback is unsafe, so it waits for the next event-loop turn.
 pub(crate) fn close_sticky(stickies: &Stickies, id: &str) {
     if let Some(entry) = stickies.borrow().get(id) {
         entry.save_timer.stop();
@@ -120,18 +120,18 @@ pub(crate) fn close_sticky(stickies: &Stickies, id: &str) {
     });
 }
 
-/// 이 메모의 첨부 사진을 읽어 Slint 모델로 만든다.
+/// Builds the Slint model of a memo's photos.
 ///
-/// 사진은 vault 안에서 암호문이라 **메모리에서 복호화·디코딩해** 넘긴다(평문을 임시 파일로
-/// 흘리지 않는다). 아직 동기화되지 않았거나 디코딩할 수 없는 형식이면 `missing` 으로 두고
-/// UI 가 그 사실을 알린다 — 빈 자리로 두면 사용자는 사진이 사라진 줄 안다.
+/// Photos are ciphertext inside the vault, so they are decrypted and decoded **in memory** —
+/// no plaintext ever reaches a temp file. A photo that has not synced yet, or that cannot be
+/// decoded, is marked `missing` so the UI can say so; an empty gap would read as data loss.
 pub(crate) fn photo_rows(ctx: &Ctx, memo_id: &str) -> Vec<PhotoRow> {
     let guard = ctx.vault.borrow();
     let Some(v) = guard.as_ref() else { return Vec::new() };
     let list = match v.store().attachments_of(memo_id) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("첨부 조회 실패: {e}");
+            eprintln!("could not read the attachments: {e}");
             return Vec::new();
         }
     };
@@ -155,7 +155,7 @@ pub(crate) fn photo_rows(ctx: &Ctx, memo_id: &str) -> Vec<PhotoRow> {
         .collect()
 }
 
-/// 사진 바이트 → Slint 이미지 (RGBA8). 지원하지 않는 포맷이면 None.
+/// Photo bytes to an RGBA8 Slint image; `None` for an unsupported format.
 fn decode_image(bytes: &[u8]) -> Option<slint::Image> {
     let decoded = image::load_from_memory(bytes).ok()?.into_rgba8();
     let (w, h) = decoded.dimensions();
@@ -164,7 +164,7 @@ fn decode_image(bytes: &[u8]) -> Option<slint::Image> {
     Some(slint::Image::from_rgba8(buffer))
 }
 
-/// 열려 있는 스티커의 사진 목록을 다시 채운다 (첨부 추가·크기 변경·원격 병합 후).
+/// Refills an open sticky's photo list after an add, a resize or a remote merge.
 pub(crate) fn refresh_photos(ctx: &Ctx, memo_id: &str) {
     let rows = photo_rows(ctx, memo_id);
     if let Some(entry) = ctx.stickies.borrow().get(memo_id) {
@@ -174,7 +174,7 @@ pub(crate) fn refresh_photos(ctx: &Ctx, memo_id: &str) {
     }
 }
 
-/// 워커 스레드가 고른 사진. 이벤트 루프로 넘겨야 하므로 `Send` 인 값만 담는다.
+/// A photo chosen by the worker thread. Only `Send` values, since it crosses to the event loop.
 struct PhotoPick {
     bytes: Vec<u8>,
     name: String,
@@ -183,18 +183,19 @@ struct PhotoPick {
     height: i64,
 }
 
-/// 파일 대화상자를 워커 스레드에서 띄우고, 고른 사진만 이벤트 루프로 돌려보낸다.
+/// Opens the file dialog on a worker thread and sends only the chosen photo back.
 ///
-/// `rfd` 의 동기 API 는 Linux(xdg-portal)에서 포털 응답을 블로킹으로 기다린다 — UI
-/// 스레드에서 부르면 대화상자가 떠 있는 내내 이벤트 루프가 멈춰 다른 스티커도, 병합·자리
-/// 비움 타이머도 전부 정지한다. 그래서 고르기와 디코딩은 워커에서 하고 결과만 넘긴다.
-/// `Ctx` 는 `Rc` 라 스레드를 못 넘으므로 되돌아온 쪽에서 `APP` 으로 되찾는다.
+/// `rfd`'s synchronous API blocks waiting for the portal's answer on Linux (xdg-portal), so
+/// calling it from the UI thread would freeze the event loop for as long as the dialog is
+/// open — every other sticky, the merge timer and the idle timer with it. Picking and
+/// decoding therefore happen on the worker and only the result comes back. `Ctx` is an `Rc`
+/// and cannot cross threads, so the other side recovers it through `APP`.
 ///
-/// `picking` 은 대화상자 중복 방지용이다. 예전엔 UI 가 멈춰 있어 📎 를 두 번 누를 수
-/// 없었지만, 이제는 누를 수 있어 대화상자가 겹쳐 뜬다.
+/// `picking` keeps a second dialog from opening: the UI used to be frozen, so the attach
+/// button could not be pressed twice; now it can.
 fn spawn_photo_picker(memo_id: String, title: String, picking: Arc<AtomicBool>) {
     if picking.swap(true, Ordering::SeqCst) {
-        return; // 이미 대화상자가 떠 있다
+        return; // a dialog is already open
     }
     std::thread::spawn(move || {
         let pick = pick_photo(&title);
@@ -207,20 +208,20 @@ fn spawn_photo_picker(memo_id: String, title: String, picking: Arc<AtomicBool>) 
     });
 }
 
-/// (워커 스레드) 사진을 고르고 읽어 온다. 취소하거나 읽을 수 없으면 `None`.
+/// (Worker thread) Picks a photo and reads it; `None` on cancel or a read error.
 fn pick_photo(title: &str) -> Option<PhotoPick> {
     let path = rfd::FileDialog::new()
         .add_filter("image", &["png", "jpg", "jpeg"])
         .set_title(title)
-        .pick_file()?; // 사용자가 취소
+        .pick_file()?; // cancelled
     let bytes = match std::fs::read(&path) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("사진 읽기 실패: {e}");
+            eprintln!("could not read the photo: {e}");
             return None;
         }
     };
-    // 원본 픽셀 크기는 여기서 재서 코어에 넘긴다(코어엔 디코더가 없다).
+    // Measure the original size here; the core has no decoder.
     let (width, height) = image::load_from_memory(&bytes)
         .map(|img| (img.width() as i64, img.height() as i64))
         .unwrap_or((0, 0));
@@ -233,10 +234,10 @@ fn pick_photo(title: &str) -> Option<PhotoPick> {
     Some(PhotoPick { bytes, name, mime, width, height })
 }
 
-/// (이벤트 루프) 고른 사진을 vault 에 붙이고 스티커를 다시 그린다.
+/// (Event loop) Attaches the chosen photo to the vault and redraws the sticky.
 ///
-/// 대화상자가 떠 있는 동안 자리 비움 잠금이 걸렸을 수 있다 — 그러면 vault 가 없으니
-/// 조용히 버린다(잠긴 뒤에 몰래 쓰지 않는다).
+/// The idle auto-lock may have fired while the dialog was open; without a vault the photo is
+/// dropped silently, rather than written after locking.
 fn attach_photo(memo_id: &str, pick: PhotoPick) {
     let ctx = APP.with(|a| a.borrow().as_ref().map(|app| app.ctx.clone()));
     let Some(ctx) = ctx else { return };
@@ -245,14 +246,14 @@ fn attach_photo(memo_id: &str, pick: PhotoPick) {
         let Some(v) = guard.as_mut() else { return };
         if let Err(e) = v.attach(memo_id, &pick.bytes, &pick.name, pick.mime, pick.width, pick.height)
         {
-            eprintln!("사진 붙이기 실패: {e}");
+            eprintln!("could not attach the photo: {e}");
             return;
         }
     }
     refresh_photos(&ctx, memo_id);
 }
 
-/// 메모의 스티커 창을 연다 (이미 열려 있으면 앞으로 가져오기만).
+/// Opens a memo's sticky, or raises it when already open.
 pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     if let Some(entry) = ctx.stickies.borrow().get(&memo.id) {
         entry.window.show()?;
@@ -261,7 +262,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     }
 
     let window = StickyWindow::new()?;
-    // 전역은 인스턴스마다 새로 생기므로, 새 스티커에도 현재 문구를 넣어 준다.
+    // The globals are per instance, so fill this one with the current strings.
     apply_strings(&window.global::<Strings>());
     window.set_memo_title(SharedString::from(memo.title.clone()));
     window.set_memo_text(SharedString::from(sticky_text(memo)));
@@ -269,7 +270,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     window.set_sticky_opacity(memo.opacity as f32);
     window.set_photos(slint::ModelRc::new(slint::VecModel::from(photo_rows(ctx, &memo.id))));
 
-    // 📎 → 파일 대화상자에서 사진을 골라 붙인다 (대화상자는 워커 스레드에서).
+    // Attach: pick a photo from the file dialog, which runs on a worker thread.
     {
         let ctx = ctx.clone();
         let id = memo.id.clone();
@@ -280,7 +281,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
-    // ＋/− 로 사진 표시 크기 변경. 값은 em 이라 모바일에도 같은 비율로 반영된다.
+    // Resize a photo. The value is in em, so mobile sees the same proportion.
     {
         let ctx = ctx.clone();
         let id = memo.id.clone();
@@ -292,7 +293,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
                 let Ok(Some(a)) = v.store().get_attachment(photo_id.as_str()) else { return };
                 let next = a.width_em_milli + (delta_em * 1000.0) as i64;
                 if let Err(e) = v.set_attachment_width(photo_id.as_str(), next) {
-                    eprintln!("사진 크기 변경 실패: {e}");
+                    eprintln!("could not resize the photo: {e}");
                 }
             }
             refresh_photos(&ctx, &id);
@@ -302,7 +303,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     let dirty = Rc::new(Cell::new(false));
     let expanded_height = Rc::new(Cell::new(0.0f32));
 
-    // 본문 편집 → dirty 표시 + 디바운스 저장 예약.
+    // An edit marks the sticky dirty and arms the debounced save.
     {
         let ctx = ctx.clone();
         let id = memo.id.clone();
@@ -326,7 +327,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
-    // ✕ → 저장 후 창 닫기 (메모 삭제 아님).
+    // Close: save first, then hide the window; the memo stays.
     {
         let ctx = ctx.clone();
         let id = memo.id.clone();
@@ -344,13 +345,13 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
-    // ＋ → 새 메모.
+    // New memo.
     {
         let ctx = ctx.clone();
         window.on_new_memo(move || new_memo(&ctx));
     }
 
-    // 🎨 → 스티커 색 변경 (본문/제목은 유지, 색만 저장 → 기기 간 동기화).
+    // Color change: only the color is stored, and it syncs across devices.
     {
         let ctx = ctx.clone();
         let id = memo.id.clone();
@@ -367,7 +368,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
                 m.color = key.to_string();
                 m.updated_at = now_millis();
                 if let Err(e) = v.upsert(&m) {
-                    eprintln!("색 변경 실패: {e}");
+                    eprintln!("could not change the color: {e}");
                     return;
                 }
                 refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
@@ -378,7 +379,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
-    // 투명도 슬라이더 → 손을 뗄 때 한 번 저장 (드래그 중 미리보기는 UI 가 처리).
+    // Opacity is stored once on release; the UI previews it while dragging.
     {
         let ctx = ctx.clone();
         let id = memo.id.clone();
@@ -394,13 +395,13 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
             m.opacity = pct;
             m.updated_at = now_millis();
             if let Err(e) = v.upsert(&m) {
-                eprintln!("투명도 변경 실패: {e}");
+                eprintln!("could not change the opacity: {e}");
             }
         });
     }
 
-    // 제목 바 끌기 시작. 창 좌표를 읽을 수 있으면(X11) 우리가 직접 창을 옮기며
-    // 실시간 스냅을 걸고, 아니면(네이티브 Wayland) OS 이동에 맡기고 false 를 돌려준다.
+    // Drag start. Where window coordinates are readable (X11) we move the window ourselves
+    // and snap live; otherwise (native Wayland) the OS moves it and this returns false.
     {
         let weak = window.as_weak();
         let ctx = ctx.clone();
@@ -426,8 +427,9 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
-    // 끄는 중 매 포인터 이동: 포인터를 따라갈 위치를 구한 뒤 스냅해서 창을 옮긴다.
-    // 스냅된 뒤에도 포인터의 절대 위치로 다시 계산하므로, 임계값을 벗어나면 자연히 떨어진다.
+    // Every pointer move while dragging: compute where the pointer wants the window, snap
+    // that, and move there. It is recomputed from the absolute pointer position every time,
+    // so pulling past the threshold releases the snap on its own.
     {
         let weak = window.as_weak();
         let ctx = ctx.clone();
@@ -451,8 +453,8 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
             }) else {
                 return;
             };
-            // 창 위치 + 창 안 포인터 좌표 = 화면상의 포인터 위치. 여기서 잡은 지점을
-            // 빼면 "스냅이 없었다면 있었을" 위치가 나온다.
+            // Window position plus in-window pointer position is the pointer on screen;
+            // minus the grab point gives where the window would be without snapping.
             let want = (
                 pos.0 + (mx * scale) as i32 - grab.0,
                 pos.1 + (my * scale) as i32 - grab.1,
@@ -469,8 +471,8 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
-    // 손을 뗌: 끌기 상태를 지우고, 스냅 타이머가 이걸 "방금 멈춘 창"으로 오인해
-    // 한 번 더 스냅하지 않도록 관측 위치를 현재 값으로 맞춰 둔다.
+    // Release: clear the drag state and record the current position, so the snap timer does
+    // not mistake this for a window that just stopped and snap it again.
     {
         let weak = window.as_weak();
         let ctx = ctx.clone();
@@ -491,7 +493,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
-    // 제목 바 더블클릭 → 얇은 바 접기/펴기 (창 크기를 직접 바꾼다).
+    // Double-clicking the title bar folds the window to a thin bar and back.
     {
         let weak = window.as_weak();
         let expanded_height = expanded_height.clone();
@@ -533,19 +535,19 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// 자석 스냅
+// Magnetic snapping
 // ---------------------------------------------------------------------------
 
-/// 물리 px 사각형. (x, y, w, h)
+/// A rectangle in physical px: (x, y, w, h).
 pub(crate) type Rect = (i32, i32, i32, i32);
 
-/// 스냅 타이머 한 틱: 열린 스티커 창들의 위치를 읽어 "방금 멈춘" 창을 스냅한다.
+/// One snap tick: read every open sticky's position and snap the ones that just stopped.
 pub(crate) fn snap_tick(stickies: &Stickies) {
     let map = stickies.borrow();
     if map.is_empty() {
         return;
     }
-    // 1) 보이는 창들의 현재 rect/scale/모니터를 읽는다 (X11 에서만 성공).
+    // 1) Read rect, scale and monitor of the visible windows (only works on X11).
     let mut rects: Vec<(String, Rect, f32, Option<Rect>)> = Vec::new();
     for (id, e) in map.iter() {
         if !e.window.window().is_visible() {
@@ -566,26 +568,26 @@ pub(crate) fn snap_tick(stickies: &Stickies) {
         }
     }
 
-    // 2) 각 창: 지난 틱 대비 정지 여부로 이동 종료를 감지하고, 멈춘 순간 한 번 스냅.
+    // 2) Compare with the last tick to detect the end of a move, then snap once.
     for (idx, (id, rect, scale, mon)) in rects.iter().enumerate() {
         let Some(e) = map.get(id) else { continue };
         let cur = (rect.0, rect.1);
-        // 제목 바로 끄는 중인 창은 drag-move 가 이미 실시간으로 스냅한다.
+        // A window being dragged is already snapped live by drag_move.
         if e.drag_grab.get().is_some() {
             e.last_pos.set(Some(cur));
             e.moving.set(false);
             continue;
         }
         if e.last_pos.get() != Some(cur) {
-            // 아직 움직이는 중.
+            // Still moving.
             e.moving.set(true);
             e.last_pos.set(Some(cur));
             continue;
         }
         if !e.moving.get() {
-            continue; // 계속 정지 상태 — 손대지 않는다.
+            continue; // still at rest, leave it alone
         }
-        // 방금 멈췄다 → 다른 창들 + 화면 테두리에 스냅.
+        // Just stopped: snap to the other windows and the screen edges.
         let others: Vec<Rect> = rects
             .iter()
             .enumerate()
@@ -604,7 +606,7 @@ pub(crate) fn snap_tick(stickies: &Stickies) {
     }
 }
 
-/// 나를 뺀, 화면에 보이는 다른 스티커들의 물리 px rect (끌기 중 스냅 대상).
+/// Physical-px rects of the other visible stickies, i.e. the snap targets.
 pub(crate) fn other_rects(map: &HashMap<String, StickyEntry>, me: &str) -> Vec<Rect> {
     let mut out = Vec::new();
     for (id, e) in map.iter() {
@@ -623,34 +625,34 @@ pub(crate) fn other_rects(map: &HashMap<String, StickyEntry>, me: &str) -> Vec<R
     out
 }
 
-/// 활성 창 rect 를 화면 테두리·다른 창 테두리에 스냅한 새 좌표를 계산한다(순수 함수).
-/// threshold 이내의 가장 가까운 후보로 각 축을 독립적으로 끌어당긴다.
+/// Pure function computing the snapped position of `rect` against the screen and the other
+/// windows: each axis is pulled independently to its nearest candidate within `threshold`.
 pub(crate) fn snap_position(rect: Rect, others: &[Rect], monitor: Option<Rect>, threshold: i32) -> (i32, i32) {
     let (x, y, w, h) = rect;
     let mut xs: Vec<i32> = Vec::new();
     let mut ys: Vec<i32> = Vec::new();
 
     if let Some((mx, my, mw, mh)) = monitor {
-        xs.push(mx); // 왼쪽 화면 테두리
-        xs.push(mx + mw - w); // 오른쪽 화면 테두리
-        ys.push(my); // 위 화면 테두리
-        ys.push(my + mh - h); // 아래 화면 테두리
+        xs.push(mx); // left screen edge
+        xs.push(mx + mw - w); // right screen edge
+        ys.push(my); // top screen edge
+        ys.push(my + mh - h); // bottom screen edge
     }
     for &(ox, oy, ow, oh) in others {
-        xs.push(ox + ow); // 내 왼쪽 ↔ 상대 오른쪽 (오른쪽에 인접)
-        xs.push(ox - w); // 내 오른쪽 ↔ 상대 왼쪽 (왼쪽에 인접)
-        xs.push(ox); // 왼쪽 정렬
-        xs.push(ox + ow - w); // 오른쪽 정렬
-        ys.push(oy + oh); // 아래에 인접
-        ys.push(oy - h); // 위에 인접
-        ys.push(oy); // 위 정렬
-        ys.push(oy + oh - h); // 아래 정렬
+        xs.push(ox + ow); // sit to its right
+        xs.push(ox - w); // sit to its left
+        xs.push(ox); // align left edges
+        xs.push(ox + ow - w); // align right edges
+        ys.push(oy + oh); // sit below
+        ys.push(oy - h); // sit above
+        ys.push(oy); // align top edges
+        ys.push(oy + oh - h); // align bottom edges
     }
 
     (nearest(&xs, x, threshold), nearest(&ys, y, threshold))
 }
 
-/// 후보들 중 v 에 threshold 이내로 가장 가까운 값. 없으면 v 그대로.
+/// Nearest candidate to `v` within `threshold`, or `v` itself.
 pub(crate) fn nearest(cands: &[i32], v: i32, threshold: i32) -> i32 {
     let mut best = v;
     let mut best_dist = threshold + 1;
@@ -672,19 +674,19 @@ mod tests {
 
     #[test]
     fn snaps_to_screen_left_edge_when_near() {
-        // 창이 화면 왼쪽에서 5px 안쪽 → 왼쪽 테두리(0)로 붙는다.
+        // 5px from the left edge snaps to 0.
         let mon = Some((0, 0, 1920, 1080));
         let (nx, ny) = snap_position((5, 300, 260, 240), &[], mon, T);
         assert_eq!(nx, 0);
-        assert_eq!(ny, 300); // 세로는 후보 없음 → 유지
+        assert_eq!(ny, 300); // no vertical candidate
     }
 
     #[test]
     fn snaps_right_edge_to_neighbor_left() {
-        // 내 오른쪽(x+w=260)이 상대 왼쪽(268)과 8px 차 → 인접하도록 x 를 8 당긴다.
+        // Our right edge (260) is 8px from their left (268), so x shifts by 8.
         let other = (268, 300, 200, 240);
         let (nx, _) = snap_position((0, 300, 260, 240), &[other], None, T);
-        assert_eq!(nx, 268 - 260); // 내 오른쪽이 상대 왼쪽에 딱 붙음
+        assert_eq!(nx, 268 - 260); // flush against the neighbor
     }
 
     #[test]
@@ -697,7 +699,7 @@ mod tests {
 
     #[test]
     fn aligns_tops_of_adjacent_stickies() {
-        // 세로로 3px 어긋난 두 창 → 위 정렬로 붙는다.
+        // 3px of vertical offset snaps the tops together.
         let other = (300, 100, 200, 240);
         let (_, ny) = snap_position((0, 103, 260, 240), &[other], None, T);
         assert_eq!(ny, 100);

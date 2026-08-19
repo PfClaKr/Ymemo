@@ -1,20 +1,20 @@
-//! 기기 페어링 코드.
+//! Device pairing codes.
 //!
-//! 새 기기 추가 절차 (양방향):
-//! 1. 기기 A 가 자기 Syncthing 기기 ID 를 페어링 코드(QR/문자열)로 보여준다.
-//! 2. 기기 B 가 코드를 읽어 A 를 peer 로 등록하고, B 도 자기 코드를 A 에 등록한다.
-//! 3. Syncthing 이 vault 디렉터리를 전파하면 B 는 동기화된 `vault.json` 의 salt +
-//!    마스터 암호 입력만으로 같은 키를 유도한다 → 별도 키 전송 불필요.
+//! Adding a device, both ways round:
+//! 1. Device A shows its Syncthing device ID as a pairing code (string or QR).
+//! 2. Device B reads it and registers A as a peer; B registers its own code with A.
+//! 3. Once Syncthing carries the vault over, B derives the same key from the synced
+//!    `vault.json` salt plus the master password — no key is ever transmitted.
 //!
-//! 코드는 버전 프리픽스가 붙은 단순 문자열이라 QR 로 렌더링하기 좋다.
+//! The code is a plain versioned string, which makes it easy to render as a QR.
 
 use anyhow::{bail, Result};
 use ymemo_i18n::t;
 
-/// 페어링 코드 포맷 버전 프리픽스.
+/// Version prefix of the code format.
 const PREFIX: &str = "YMEMO1:";
 
-/// 페어링 코드 한 장 — 현재는 Syncthing 기기 ID 만 담는다.
+/// A pairing code; currently just a Syncthing device ID.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PairingCode {
     pub syncthing_device_id: String,
@@ -25,12 +25,12 @@ impl PairingCode {
         Self { syncthing_device_id: syncthing_device_id.into() }
     }
 
-    /// QR/전송용 문자열. 예: `YMEMO1:ABCDEFG-...`
+    /// Encodes for QR or copy-paste, e.g. `YMEMO1:ABCDEFG-...`
     pub fn encode(&self) -> String {
         format!("{PREFIX}{}", self.syncthing_device_id)
     }
 
-    /// 문자열 파싱. 프리픽스 없이 기기 ID 만 붙여넣은 경우도 허용한다.
+    /// Parses a code; a bare device ID without the prefix is accepted too.
     pub fn decode(s: &str) -> Result<Self> {
         let id = s.trim().strip_prefix(PREFIX).unwrap_or(s.trim()).trim();
         if id.len() < 7 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {

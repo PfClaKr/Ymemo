@@ -1,12 +1,11 @@
-//! Flutter 에 노출하는 API.
+//! The API exposed to Flutter.
 //!
-//! flutter_rust_bridge v2 는 이 모듈의 공개 함수/구조체에서 Dart 코드를 생성한다.
-//! Dart 쪽은 스레드를 넘나들며 호출하므로 vault 는 전역 Mutex 로 감싼다
-//! (rusqlite Connection 은 Sync 가 아님).
+//! flutter_rust_bridge v2 generates Dart from the public functions and structs here. Dart
+//! calls in from several threads, so the vault sits behind a global Mutex (a rusqlite
+//! Connection is not Sync).
 //!
-//! 동기화(Syncthing)는 모바일에선 gomobile `.aar` 번들로 별도 처리 예정이라
-//! 여기엔 아직 없다. 로그 병합(rebuild)은 이미 코어에 있으므로, 파일만 도착하면
-//! `sync_rebuild` 로 반영된다.
+//! Transport (Syncthing) is missing: on mobile it will arrive as a gomobile `.aar`. Merging
+//! already lives in the core, so once the files land, `sync_rebuild` picks them up.
 
 use std::sync::Mutex;
 
@@ -14,7 +13,7 @@ use anyhow::{anyhow, Result};
 use ymemo_core::{now_millis, pairing::PairingCode, vault::Vault, Attachment, Group, Memo, Store};
 use ymemo_i18n::t;
 
-/// 열린 vault (앱 프로세스당 하나).
+/// The open vault; one per app process.
 static VAULT: Mutex<Option<Vault>> = Mutex::new(None);
 
 fn with_vault<T>(f: impl FnOnce(&mut Vault) -> Result<T>) -> Result<T> {
@@ -23,7 +22,7 @@ fn with_vault<T>(f: impl FnOnce(&mut Vault) -> Result<T>) -> Result<T> {
     f(vault)
 }
 
-/// Dart 로 넘기는 메모 표현. (코어 `Memo` 와 동일 필드; frb 가 Dart 클래스로 변환)
+/// A memo as handed to Dart; same fields as the core `Memo`.
 pub struct FfiMemo {
     pub id: String,
     pub title: String,
@@ -50,20 +49,20 @@ impl From<Memo> for FfiMemo {
     }
 }
 
-/// Dart 로 넘기는 첨부 사진 표현.
+/// A photo attachment as handed to Dart.
 ///
-/// 바이트는 들어 있지 않다 — 사진은 수 MB 라 목록마다 실어 나르면 낭비다.
-/// 그릴 때 [`attachment_bytes`] 로 해시를 주고 따로 받는다.
+/// The bytes are not included: photos run to megabytes and carrying them in every list
+/// would be waste. Fetch them by hash with [`attachment_bytes`] when drawing.
 pub struct FfiAttachment {
     pub id: String,
     pub memo_id: String,
     pub hash: String,
     pub name: String,
     pub mime: String,
-    /// 원본 픽셀 크기 (비율 계산용, 모르면 0).
+    /// Original pixel size for the aspect ratio; 0 when unknown.
     pub width_px: i64,
     pub height_px: i64,
-    /// 표시 너비 (em 의 1/1000). 실제 픽셀 = 이 값/1000 × 이 플랫폼 기본 폰트 px.
+    /// Display width in 1/1000 em; pixels = value / 1000 * the platform's base font px.
     pub width_em_milli: i64,
     pub created_at: i64,
 }
@@ -84,7 +83,7 @@ impl From<Attachment> for FfiAttachment {
     }
 }
 
-/// Dart 로 넘기는 그룹(폴더) 표현.
+/// A group (folder) as handed to Dart.
 pub struct FfiGroup {
     pub id: String,
     pub name: String,
@@ -105,27 +104,26 @@ impl From<Group> for FfiGroup {
     }
 }
 
-/// 코어가 돌려주는 에러 메시지의 언어를 정한다 (`"ko"` / `"en"`, `"ko-KR"` 같은 로캘도 됨).
+/// Sets the language of core error messages (`"ko"`, `"en"`, or a locale like `"ko-KR"`).
 ///
-/// 모르는 값이면 시스템 로캘로 추정한다. Dart 쪽 UI 문구는 Flutter 가 따로 관리하지만,
-/// 코어 에러는 이 함수로 맞춰야 화면에서 언어가 섞이지 않는다. 다른 API 를 부르기 전에
-/// 한 번 호출하면 되고, 언어를 바꿀 때마다 다시 부르면 된다.
+/// An unknown value falls back to the system locale. Call it once before the other APIs,
+/// and again whenever the language changes, or the screen ends up mixing languages.
 pub fn set_language(code: String) {
     let lang = ymemo_i18n::Lang::parse(&code).unwrap_or_else(ymemo_i18n::system_lang);
     ymemo_i18n::set_lang(lang);
 }
 
-/// 지금 쓰이는 코어 메시지 언어 코드.
+/// Language code currently used for core messages.
 pub fn language() -> String {
     ymemo_i18n::lang().code().to_string()
 }
 
-/// 모바일 UI 문구 한 벌 (현재 언어). Dart 가 시작할 때 한 번 받아 들고 쓴다.
+/// The mobile UI strings in the current language; Dart fetches these once at startup.
 ///
-/// 문구를 Dart 에 따로 두면 언어가 갈라진다 — 코어 에러는 카탈로그, 화면 문구는
-/// 하드코딩이 되어 한쪽만 번역된다. 키를 **Rust 에서** 읽어 넘기므로 `ymemo-i18n` 의
-/// "코드가 쓰는 키가 카탈로그에 있는지" 테스트가 모바일 문구까지 함께 지켜 준다.
-/// (언어를 바꾼 뒤엔 [`set_language`] 를 부르고 이걸 다시 받으면 된다.)
+/// Keeping them in Dart instead would split the languages — catalog for core errors,
+/// hardcoded for the screens. Reading the keys **in Rust** also puts mobile strings under
+/// `ymemo-i18n`'s "every key used in code exists in the catalog" test. After
+/// [`set_language`], fetch this again.
 pub struct FfiStrings {
     pub add_photo: String,
     pub body_hint: String,
@@ -150,7 +148,7 @@ pub struct FfiStrings {
     pub unlock: String,
 }
 
-/// 현재 언어의 모바일 문구를 모아 돌려준다.
+/// Collects the mobile strings for the current language.
 pub fn mobile_strings() -> FfiStrings {
     FfiStrings {
         add_photo: t!("mobile.add_photo"),
@@ -177,8 +175,8 @@ pub fn mobile_strings() -> FfiStrings {
     }
 }
 
-/// vault 열기(없으면 생성). `vault_dir` 는 동기화 대상 디렉터리,
-/// `cache_db_path` 는 기기 로컬 SQLite 파일 경로.
+/// Opens the vault, creating it if needed. `vault_dir` is the synced directory,
+/// `cache_db_path` the device-local SQLite file.
 pub fn vault_open(vault_dir: String, cache_db_path: String, password: String) -> Result<()> {
     let store = Store::open(&cache_db_path)?;
     let vault = Vault::open_or_create(&vault_dir, password.as_bytes(), store)?;
@@ -186,18 +184,18 @@ pub fn vault_open(vault_dir: String, cache_db_path: String, password: String) ->
     Ok(())
 }
 
-/// vault 닫기 (로그아웃).
+/// Closes the vault (log out).
 pub fn vault_close() -> Result<()> {
     *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = None;
     Ok(())
 }
 
-/// 최근 수정순 메모 목록.
+/// Memos, most recently updated first.
 pub fn memo_list() -> Result<Vec<FfiMemo>> {
     with_vault(|v| Ok(v.store().list()?.into_iter().map(FfiMemo::from).collect()))
 }
 
-/// 메모 생성(id=None) 또는 수정(id=Some). 생성된/수정된 메모의 id 를 돌려준다.
+/// Creates (`id` = None) or updates (`id` = Some) a memo and returns its id.
 pub fn memo_upsert(id: Option<String>, title: String, body: String) -> Result<String> {
     with_vault(|v| {
         let memo = match id {
@@ -218,12 +216,12 @@ pub fn memo_upsert(id: Option<String>, title: String, body: String) -> Result<St
     })
 }
 
-/// 메모 삭제.
+/// Deletes a memo.
 pub fn memo_delete(id: String) -> Result<()> {
     with_vault(|v| v.delete(&id))
 }
 
-/// 스티커 색상 팔레트 키 변경.
+/// Sets the palette key.
 pub fn memo_set_color(id: String, color: String) -> Result<()> {
     with_vault(|v| {
         let mut memo = v
@@ -236,7 +234,7 @@ pub fn memo_set_color(id: String, color: String) -> Result<()> {
     })
 }
 
-/// 스티커 불투명도(%) 변경. 범위를 벗어나면 코어가 잘라낸다.
+/// Sets the opacity in percent; the core clamps out-of-range values.
 pub fn memo_set_opacity(id: String, opacity: i64) -> Result<()> {
     with_vault(|v| {
         let mut memo = v
@@ -249,7 +247,7 @@ pub fn memo_set_opacity(id: String, opacity: i64) -> Result<()> {
     })
 }
 
-/// 메모를 그룹으로 옮긴다. `group_id` 가 빈 문자열이면 최상위로 뺀다.
+/// Moves a memo into a group; an empty `group_id` moves it to the top level.
 pub fn memo_set_group(id: String, group_id: String) -> Result<()> {
     with_vault(|v| {
         let mut memo = v
@@ -262,7 +260,7 @@ pub fn memo_set_group(id: String, group_id: String) -> Result<()> {
     })
 }
 
-/// 한 메모에 붙은 사진 목록 (붙인 순서).
+/// Photos on one memo, in the order they were added.
 pub fn attachment_list(memo_id: String) -> Result<Vec<FfiAttachment>> {
     with_vault(|v| {
         Ok(v.store()
@@ -273,10 +271,10 @@ pub fn attachment_list(memo_id: String) -> Result<Vec<FfiAttachment>> {
     })
 }
 
-/// 사진을 메모에 붙인다. `data` 는 **원본 파일 바이트 그대로**.
+/// Attaches a photo; `data` is the original file bytes.
 ///
-/// `width_px`/`height_px` 는 Dart 가 디코딩해서 넘긴다(코어에 이미지 디코더를 두지
-/// 않는다). 모르면 0 — 그 경우 표시 비율이 1:1 로 취급된다.
+/// Dart decodes and passes `width_px`/`height_px`, so the core needs no image decoder. Pass
+/// 0 when unknown and the aspect ratio falls back to 1:1.
 pub fn attachment_add(
     memo_id: String,
     data: Vec<u8>,
@@ -291,32 +289,32 @@ pub fn attachment_add(
     })
 }
 
-/// 사진 바이트(평문). 아직 동기화가 안 됐으면 에러 — UI 는 자리표시자를 그리면 된다.
+/// Photo bytes. Errors while the blob has not synced yet; draw a placeholder instead.
 pub fn attachment_bytes(hash: String) -> Result<Vec<u8>> {
     with_vault(|v| v.attachment_bytes(&hash))
 }
 
-/// 이 기기에 사진 파일이 도착했는가 (없으면 바이트를 청하지 말 것).
+/// Whether the photo has arrived on this device; do not ask for bytes if it has not.
 pub fn attachment_has_blob(hash: String) -> Result<bool> {
     with_vault(|v| Ok(v.has_blob(&hash)))
 }
 
-/// 표시 너비 변경 (em 의 1/1000). 다른 기기에도 같은 비율로 반영된다.
+/// Sets the display width in 1/1000 em; other devices see the same proportion.
 pub fn attachment_set_width(id: String, width_em_milli: i64) -> Result<()> {
     with_vault(|v| v.set_attachment_width(&id, width_em_milli))
 }
 
-/// 메모에서 사진을 뗀다. blob 파일은 남는다(GC 없음).
+/// Detaches a photo; the blob file stays (no GC).
 pub fn attachment_remove(id: String) -> Result<()> {
     with_vault(|v| v.detach(&id))
 }
 
-/// 전체 그룹 목록 (이름순).
+/// All groups, sorted by name.
 pub fn group_list() -> Result<Vec<FfiGroup>> {
     with_vault(|v| Ok(v.store().list_groups()?.into_iter().map(FfiGroup::from).collect()))
 }
 
-/// 그룹 생성. 만들어진 그룹 id 를 돌려준다.
+/// Creates a group and returns its id.
 pub fn group_create(name: String, parent_id: String) -> Result<String> {
     with_vault(|v| {
         let mut group = Group::new(name);
@@ -326,7 +324,7 @@ pub fn group_create(name: String, parent_id: String) -> Result<String> {
     })
 }
 
-/// 그룹 이름 변경.
+/// Renames a group.
 pub fn group_rename(id: String, name: String) -> Result<()> {
     with_vault(|v| {
         let mut group = v
@@ -339,7 +337,7 @@ pub fn group_rename(id: String, name: String) -> Result<()> {
     })
 }
 
-/// 그룹을 다른 그룹 밑으로 옮긴다. 자기 자손 밑으로는 옮길 수 없다(순환 방지).
+/// Moves a group under another; moving it into its own subtree is rejected.
 pub fn group_move(id: String, parent_id: String) -> Result<()> {
     with_vault(|v| {
         let groups = v.store().list_groups()?;
@@ -356,19 +354,19 @@ pub fn group_move(id: String, parent_id: String) -> Result<()> {
     })
 }
 
-/// 그룹 삭제. 안의 메모/하위 그룹은 지워지지 않고 상위로 올라온다.
+/// Deletes a group; its memos and subgroups move up instead of being deleted.
 pub fn group_delete(id: String) -> Result<()> {
     with_vault(|v| v.delete_group(&id))
 }
 
-/// 다른 기기의 로그를 병합해 로컬 상태를 갱신한다.
-/// (전송 계층이 vault 디렉터리에 새 로그를 가져다 놓은 뒤 호출)
+/// Merges the other devices' logs into the local state; call it after the transport has
+/// delivered new logs.
 pub fn sync_rebuild() -> Result<()> {
     with_vault(|v| v.rebuild())
 }
 
-/// QR 스캔으로 받은 페어링 코드 검증 + 기기 ID 추출.
-/// (모바일 Syncthing 연동 전까지는 검증/표시에만 쓴다.)
+/// Validates a scanned pairing code and extracts the device id. Until mobile Syncthing
+/// lands, this is only used to check and display it.
 pub fn pairing_decode(code: String) -> Result<String> {
     Ok(PairingCode::decode(&code)?.syncthing_device_id)
 }
@@ -377,17 +375,17 @@ pub fn pairing_decode(code: String) -> Result<String> {
 mod tests {
     use super::*;
 
-    /// 이 crate 의 vault 는 **프로세스 전역**이라, 각자 vault 를 여는 테스트들이
-    /// 병렬로 돌면 서로의 상태를 덮어쓴다. 그래서 vault 를 쓰는 테스트는 이 잠금을 잡는다.
-    /// (실패로 poison 돼도 그대로 이어 쓴다 — 테스트 격리에만 쓰는 잠금이다.)
+    /// The vault is process-global, so tests that open one would clobber each other in
+    /// parallel; they take this lock instead. A poisoned lock is reused as-is, since it only
+    /// isolates tests.
     static VAULT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn lock_vault_for_test() -> std::sync::MutexGuard<'static, ()> {
         VAULT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// FFI 표면 왕복: open → upsert → list → update → delete → close.
-    /// (전역 VAULT 를 쓰므로 시나리오를 한 테스트에 몰아넣는다)
+    /// Round-trip over the FFI surface: open, upsert, list, update, delete, close. It is one
+    /// test because the vault is global.
     #[test]
     fn ffi_surface_roundtrip() {
         let _guard = lock_vault_for_test();
@@ -403,12 +401,12 @@ mod tests {
         )
         .unwrap();
 
-        let id = memo_upsert(None, "모바일 메모".into(), "본문".into()).unwrap();
+        let id = memo_upsert(None, "mobile memo".into(), "body".into()).unwrap();
         assert_eq!(memo_list().unwrap().len(), 1);
 
-        memo_upsert(Some(id.clone()), "수정됨".into(), "본문".into()).unwrap();
+        memo_upsert(Some(id.clone()), "edited".into(), "body".into()).unwrap();
         let all = memo_list().unwrap();
-        assert_eq!(all[0].title, "수정됨");
+        assert_eq!(all[0].title, "edited");
         assert_eq!(all[0].id, id);
 
         sync_rebuild().unwrap();
@@ -418,18 +416,18 @@ mod tests {
         assert!(memo_list().unwrap().is_empty());
 
         vault_close().unwrap();
-        // 닫힌 뒤엔 에러 — 그 문구가 카탈로그를 타는지도 함께 본다
-        // (하드코딩으로 되돌아가면 여기서 걸린다. 전역 VAULT 를 쓰므로 이 테스트 안에서 확인).
+        // Once closed, calls must fail with the catalog's message — a hardcoded string would
+        // be caught here.
         for code in ["en", "ko"] {
             set_language(code.into());
             let lang = ymemo_i18n::Lang::parse(code).unwrap();
             let Err(e) = memo_list() else {
-                panic!("닫힌 vault 인데 목록이 나왔다");
+                panic!("closed vault still listed memos");
             };
             assert_eq!(e.to_string(), ymemo_i18n::raw(lang, "core.vault_not_open").unwrap());
         }
 
-        // 재오픈: 로그에서 복원 (삭제까지 반영된 빈 상태)
+        // Reopen: restored from the logs, empty because the delete is in there too.
         vault_open(
             vault_dir.to_string_lossy().into(),
             db.to_string_lossy().into(),
@@ -442,7 +440,7 @@ mod tests {
         std::fs::remove_dir_all(&base).ok();
     }
 
-    /// 첨부 FFI 표면: 붙이기 → 목록 → 크기 변경 → 바이트 → 떼기.
+    /// Attachment surface: add, list, resize, read bytes, remove.
     #[test]
     fn attachment_surface_roundtrip() {
         let _guard = lock_vault_for_test();
@@ -455,7 +453,7 @@ mod tests {
         )
         .unwrap();
 
-        let memo_id = memo_upsert(None, "사진 메모".into(), "".into()).unwrap();
+        let memo_id = memo_upsert(None, "photo memo".into(), "".into()).unwrap();
         let photo = b"fake jpeg bytes".repeat(20);
         let a = attachment_add(
             memo_id.clone(),

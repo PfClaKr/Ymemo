@@ -1,34 +1,34 @@
-# Ymemo RPM (Fedora). 미리 빌드한 바이너리를 담는 패키지라 %build 단계가 없다.
-# build-rpm.sh 가 경로/버전을 --define 으로 넘긴다.
+# Ymemo RPM (Fedora). The binaries are prebuilt, so there is no %build step; build-rpm.sh
+# passes the paths and version with --define.
 #
-# .deb 와 같은 레이아웃: 앱과 (감춘) syncthing 을 함께 넣고, 제거 시 함께 지운다.
-#   /usr/lib/ymemo/ymemo        앱 본체
-#   /usr/lib/ymemo/ymemo-sync   syncthing (리네임)
-#   /usr/bin/ymemo              → ../lib/ymemo/ymemo 심볼릭 링크
+# Same layout as the .deb: the app plus a hidden syncthing, removed together.
+#   /usr/lib/ymemo/ymemo        the app
+#   /usr/lib/ymemo/ymemo-sync   syncthing, renamed
+#   /usr/bin/ymemo              symlink to ../lib/ymemo/ymemo
 
-# 미리 빌드한 바이너리를 그대로 담는다: debuginfo 추출/스트립을 끈다
-# (Go 로 만든 syncthing 은 스트립하면 깨질 수 있다).
+# The binaries ship as built, so debuginfo extraction and stripping are off; stripping the
+# Go-built syncthing can break it.
 %global debug_package %{nil}
 %global __os_install_post %{nil}
 
 Name:           ymemo
 Version:        %{ymemo_version}
 Release:        1%{?dist}
-Summary:        로컬 우선 P2P 암호화 스티커 메모
+Summary:        Local-first, P2P encrypted sticky notes
 
 License:        GPL-3.0-only
 URL:            https://github.com/PfClaKr/Ymemo
 
-# winit/렌더러가 런타임에 dlopen 하는 라이브러리는 ELF 스캔으로 안 잡히므로 명시한다.
-# (fontconfig·glibc 등 직접 링크분은 rpmbuild 가 자동으로 Requires 에 넣는다)
+# Libraries winit and the renderer dlopen at runtime are invisible to the ELF scan, so they
+# are listed here; rpmbuild picks up the directly linked ones itself.
 Requires:       mesa-libGL
 Requires:       libxkbcommon
-# 한국어 등 CJK 표시용 폰트 (약한 의존 — 없어도 설치는 된다)
+# CJK fonts, a weak dependency: it installs fine without them.
 Recommends:     google-noto-sans-cjk-fonts
 
 %description
-Ymemo 는 자체 서버 없이 기기끼리 직접 동기화되는 E2E 암호화 메모 앱이다.
-동기화 전송 계층(syncthing)을 함께 포함하며, 제거 시 함께 삭제된다.
+Ymemo is an E2E encrypted memo app that syncs directly between devices with no server of its
+own. It bundles its sync transport (syncthing), which is removed along with it.
 
 %install
 rm -rf %{buildroot}
@@ -43,8 +43,8 @@ for s in 16 32 48 64 128 256; do
 done
 install -Dm644 %{license_file} %{buildroot}/usr/share/licenses/ymemo/LICENSE
 
-# 아이콘/데스크탑 DB 갱신. 최신 Fedora 는 hicolor-icon-theme·desktop-file-utils 의
-# file trigger 로 자동 처리하지만, 구버전/최소설치 대비로 명시해 둔다(있을 때만 실행).
+# Refresh the icon and desktop databases. Current Fedora does this through file triggers,
+# but older or minimal installs may not, so run them where they exist.
 %post
 command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -qtf /usr/share/icons/hicolor >/dev/null 2>&1 || :
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q /usr/share/applications >/dev/null 2>&1 || :
@@ -63,4 +63,4 @@ command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q
 
 %changelog
 * Wed Jul 22 2026 PfClaKr <noreply@ymemo.dev> - 0.1.0-1
-- CI 로 빌드한 릴리스 패키지.
+- Release package built by CI.

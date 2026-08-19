@@ -3,21 +3,21 @@ import { Strings } from "@i18n";
 import { Palette } from "theme.slint";
 
 // ---------------------------------------------------------------------------
-// 스티커 창: 메모 하나 = 창 하나. 무프레임.
-//  - 제목 바 드래그 → 이동 (Rust 가 처리; X11 에선 자석 스냅까지)
-//  - 제목 바 더블클릭 → 얇은 바 접기/펴기
-//  - 🎨 색 팔레트, ＋ 새 메모, ✕ 창 닫기(삭제 아님)
+// Sticky window: one frameless window per memo.
+//  - Drag the title bar to move it (handled by Rust, with snapping on X11).
+//  - Double-click the title bar to fold it to a thin bar.
+//  - Palette, new memo, and close (which does not delete).
 // ---------------------------------------------------------------------------
-/// 스티커에 붙은 사진 한 장 (Rust 가 채운다).
+/// One photo on a sticky, filled in by Rust.
 ///
-/// 표시 크기는 코어가 em(폰트 배수)으로 동기화하고, Rust 가 이 창의 본문 폰트 크기로
-/// 환산해 여기엔 이미 픽셀로 들어온다 — Slint 는 그대로 그리기만 한다.
+/// The core syncs the display size in em; Rust converts it against this window's body font,
+/// so the values arriving here are already pixels.
 export struct PhotoRow {
     id: string,
     image: image,
     width-px: length,
     height-px: length,
-    // 아직 이 기기로 동기화되지 않았거나 디코딩할 수 없는 사진.
+    // Not synced to this device yet, or undecodable.
     missing: bool,
 }
 
@@ -35,30 +35,31 @@ export component StickyWindow inherits Window {
     in property <string> memo-title;
     in-out property <string> memo-text;
     in property <string> sticky-color: "yellow";
-    // 창 불투명도(%). 슬라이더를 끄는 동안엔 UI 가 직접 갱신(미리보기)하므로 in-out.
+    // Window opacity in percent; in-out because the slider previews it live.
     in-out property <float> sticky-opacity: 100;
     in property <bool> collapsed: false;
     in property <[PhotoRow]> photos: [];
     callback edited(string);
-    // 사진 붙이기 (Rust 가 파일 대화상자를 연다).
+    // Attach a photo; Rust opens the file dialog.
     callback add-photo();
-    // 사진 표시 크기 조절 (변화량, em). 코어가 em 으로 동기화하므로 모바일에도 반영된다.
+    // Resize a photo by a delta in em, which the core syncs to mobile too.
     callback resize-photo(string, float);
     callback close-requested();
     callback new-memo();
     callback set-color(string);
     callback set-opacity(float);
     callback toggle-collapse();
-    // 제목 바 끌기: OS 에 맡기지 않고 포인터를 직접 따라간다 — 그래야 손을 떼기 전,
-    // 끄는 도중에 자석 스냅이 걸린다. 인자는 모두 창 좌상단 기준 논리 px.
-    //   begin-drag: 잡은 지점. 창 좌표를 못 다루는 환경(네이티브 Wayland)이면
-    //               Rust 가 OS 이동으로 폴백하고 false 를 돌려준다 → 이후 추적 중단.
+    // Title bar drag: we follow the pointer ourselves rather than leaving it to the OS, so
+    // snapping happens during the drag and not only on release. All arguments are logical px
+    // relative to the window's top-left corner.
+    //   begin-drag takes the grab point; where window coordinates are unavailable (native
+    //   Wayland) Rust falls back to the OS move and returns false, ending the tracking.
     callback begin-drag(float, float) -> bool;
-    callback drag-move(float, float);   // 현재 포인터 위치
+    callback drag-move(float, float);   // current pointer position
     callback drag-end();
 
     private property <bool> show-palette: false;
-    // 이번 누름이 끌기로 넘어갔는가 / 그 끌기를 우리가 직접 따라가는 중인가.
+    // Whether this press became a drag, and whether we are tracking it ourselves.
     private property <bool> drag-started: false;
     private property <bool> drag-manual: false;
 
@@ -66,24 +67,24 @@ export component StickyWindow inherits Window {
 
     Rectangle {
         background: Palette.bg(root.sticky-color);
-        // 각진 창 — 둥근 모서리 없음.
+        // Square corners.
         border-radius: 0px;
         border-width: 1px;
         border-color: Palette.bar(root.sticky-color).darker(0.15);
         clip: true;
-        // 창 전체(배경+글자)를 함께 흐리게 한다 — 데스크탑이 비쳐 보이는 위젯 느낌.
+        // Fade the whole window, text included, so the desktop shows through.
         opacity: root.sticky-opacity / 100;
 
         VerticalLayout {
-            // ---- 제목 바 (드래그 핸들 + 접기 토글) ----
+            // ---- Title bar: drag handle and fold toggle ----
             Rectangle {
-                // 접었을 때 창 높이(main.rs 의 BAR_HEIGHT)와 반드시 같아야 한다.
+                // Must match BAR_HEIGHT in sticky.rs, the folded window height.
                 height: 28px;
                 background: Palette.bar(root.sticky-color);
 
                 bar-ta := TouchArea {
                     moved => {
-                        // 4px 넘게 움직여야 끌기로 친다 (클릭·더블클릭 오인 방지).
+                        // Over 4px counts as a drag, so clicks are not misread.
                         if (!root.drag-started
                             && (self.mouse-x > self.pressed-x + 4px || self.mouse-x < self.pressed-x - 4px
                                 || self.mouse-y > self.pressed-y + 4px || self.mouse-y < self.pressed-y - 4px)) {
@@ -175,8 +176,8 @@ export component StickyWindow inherits Window {
                 }
             }
 
-            // ---- 색 · 투명도 패널 (🎨 로 토글) ----
-            // 색과 투명도를 함께 만지는 경우가 많아, 고른 뒤에도 패널을 닫지 않는다.
+            // ---- Color and opacity panel. It stays open after a pick, since the two are
+            // usually adjusted together. ----
             if root.show-palette: Rectangle {
                 height: 72px;
                 background: Palette.bar(root.sticky-color).darker(0.06);
@@ -210,10 +211,10 @@ export component StickyWindow inherits Window {
                         }
                         Slider {
                             horizontal-stretch: 1;
-                            minimum: 20; // 하한 — 코어의 MIN_OPACITY 와 맞춘다
+                            minimum: 20; // matches the core's MIN_OPACITY
                             maximum: 100;
                             value: root.sticky-opacity;
-                            // 끄는 동안엔 미리보기만, 손을 뗄 때 한 번 저장한다.
+                            // Preview while dragging, store once on release.
                             changed(v) => { root.sticky-opacity = v; }
                             released(v) => { root.set-opacity(v); }
                         }
@@ -229,7 +230,7 @@ export component StickyWindow inherits Window {
                 }
             }
 
-            // ---- 본문 (접힌 동안엔 창 높이가 제목 바와 같아 안 보인다) ----
+            // ---- Body; invisible while folded, as the window is only the title bar tall ----
             body := TextEdit {
                 visible: !root.collapsed;
                 min-height: 0;
@@ -240,9 +241,8 @@ export component StickyWindow inherits Window {
                 edited => { root.edited(self.text); }
             }
 
-            // ---- 첨부 사진 ----
-            // 스티커는 작으므로 사진이 있을 때만 자리를 준다. −/＋ 로 조절한 크기(em)는
-            // 코어를 통해 모바일과 공유된다.
+            // ---- Photos. Stickies are small, so this takes space only when there are any;
+            // the size chosen here is in em and reaches mobile through the core. ----
             if !root.collapsed && root.photos.length > 0: Flickable {
                 max-height: 240px;
                 viewport-height: photo-box.preferred-height;

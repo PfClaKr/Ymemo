@@ -1,8 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- 페어링 코드 QR 스캔용. 이것 말고는 권한을 쓰지 않는다 —
-         메모는 앱 전용 디렉터리에만 저장하고, 네트워크는 (장차) Syncthing 이 맡는다. -->
+    <!-- For scanning pairing QRs; the only permission the app asks for. Memos stay in the
+         app-private directory, and networking will belong to Syncthing. -->
     <uses-permission android:name="android.permission.CAMERA" />
-    <!-- 카메라가 없는 기기에도 설치는 되게 한다 (QR 스캔만 못 쓸 뿐). -->
+    <!-- Installable on devices without a camera; only QR scanning is unavailable. -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application

@@ -3,9 +3,9 @@ import { Strings } from "@i18n";
 import { Palette, TabButton } from "theme.slint";
 
 // ---------------------------------------------------------------------------
-// 환경설정 창. 여기의 값은 모두 **기기 로컬**이라 동기화하지 않는다
-// (settings.rs 의 Settings 와 1:1 대응).
-// 값은 "저장"을 눌러야 반영된다 — Rust 가 범위를 다듬어 되돌려 쓴다.
+// Settings window. Everything here is **device-local** and never synced; it maps one to one
+// onto Settings in settings.rs. Values apply on save, and Rust writes back the clamped
+// versions.
 // ---------------------------------------------------------------------------
 component SettingRow inherits VerticalLayout {
     in property <string> label;
@@ -33,18 +33,18 @@ export component SettingsWindow inherits Window {
     min-width: 340px;
     background: #2e2b27;
 
-    // Rust 가 현재 설정을 넣어 두고, 저장할 때 그대로 읽어 간다.
+    // Rust fills these in and reads them back on save.
     in-out property <string> lang-sel: "auto";
     in-out property <int> unlock-days: 30;
     in-out property <int> idle-minutes: 0;
     in-out property <string> default-color: "yellow";
     in-out property <int> default-opacity: 100;
     in-out property <int> merge-seconds: 15;
-    // 저장 결과 등 한 줄 안내.
+    // One-line status, e.g. the result of a save.
     in property <string> status;
-    // 지금 잠금이 풀려 있는가. 잠겨 있으면 "지금 잠그기"를 눌러도 의미가 없다.
+    // Whether the vault is unlocked; locking again is meaningless when it is not.
     in property <bool> unlocked: false;
-    // 실행 중인 앱 버전 (Rust 가 CARGO_PKG_VERSION 을 넣는다). 버그 신고에 필요하다.
+    // Running version (CARGO_PKG_VERSION), for bug reports.
     in property <string> app-version;
 
     callback apply();
@@ -62,7 +62,7 @@ export component SettingsWindow inherits Window {
             color: #f0ead6;
         }
 
-        // ---- 언어 ----
+        // ---- Language ----
         SettingRow {
             label: Strings.ui_settings_lang;
             hint: Strings.ui_settings_lang_hint;
@@ -73,8 +73,8 @@ export component SettingsWindow inherits Window {
                     ink: #d8d2c2;
                     clicked => { root.lang-sel = "auto"; }
                 }
-                // 언어 이름은 **번역하지 않는다** — 각 언어를 그 언어로 써야 지금 무슨
-                // 언어인지 모르는 사용자도 자기 언어를 찾을 수 있다.
+                // Language names are **not** translated: written in their own language,
+                // they are findable even by someone stuck in a language they cannot read.
                 TabButton {
                     label: "한국어";
                     active: root.lang-sel == "ko";
@@ -90,7 +90,7 @@ export component SettingsWindow inherits Window {
             }
         }
 
-        // ---- 잠금 ----
+        // ---- Locking ----
         SettingRow {
             label: Strings.ui_settings_unlock_days;
             hint: Strings.ui_settings_unlock_days_hint;
@@ -111,7 +111,7 @@ export component SettingsWindow inherits Window {
             }
         }
 
-        // ---- 새 메모 기본값 ----
+        // ---- New memo defaults ----
         SettingRow {
             label: Strings.ui_settings_default_color;
             HorizontalLayout {
@@ -137,7 +137,7 @@ export component SettingsWindow inherits Window {
                 spacing: 6px;
                 Slider {
                     horizontal-stretch: 1;
-                    minimum: 20; // 코어의 MIN_OPACITY 와 맞춘다
+                    minimum: 20; // matches the core's MIN_OPACITY
                     maximum: 100;
                     value: root.default-opacity;
                     changed(v) => { root.default-opacity = Math.round(v); }
@@ -153,7 +153,7 @@ export component SettingsWindow inherits Window {
             }
         }
 
-        // ---- 동기화 ----
+        // ---- Sync ----
         SettingRow {
             label: Strings.ui_settings_merge_seconds;
             hint: Strings.ui_settings_merge_seconds_hint;

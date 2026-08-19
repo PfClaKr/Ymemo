@@ -1,98 +1,102 @@
-# 보안 노트 (위협 모델)
+# Security notes (threat model)
 
-Ymemo 가 **무엇을 지키고 무엇을 못 지키는지** 적어 둔다. 설계 근거가 코드 주석에만
-흩어져 있으면, 나중에 "이건 안전하겠지"라고 잘못 가정하기 쉽다.
+What Ymemo does and does not protect. Written down here because design reasoning scattered
+across code comments is easy to misread later as "this must be safe".
 
-한 줄로: **동기화 경로에 올라가는 것은 전부 암호문이고, 기기 안에 있는 것은 그렇지 않다.**
+In one line: **everything that travels the sync path is ciphertext; everything inside a
+device is not.**
 
-## 지키려는 것
+## What it protects
 
-1. 메모 내용이 **기기 밖으로 평문으로 나가지 않는다** — 동기화 전송(Syncthing 노드·relay
-   서버·중간 네트워크)은 암호문만 본다.
-2. 마스터 암호를 모르면 vault 디렉터리를 통째로 가져가도 메모를 읽을 수 없다.
-3. 잠긴 상태의 데스크탑 앱은 암호 없이 메모를 보여주지 않는다.
+1. Memo contents **never leave a device in the clear** — the sync transport (Syncthing nodes,
+   relay servers, the network in between) only ever sees ciphertext.
+2. Without the master password, an entire copy of the vault directory reveals nothing.
+3. A locked desktop app shows no memos without the password.
 
-## 암호학
+## Cryptography
 
-| 항목 | 값 |
+| Item | Value |
 |---|---|
-| 키 유도 | Argon2id (`argon2` 크레이트 기본 파라미터), salt 16B |
-| 대칭 암호 | XChaCha20-Poly1305 (AEAD), nonce 24B — 레코드마다 `OsRng` 로 새로 뽑는다 |
-| 키 | 마스터 암호에서 유도한 **32B 대칭키 하나**. 단일 사용자·다기기 모델이라 기기별 키가 없다 |
-| 난수 | `OsRng` (salt · nonce · LAN 페어링 코드) |
+| Key derivation | Argon2id (`argon2` crate defaults), 16-byte salt |
+| Cipher | XChaCha20-Poly1305 (AEAD), 24-byte nonce drawn from `OsRng` per record |
+| Key | a **single 32-byte symmetric key** from the master password; one user with many devices means no per-device keys |
+| Randomness | `OsRng` (salt, nonces, LAN pairing codes) |
 
-`vault.json` 에는 salt(비밀 아님)와 `key_check`(고정 카나리를 암호화한 값)가 들어 있다.
-카나리 덕분에 틀린 암호를 즉시 알려줄 수 있지만, 동시에 **vault 를 손에 넣은 사람은
-오프라인에서 암호를 무제한으로 대입해 볼 수 있다**. 방어선은 Argon2id 의 비용과
-사용자가 고른 암호의 강도뿐이다 — 짧은 암호는 그만큼 짧게 버틴다.
+`vault.json` holds the salt (not secret) and `key_check`, a fixed canary encrypted with the
+key. The canary makes a wrong password fail immediately — and equally means **anyone holding
+the vault can try passwords offline without limit**. The only defenses are Argon2id's cost
+and the strength of the chosen password: a short password holds for a short time.
 
-## 디스크에 남는 것
+## What lands on disk
 
-앱 데이터 디렉터리(Linux `~/.local/share/Ymemo`) 기준:
+Relative to the app data directory (`~/.local/share/Ymemo` on Linux):
 
-| 파일 | 동기화 | 내용 |
+| File | Synced | Contents |
 |---|---|---|
-| `vault/vault.json` | O | salt + key_check (평문 JSON, 비밀 없음) |
-| `vault/logs/*.ymlog` | O | 기기별 append-only 로그. 레코드마다 **암호화됨** |
-| `vault/blobs/*.ymblob` | O | 첨부 사진 원본. **암호화됨**(파일 이름 = 평문의 sha256) |
-| `ymemo.db` | X | **평문 SQLite 캐시** — 메모 본문이 그대로 들어 있다 |
-| `session.json` | X | "자동 잠금 해제" 를 켰을 때만. **원시 32B 키**(hex) + 만료 시각. unix 0600 |
-| `settings.json` | X | 언어·잠금 시간 등 기기 로컬 설정 |
+| `vault/vault.json` | yes | salt + key_check (plain JSON, no secrets) |
+| `vault/logs/*.ymlog` | yes | per-device append-only log; every record is **encrypted** |
+| `vault/blobs/*.ymblob` | yes | attached photos, **encrypted** (file name = sha256 of the plaintext) |
+| `ymemo.db` | no | **plaintext SQLite cache** — memo bodies are in it as-is |
+| `session.json` | no | only with "stay unlocked" on: the **raw 32-byte key** (hex) plus an expiry; 0600 on unix |
+| `settings.json` | no | device-local settings (language, lock timeouts, ...) |
 
-두 줄이 중요하다:
+Two rows matter most:
 
-- **`ymemo.db` 는 암호화하지 않는다.** automerge 문서에서 다시 만들 수 있는
-  materialized view 이지만, 그 안의 메모 본문은 평문이다. 즉 **디스크 자체를 읽을 수 있는
-  사람은 앱이 잠겨 있어도 메모를 읽을 수 있다.** 디스크 전체 암호화(LUKS·BitLocker·FileVault)가
-  이 층의 실질적인 방어선이다.
-- **`session.json` 은 마스터 암호를 우회하는 값이다.** 설정의 "자동 잠금 해제 기간"을
-  1일 이상으로 두면 그 기간 동안 키가 디스크에 남는다. 매번 암호를 묻게 하려면 0으로 둔다.
-  (설정 창의 안내 문구도 같은 말을 한다.)
+- **`ymemo.db` is not encrypted.** It is a materialized view that can be rebuilt from the
+  automerge document, but the memo bodies inside it are plaintext. So **anyone who can read
+  the disk can read the memos, even while the app is locked.** Full-disk encryption (LUKS,
+  BitLocker, FileVault) is the real defense at this layer.
+- **`session.json` bypasses the master password.** Setting the stay-unlocked window to a day
+  or more leaves the key on disk for that long. Set it to 0 to be asked every time. (The
+  settings window says the same thing.)
 
-## 동기화 경로
+## The sync path
 
-Syncthing 은 **암호문 파일을 나르는 운반책**이고, 신뢰 대상이 아니다.
+Syncthing is a **courier for ciphertext** and is not trusted.
 
-- 기기 간 전송은 Syncthing 의 TLS 로 보호되고, 그 위에 우리 레코드 암호화가 또 있다.
-  relay 서버를 거치더라도 relay 는 암호문만 본다.
-- Syncthing REST API 는 localhost 에 바인딩하고 API 키로 보호된다. GUI 는 쓰지 않는다.
-- vault 폴더는 **페어링한 기기하고만** 공유된다. 공유 중인 기기는 설정에서 확인·해제할 수 있다.
+- Transfers are protected by Syncthing's TLS, with our own record encryption underneath, so
+  even a relay sees only ciphertext.
+- Its REST API binds to localhost and is protected by an API key. The GUI is never used.
+- The vault folder is shared **only with paired devices**, and the settings window can list
+  and revoke them.
 
-## 기기 연결(페어링)
+## Pairing
 
-두 경로가 있고, 둘 다 "코드를 아는 쪽"만 붙을 수 있게 만든다.
+Two paths, both requiring knowledge of a code.
 
-- **페어링 코드/QR** (`YMEMO1:<syncthing-device-id>`) — 사용자가 직접 옮긴다.
-- **LAN 6자리 코드** — 코드 엔트로피가 100만뿐이라, 코드 자체로 Argon2 키를 유도해
-  교환 메시지를 암호화한다. 복호화 성공이 곧 "상대도 코드를 안다"는 증명이다.
-  추가 방어: 1분 코드 회전, 최소 200ms 처리 간격(무차별 대입 속도 제한),
-  **페어링 모드일 때만 수신**, 그리고 설령 잘못 붙어도 vault 는 암호문이라
-  마스터 암호 없이는 아무것도 읽히지 않는다.
+- **Pairing code / QR** (`YMEMO1:<syncthing-device-id>`) — carried by the user.
+- **6-digit LAN code** — only a million possibilities, so the code itself derives an Argon2
+  key that encrypts the exchange; a successful decryption proves the peer knows the code.
+  Also: the code rotates every minute, attempts are throttled to 200ms, and the listener only
+  runs while pairing mode is on. Even a wrong pairing reveals nothing, since the vault stays
+  encrypted without the master password.
 
-## 지키지 못하는 것 (알고 있는 한계)
+## What it does not protect (known limits)
 
-- **침해된 기기.** 멀웨어·키로거·다른 사용자 계정의 root 권한 앞에서는 방법이 없다.
-  잠금이 풀린 동안 키와 평문은 프로세스 메모리에 있고, 메모리에서 키를 지우는(zeroize) 처리도 하지 않는다.
-- **메타데이터.** vault 디렉터리를 볼 수 있으면 기기 수(로그 파일 개수), 각 기기의 활동량
-  (로그 크기), 수정 시각(파일 mtime), Syncthing device-id 를 알 수 있다. 내용만 가려진다.
-- **첨부 사진의 메타데이터.** blob 은 **원본 크기 그대로** 저장하므로 사진 개수와 각 파일
-  크기가 그대로 드러난다. 또 암호화가 convergent(같은 평문 → 같은 암호문) 라서, 어떤 사진을
-  갖고 있는지 아는 상대는 "그 사진이 이 vault 에 있는지" 를 파일 이름만으로 확인할 수 있다.
-  같은 사진을 두 기기가 붙여도 파일 하나로 합쳐지게 하려면 이 성질이 필요했다 —
-  동기화 충돌을 없애는 대가로 이만큼을 내준 것이다.
-- **삭제해도 이력이 남는다.** 로그는 append-only 라 메모를 지워도 과거 레코드는 그대로 있다
-  (automerge 상 삭제로 표시될 뿐). "완전 삭제" 기능은 없다.
-- **기기 폐기(revocation) 가 없다.** 한 번 페어링한 기기는 이미 키를 유도해 갖고 있다.
-  공유를 해제해도 그 기기가 이미 받은 데이터는 회수되지 않는다.
-- **마스터 암호 변경 기능이 없다.** 암호를 바꾸려면 모든 로그를 새 키로 재암호화해야 하는데
-  아직 구현하지 않았다. 즉 암호가 유출되면 vault 를 새로 만드는 것 외에 대응이 없다.
-- **전방향 비밀성(forward secrecy) 이 없다.** 키 하나가 vault 전체의 과거·현재를 연다.
-- **작성자 인증이 없다.** 키를 가진 기기면 어떤 레코드든 쓸 수 있다. 다기기 단일 사용자
-  모델이라 의도한 것이지만, 기기 하나가 뚫리면 그 기기로 위조된 변경을 구분할 수 없다.
-- **감사(audit) 를 받지 않았다.** 개인 프로젝트의 자체 조합이다. 표준 알고리즘을 쓰지만
-  조합·구현에 실수가 없다는 보장은 없다.
+- **A compromised device.** Malware, a keylogger or root in another account wins. While
+  unlocked, the key and plaintext are in process memory, and the key is not zeroized.
+- **Metadata.** Anyone who can see the vault directory learns the number of devices (log
+  files), how active each is (log sizes), when they changed (mtimes) and their Syncthing
+  device ids. Only the contents are hidden.
+- **Photo metadata.** Blobs are stored **at original size**, so the number of photos and each
+  file's size are visible. Encryption is also convergent (same plaintext, same ciphertext), so
+  someone holding a photo can check whether that photo is in the vault by file name alone.
+  This was the price of collapsing the same photo from two devices into one file: no sync
+  conflicts, at this cost.
+- **Deletion leaves history.** The logs are append-only, so deleting a memo leaves the old
+  records in place (automerge merely marks them deleted). There is no "erase completely".
+- **No device revocation.** A device that paired once has already derived the key. Unsharing
+  stops further syncing but does not recall what it already has.
+- **No password change.** Changing it would mean re-encrypting every log, which is not
+  implemented. A leaked password leaves no option but a fresh vault.
+- **No forward secrecy.** One key opens the vault's past and present alike.
+- **No author authentication.** Any device with the key can write any record. That is intended
+  for a single-user, multi-device model, but a compromised device's forged changes are
+  indistinguishable.
+- **Not audited.** This is a personal project's own combination of standard algorithms; there
+  is no guarantee the combination and the implementation are free of mistakes.
 
-## 취약점 제보
+## Reporting a vulnerability
 
-문제를 찾으면 [GitHub 이슈](https://github.com/PfClaKr/Ymemo/issues)로 알려 주세요.
-민감한 내용이면 공개 이슈 대신 저장소 소유자에게 직접 연락해 주세요.
+Please open a [GitHub issue](https://github.com/PfClaKr/Ymemo/issues). For anything sensitive,
+contact the repository owner directly instead of filing a public issue.

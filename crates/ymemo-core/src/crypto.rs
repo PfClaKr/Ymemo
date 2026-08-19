@@ -1,10 +1,10 @@
-//! E2E 암호화 기본 요소 (순수 Rust RustCrypto).
+//! E2E encryption primitives (pure Rust, RustCrypto).
 //!
-//! - 키 유도: 마스터 암호 + salt → **Argon2id** → 32바이트 대칭키.
-//! - 암호화: **XChaCha20-Poly1305** (24바이트 nonce → 랜덤 nonce 충돌 걱정 없음).
+//! - Key derivation: master password + salt -> Argon2id -> 32-byte symmetric key.
+//! - Cipher: XChaCha20-Poly1305 (24-byte nonce, so random nonces never collide).
 //!
-//! 단일 사용자·다기기 모델이므로 대칭키는 하나다(이후 QR 로 기기 간 전달).
-//! salt 는 비밀이 아니며, 마스터 암호에서 같은 키를 재현하려면 반드시 함께 보관해야 한다.
+//! One user with many devices means exactly one symmetric key. The salt is not secret,
+//! but it must be kept to re-derive that key from the password.
 
 use anyhow::{anyhow, Result};
 use ymemo_i18n::t;
@@ -18,30 +18,28 @@ pub const SALT_LEN: usize = 16;
 pub const KEY_LEN: usize = 32;
 pub const NONCE_LEN: usize = 24;
 
-/// Argon2id salt (비밀 아님, 키와 함께 보관).
+/// Argon2id salt. Not secret, but must be stored next to the vault.
 pub type Salt = [u8; SALT_LEN];
 
-/// 암호학적 난수 salt 생성.
 pub fn generate_salt() -> Salt {
     let mut salt = [0u8; SALT_LEN];
     OsRng.fill_bytes(&mut salt);
     salt
 }
 
-/// 마스터 암호에서 유도한 대칭 암호화 키.
+/// Symmetric key derived from the master password.
 ///
-/// Clone 은 같은 키를 여러 로그(vault 의 기기별 로그들)에서 쓰기 위함.
+/// `Clone` so one key can back every per-device log in a vault.
 #[derive(Clone)]
 pub struct MasterKey {
-    /// 유도된 원시 키. [`Self::to_bytes`] 로만 나가며, 그 문서를 반드시 읽을 것.
+    /// Raw derived key. Only leaves through [`Self::to_bytes`]; read its docs first.
     raw: [u8; KEY_LEN],
     cipher: XChaCha20Poly1305,
 }
 
 impl MasterKey {
-    /// 마스터 암호 + salt → Argon2id → 대칭키.
-    ///
-    /// 같은 (암호, salt) 조합은 항상 같은 키를 재현한다.
+    /// Derives the key from the master password; the same (password, salt) always
+    /// reproduces the same key.
     pub fn derive(password: &[u8], salt: &Salt) -> Result<Self> {
         let mut key = [0u8; KEY_LEN];
         Argon2::default()
@@ -50,25 +48,22 @@ impl MasterKey {
         Self::from_bytes(&key)
     }
 
-    /// 이미 유도해 둔 원시 키로 복원 (암호 없이 여는 경로).
+    /// Restores a key from raw bytes (the unlock-without-password path).
     pub fn from_bytes(key: &[u8; KEY_LEN]) -> Result<Self> {
         let cipher = XChaCha20Poly1305::new_from_slice(key)
             .map_err(|e| anyhow!(t!("core.cipher_init_failed", error = e)))?;
         Ok(Self { raw: *key, cipher })
     }
 
-    /// 유도된 원시 키 바이트.
+    /// Raw derived key bytes.
     ///
-    /// **이 값을 디스크에 남기면 그 순간부터 vault 의 저장 시 암호화는 의미가 없다**
-    /// (마스터 암호 없이도 모든 메모를 읽을 수 있는 값이기 때문). 사용자가 명시적으로
-    /// 켠 "자동 잠금 해제" 캐시 외에는 쓰지 말 것.
+    /// **Writing this to disk defeats the vault's at-rest encryption** — it opens every
+    /// memo without the master password. Only for the opt-in "stay unlocked" cache.
     pub fn to_bytes(&self) -> [u8; KEY_LEN] {
         self.raw
     }
 
-    /// 평문을 암호화. 반환 형식: `nonce(24B) || ciphertext+tag`.
-    ///
-    /// nonce 는 매 호출마다 랜덤 생성되므로 같은 평문도 매번 다른 암호문이 된다.
+    /// Encrypts to `nonce(24B) || ciphertext+tag` with a fresh random nonce per call.
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
         let mut nonce_bytes = [0u8; NONCE_LEN];
         OsRng.fill_bytes(&mut nonce_bytes);
@@ -84,13 +79,13 @@ impl MasterKey {
         Ok(out)
     }
 
-    /// nonce 를 호출자가 정해 암호화한다 (형식은 [`Self::encrypt`] 와 같다).
+    /// Encrypts with a caller-chosen nonce; same layout as [`Self::encrypt`].
     ///
-    /// **일반 데이터에 쓰지 말 것.** 같은 키로 같은 nonce 를 다른 평문에 재사용하면
-    /// XChaCha20 의 키스트림이 겹쳐 치명적이다. 내용해시 blob([`crate::blob`])처럼
-    /// "nonce 를 평문에서 유도해 평문이 다르면 nonce 도 다른" 경우에만 쓴다.
-    /// 그 대가로 같은 평문이 항상 같은 암호문이 되어(convergent), 여러 기기가 같은
-    /// 사진을 붙여도 파일 내용이 똑같아 동기화 충돌이 생기지 않는다.
+    /// **Not for general data.** Reusing a nonce for a different plaintext under the same
+    /// key repeats the XChaCha20 keystream. Only for content-hashed blobs
+    /// ([`crate::blob`]), where the nonce is derived from the plaintext. In exchange the
+    /// encryption is convergent: the same photo yields the same bytes on every device,
+    /// so syncing it never conflicts.
     pub fn encrypt_with_nonce(&self, plaintext: &[u8], nonce_bytes: &[u8; NONCE_LEN]) -> Result<Vec<u8>> {
         let nonce = XNonce::from_slice(nonce_bytes);
         let ciphertext = self
@@ -104,9 +99,8 @@ impl MasterKey {
         Ok(out)
     }
 
-    /// `encrypt` 가 만든 `nonce || ciphertext` 를 복호화.
-    ///
-    /// 키가 다르거나 데이터가 변조되면 Poly1305 인증이 실패해 에러가 난다.
+    /// Decrypts `nonce || ciphertext`. Fails if the key is wrong or the data was tampered
+    /// with (Poly1305 authentication).
     pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
         if data.len() < NONCE_LEN {
             return Err(anyhow!(t!("core.ciphertext_too_short", len = data.len(), min = NONCE_LEN)));
@@ -128,7 +122,7 @@ mod tests {
         let salt = generate_salt();
         let a = MasterKey::derive(b"correct horse", &salt).unwrap();
         let b = MasterKey::derive(b"correct horse", &salt).unwrap();
-        // 같은 키면 서로의 암호문을 복호화할 수 있어야 한다.
+        // Same key: each must decrypt the other's ciphertext.
         let ct = a.encrypt(b"hello").unwrap();
         assert_eq!(b.decrypt(&ct).unwrap(), b"hello");
     }
@@ -139,7 +133,7 @@ mod tests {
         let key = MasterKey::derive(b"pw", &salt).unwrap();
         let msg = "한글 메모 내용 🦀".as_bytes();
         let ct = key.encrypt(msg).unwrap();
-        assert_ne!(&ct[NONCE_LEN..], msg); // 실제로 암호화됨
+        assert_ne!(&ct[NONCE_LEN..], msg); // actually encrypted
         assert_eq!(key.decrypt(&ct).unwrap(), msg);
     }
 
@@ -157,7 +151,7 @@ mod tests {
         let key = MasterKey::derive(b"pw", &salt).unwrap();
         let mut ct = key.encrypt(b"secret").unwrap();
         let last = ct.len() - 1;
-        ct[last] ^= 0x01; // tag 변조
+        ct[last] ^= 0x01; // corrupt the tag
         assert!(key.decrypt(&ct).is_err());
     }
 }

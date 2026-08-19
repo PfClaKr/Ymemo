@@ -4,13 +4,13 @@ import { Palette } from "theme.slint";
 import { PairingPanel, SharedDeviceRow } from "pairing.slint";
 
 
-// 목록 창의 한 행. 그룹 트리를 Rust 가 미리 평탄화해 depth 를 붙여 넘긴다
-// (Slint 에 트리 뷰가 없으므로 "들여쓰기 된 리스트"로 그린다).
+// One row of the list. Rust flattens the group tree and tags each row with a depth, since
+// Slint has no tree view and this is drawn as an indented list.
 export struct ListRow {
     id: string,
     title: string,
-    color: string,     // 메모 색 악센트 (그룹이면 무시)
-    depth: int,        // 들여쓰기 단계
+    color: string,     // memo accent color, ignored for groups
+    depth: int,        // indent level
     is-group: bool,
     expanded: bool,
     child-count: int,
@@ -18,12 +18,12 @@ export struct ListRow {
 
 
 // ---------------------------------------------------------------------------
-// 메모 목록 창: 트레이 아이콘 클릭으로 토글된다. 어두운 배경 + 밝은 글자.
-// 행 클릭 → 스티커 창 열기. ＋ 새 메모, 🗑 삭제. 왼쪽 악센트로 스티커 색 표시.
+// Memo list window, toggled from the tray icon. Clicking a row opens its sticky; the left
+// accent shows the sticky's color.
 // ---------------------------------------------------------------------------
 export component ListWindow inherits Window {
     title: "Ymemo";
-    // 헤더 버튼이 다섯 개(🔒 ⚙ 🔗 📁 ＋)라 300px 로는 제목이 눌린다.
+    // Five header buttons squeeze the title below this width.
     preferred-width: 340px;
     preferred-height: 420px;
     background: #2e2b27;
@@ -38,34 +38,34 @@ export component ListWindow inherits Window {
     in property <[SharedDeviceRow]> shared-devices;
     callback lan-join(string);
     callback unshare(string);
-    // 이름 편집 중인 그룹 id. Rust 가 그룹을 새로 만들면 바로 편집 상태로 넣는다.
+    // Id of the group being renamed; Rust puts a freshly created group straight into it.
     in-out property <string> editing-id: "";
     in-out property <string> editing-text: "";
-    callback open-memo(string);            // 인자: memo id
+    callback open-memo(string);            // memo id
     callback new-memo();
     callback new-group();
-    callback toggle-group(string);         // 펼침/접힘 (기기 로컬 상태)
-    callback rename-group(string, string); // id, 새 이름
+    callback toggle-group(string);         // expand/collapse, device-local state
+    callback rename-group(string, string); // id, new name
     callback delete-row(string, bool);     // id, is-group
-    callback move-row(int, int);           // 원본 행 index, 놓은 행 index (음수/범위밖 = 최상위)
+    callback move-row(int, int);           // source row, drop row (out of range = top level)
     callback add-peer(string);
-    // 페어링 패널 열림/닫힘 — Rust 가 창 크기를 맞춰 준다 (LockWindow 와 같은 이유).
+    // Pairing panel open/close; Rust resizes the window, as in LockWindow.
     callback sync-toggled(bool);
     callback open-settings();
     callback lock-now();
 
     private property <bool> show-sync: false;
     changed show-sync => { root.sync-toggled(self.show-sync); }
-    // 드래그 상태: 잡은 행과 현재 놓을 위치. -1 이면 드래그 중이 아님.
+    // Drag state: the grabbed row and the current drop target; -1 means no drag.
     private property <int> drag-source: -1;
     private property <int> drag-target: -1;
-    // 이번 누름이 드래그였나 (드래그 후 클릭이 열기로 오인되지 않도록).
+    // Whether this press became a drag, so its release is not taken for a click.
     private property <bool> did-drag: false;
 
-    // 행 높이 — 드래그 시 이동한 행 수를 계산하는 기준이라 고정이어야 한다.
+    // Row height; drag distance is converted to rows with it, so it must stay fixed.
     private property <length> row-h: 34px;
 
-    // 편집 중이던 이름을 저장하고 편집 모드를 끝낸다.
+    // Commits the name being edited and leaves edit mode.
     function commit-edit() {
         if (root.editing-id != "") {
             root.rename-group(root.editing-id, root.editing-text);
@@ -139,14 +139,14 @@ export component ListWindow inherits Window {
             for row[idx] in root.rows: Rectangle {
                 height: root.row-h;
                 border-radius: 6px;
-                // 드래그 중인 행은 흐리게, 놓을 대상은 밝게 강조.
+                // The dragged row dims, the drop target highlights.
                 opacity: root.drag-source == idx ? 0.45 : 1;
                 background: root.drag-source != -1 && root.drag-target == idx ? #7db8ec55
                           : ta.has-hover ? #ffffff1a
                           : transparent;
 
-                // 아래에 깔린 터치 영역: 위의 Text 는 입력을 소비하지 않아 여기로 들어온다.
-                // (이름 편집 중일 땐 위에 올라온 LineEdit 가 먼저 입력을 가져간다)
+                // Touch area underneath: the Text above does not consume input, so it lands
+                // here — except while renaming, where the LineEdit on top takes it first.
                 ta := TouchArea {
                     pointer-event(ev) => {
                         if (ev.kind == PointerEventKind.down) {
@@ -161,13 +161,13 @@ export component ListWindow inherits Window {
                         }
                     }
                     moved => {
-                        // 살짝 움직인 정도는 클릭으로 두고, 임계값을 넘으면 드래그 시작.
+                        // Small movements stay clicks; past the threshold it is a drag.
                         if (self.mouse-y - self.pressed-y > 4px || self.pressed-y - self.mouse-y > 4px) {
                             root.did-drag = true;
                             root.drag-source = idx;
                         }
                         if (root.drag-source != -1) {
-                            // 행 높이가 일정하므로 이동한 픽셀을 행 수로 환산한다.
+                            // Rows are uniform, so pixels convert straight to row counts.
                             root.drag-target = idx + Math.round((self.mouse-y - self.pressed-y) / root.row-h);
                         }
                     }
@@ -182,7 +182,7 @@ export component ListWindow inherits Window {
                         }
                     }
                     double-clicked => {
-                        // 그룹 이름은 더블클릭으로 바로 고친다.
+                        // Double click renames a group in place.
                         if (row.is-group) {
                             root.editing-text = row.title;
                             root.editing-id = row.id;
@@ -191,11 +191,11 @@ export component ListWindow inherits Window {
                 }
 
                 HorizontalLayout {
-                    padding-left: 6px + row.depth * 14px; // 트리 들여쓰기
+                    padding-left: 6px + row.depth * 14px; // tree indent
                     padding-right: 4px;
                     spacing: 6px;
 
-                    // 그룹: 펼침 표시 / 메모: 색 악센트
+                    // Groups show a disclosure marker, memos a color accent.
                     if row.is-group: Text {
                         width: 14px;
                         text: row.child-count == 0 ? "" : (row.expanded ? "▾" : "▸");
@@ -217,7 +217,7 @@ export component ListWindow inherits Window {
                         background: Palette.swatch(row.color);
                     }
 
-                    // 이름: 편집 중인 그룹만 LineEdit 로 바뀐다.
+                    // The name turns into a LineEdit only for the group being renamed.
                     if root.editing-id == row.id: LineEdit {
                         horizontal-stretch: 1;
                         text: row.title;

@@ -1,15 +1,15 @@
-; Ymemo Windows 인스톨러 (Inno Setup).
+; Ymemo Windows installer (Inno Setup).
 ;
-; 앱과 (감춘) syncthing 을 한 인스톨러에 담는다:
-;   {app}\Ymemo.exe        앱 본체
-;   {app}\ymemo-sync.exe   syncthing (리네임 — 사용자에게 감춤)
-; 둘 다 {app} 안에 설치되므로 언인스톨 시 함께 제거된다.
+; The app and a hidden copy of syncthing ship in one installer:
+;   {app}\Ymemo.exe        the app
+;   {app}\ymemo-sync.exe   syncthing, renamed so users never see it
+; Both live under {app}, so uninstalling removes them together.
 ;
-; 방화벽 규칙을 설치/제거 시 자동 추가/삭제해 syncthing 이 네트워크를 쓸 때
-; 방화벽 팝업이 뜨지 않게 한다 (사용자가 syncthing 존재를 눈치채지 못하도록).
+; A firewall rule is added on install and deleted on uninstall, so syncthing never triggers
+; a firewall prompt and stays invisible to the user.
 ;
-; 컴파일: iscc /DAppVersion=0.1.0 ymemo.iss
-;   (파일은 이 .iss 와 같은 폴더에 준비: Ymemo.exe, ymemo-sync.exe)
+; Compile: iscc /DAppVersion=0.1.0 ymemo.iss
+;   (Ymemo.exe and ymemo-sync.exe must sit next to this .iss)
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -35,9 +35,9 @@ PrivilegesRequired=admin
 SetupIconFile=..\assets\ymemo.ico
 WizardStyle=modern
 
-; 코드 서명: ISCC 에 /DSign 과 /Symemosign="<signtool 명령> $f" 를 넘기면 인스톨러와
-; 언인스톨러가 서명된다. 인증서가 없으면 이 블록은 건너뛰고 미서명으로 빌드된다.
-; (CI 의 windows-desktop 잡이 시크릿이 있을 때만 이 플래그를 붙인다.)
+; Code signing: passing /DSign and /Symemosign="<signtool command> $f" to ISCC signs the
+; installer and uninstaller. Without a certificate this block is skipped and the build is
+; unsigned; CI adds the flags only when the secrets are present.
 #ifdef Sign
 SignTool=ymemosign
 SignedUninstaller=yes
@@ -47,8 +47,20 @@ SignedUninstaller=yes
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[CustomMessages]
+english.StartupTask=Start Ymemo when Windows starts
+korean.StartupTask=Windows 시작 시 Ymemo 자동 실행
+english.AdditionalTasks=Additional tasks:
+korean.AdditionalTasks=추가 작업:
+english.UninstallIcon=Uninstall Ymemo
+korean.UninstallIcon=Ymemo 제거
+english.FirewallStatus=Configuring network settings...
+korean.FirewallStatus=네트워크 설정 구성 중...
+english.LaunchApp=Launch Ymemo
+korean.LaunchApp=Ymemo 실행
+
 [Tasks]
-Name: "startup"; Description: "Windows 시작 시 Ymemo 자동 실행"; GroupDescription: "추가 작업:"
+Name: "startup"; Description: "{cm:StartupTask}"; GroupDescription: "{cm:AdditionalTasks}"
 
 [Files]
 Source: "Ymemo.exe";      DestDir: "{app}"; Flags: ignoreversion
@@ -57,22 +69,22 @@ Source: "..\..\LICENSE";  DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: igno
 
 [Icons]
 Name: "{group}\Ymemo"; Filename: "{app}\Ymemo.exe"
-Name: "{group}\Ymemo 제거"; Filename: "{uninstallexe}"
+Name: "{group}\{cm:UninstallIcon}"; Filename: "{uninstallexe}"
 Name: "{autostartup}\Ymemo"; Filename: "{app}\Ymemo.exe"; Tasks: startup
 
 [Run]
-; syncthing 방화벽 인바운드 허용 규칙 (실패해도 설치는 계속).
+; Inbound firewall rule for syncthing; a failure does not stop the install.
 Filename: "netsh"; \
   Parameters: "advfirewall firewall add rule name=""Ymemo Sync"" dir=in action=allow program=""{app}\ymemo-sync.exe"" enable=yes profile=any"; \
-  Flags: runhidden; StatusMsg: "네트워크 설정 구성 중..."
-; 설치 마침 후 바로 실행 (선택).
-Filename: "{app}\Ymemo.exe"; Description: "Ymemo 실행"; Flags: nowait postinstall skipifsilent
+  Flags: runhidden; StatusMsg: "{cm:FirewallStatus}"
+; Optionally launch after install.
+Filename: "{app}\Ymemo.exe"; Description: "{cm:LaunchApp}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-; 방화벽 규칙 제거.
+; Remove the firewall rule.
 Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""Ymemo Sync"""; \
   Flags: runhidden; RunOnceId: "DelYmemoFwRule"
 
 [UninstallDelete]
-; 앱 폴더 잔여물까지 정리 (사용자 데이터 %LOCALAPPDATA%\ymemo 는 남긴다).
+; Clean out what is left in the app folder; user data in %LOCALAPPDATA%\ymemo stays.
 Type: filesandordirs; Name: "{app}"

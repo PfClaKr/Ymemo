@@ -1,6 +1,6 @@
 [package]
 name = "ymemo-core"
-description = "Ymemo 공유 코어: 데이터 모델·SQLite 캐시·암호화·automerge vault·blob 저장소·동기화."
+description = "Ymemo shared core: data model, SQLite cache, crypto, automerge vault, blob store, sync."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

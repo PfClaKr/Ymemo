@@ -1,6 +1,6 @@
 [package]
 name = "ymemo-i18n"
-description = "Ymemo 번역 카탈로그. i18n/*.json 을 컴파일 타임에 박아 넣고 런타임에 언어를 고른다."
+description = "Ymemo translation catalog: i18n/*.json baked in at compile time, language chosen at runtime."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

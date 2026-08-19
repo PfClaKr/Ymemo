@@ -9,23 +9,22 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These functions are ignored because they are not marked as `pub`: `with_vault`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `from`, `from`, `from`
 
-/// 코어가 돌려주는 에러 메시지의 언어를 정한다 (`"ko"` / `"en"`, `"ko-KR"` 같은 로캘도 됨).
+/// Sets the language of core error messages (`"ko"`, `"en"`, or a locale like `"ko-KR"`).
 ///
-/// 모르는 값이면 시스템 로캘로 추정한다. Dart 쪽 UI 문구는 Flutter 가 따로 관리하지만,
-/// 코어 에러는 이 함수로 맞춰야 화면에서 언어가 섞이지 않는다. 다른 API 를 부르기 전에
-/// 한 번 호출하면 되고, 언어를 바꿀 때마다 다시 부르면 된다.
+/// An unknown value falls back to the system locale. Call it once before the other APIs,
+/// and again whenever the language changes, or the screen ends up mixing languages.
 Future<void> setLanguage({required String code}) =>
     RustLib.instance.api.crateApiSetLanguage(code: code);
 
-/// 지금 쓰이는 코어 메시지 언어 코드.
+/// Language code currently used for core messages.
 Future<String> language() => RustLib.instance.api.crateApiLanguage();
 
-/// 현재 언어의 모바일 문구를 모아 돌려준다.
+/// Collects the mobile strings for the current language.
 Future<FfiStrings> mobileStrings() =>
     RustLib.instance.api.crateApiMobileStrings();
 
-/// vault 열기(없으면 생성). `vault_dir` 는 동기화 대상 디렉터리,
-/// `cache_db_path` 는 기기 로컬 SQLite 파일 경로.
+/// Opens the vault, creating it if needed. `vault_dir` is the synced directory,
+/// `cache_db_path` the device-local SQLite file.
 Future<void> vaultOpen(
         {required String vaultDir,
         required String cacheDbPath,
@@ -33,42 +32,42 @@ Future<void> vaultOpen(
     RustLib.instance.api.crateApiVaultOpen(
         vaultDir: vaultDir, cacheDbPath: cacheDbPath, password: password);
 
-/// vault 닫기 (로그아웃).
+/// Closes the vault (log out).
 Future<void> vaultClose() => RustLib.instance.api.crateApiVaultClose();
 
-/// 최근 수정순 메모 목록.
+/// Memos, most recently updated first.
 Future<List<FfiMemo>> memoList() => RustLib.instance.api.crateApiMemoList();
 
-/// 메모 생성(id=None) 또는 수정(id=Some). 생성된/수정된 메모의 id 를 돌려준다.
+/// Creates (`id` = None) or updates (`id` = Some) a memo and returns its id.
 Future<String> memoUpsert(
         {String? id, required String title, required String body}) =>
     RustLib.instance.api.crateApiMemoUpsert(id: id, title: title, body: body);
 
-/// 메모 삭제.
+/// Deletes a memo.
 Future<void> memoDelete({required String id}) =>
     RustLib.instance.api.crateApiMemoDelete(id: id);
 
-/// 스티커 색상 팔레트 키 변경.
+/// Sets the palette key.
 Future<void> memoSetColor({required String id, required String color}) =>
     RustLib.instance.api.crateApiMemoSetColor(id: id, color: color);
 
-/// 스티커 불투명도(%) 변경. 범위를 벗어나면 코어가 잘라낸다.
+/// Sets the opacity in percent; the core clamps out-of-range values.
 Future<void> memoSetOpacity(
         {required String id, required PlatformInt64 opacity}) =>
     RustLib.instance.api.crateApiMemoSetOpacity(id: id, opacity: opacity);
 
-/// 메모를 그룹으로 옮긴다. `group_id` 가 빈 문자열이면 최상위로 뺀다.
+/// Moves a memo into a group; an empty `group_id` moves it to the top level.
 Future<void> memoSetGroup({required String id, required String groupId}) =>
     RustLib.instance.api.crateApiMemoSetGroup(id: id, groupId: groupId);
 
-/// 한 메모에 붙은 사진 목록 (붙인 순서).
+/// Photos on one memo, in the order they were added.
 Future<List<FfiAttachment>> attachmentList({required String memoId}) =>
     RustLib.instance.api.crateApiAttachmentList(memoId: memoId);
 
-/// 사진을 메모에 붙인다. `data` 는 **원본 파일 바이트 그대로**.
+/// Attaches a photo; `data` is the original file bytes.
 ///
-/// `width_px`/`height_px` 는 Dart 가 디코딩해서 넘긴다(코어에 이미지 디코더를 두지
-/// 않는다). 모르면 0 — 그 경우 표시 비율이 1:1 로 취급된다.
+/// Dart decodes and passes `width_px`/`height_px`, so the core needs no image decoder. Pass
+/// 0 when unknown and the aspect ratio falls back to 1:1.
 Future<FfiAttachment> attachmentAdd(
         {required String memoId,
         required List<int> data,
@@ -84,56 +83,56 @@ Future<FfiAttachment> attachmentAdd(
         widthPx: widthPx,
         heightPx: heightPx);
 
-/// 사진 바이트(평문). 아직 동기화가 안 됐으면 에러 — UI 는 자리표시자를 그리면 된다.
+/// Photo bytes. Errors while the blob has not synced yet; draw a placeholder instead.
 Future<Uint8List> attachmentBytes({required String hash}) =>
     RustLib.instance.api.crateApiAttachmentBytes(hash: hash);
 
-/// 이 기기에 사진 파일이 도착했는가 (없으면 바이트를 청하지 말 것).
+/// Whether the photo has arrived on this device; do not ask for bytes if it has not.
 Future<bool> attachmentHasBlob({required String hash}) =>
     RustLib.instance.api.crateApiAttachmentHasBlob(hash: hash);
 
-/// 표시 너비 변경 (em 의 1/1000). 다른 기기에도 같은 비율로 반영된다.
+/// Sets the display width in 1/1000 em; other devices see the same proportion.
 Future<void> attachmentSetWidth(
         {required String id, required PlatformInt64 widthEmMilli}) =>
     RustLib.instance.api
         .crateApiAttachmentSetWidth(id: id, widthEmMilli: widthEmMilli);
 
-/// 메모에서 사진을 뗀다. blob 파일은 남는다(GC 없음).
+/// Detaches a photo; the blob file stays (no GC).
 Future<void> attachmentRemove({required String id}) =>
     RustLib.instance.api.crateApiAttachmentRemove(id: id);
 
-/// 전체 그룹 목록 (이름순).
+/// All groups, sorted by name.
 Future<List<FfiGroup>> groupList() => RustLib.instance.api.crateApiGroupList();
 
-/// 그룹 생성. 만들어진 그룹 id 를 돌려준다.
+/// Creates a group and returns its id.
 Future<String> groupCreate({required String name, required String parentId}) =>
     RustLib.instance.api.crateApiGroupCreate(name: name, parentId: parentId);
 
-/// 그룹 이름 변경.
+/// Renames a group.
 Future<void> groupRename({required String id, required String name}) =>
     RustLib.instance.api.crateApiGroupRename(id: id, name: name);
 
-/// 그룹을 다른 그룹 밑으로 옮긴다. 자기 자손 밑으로는 옮길 수 없다(순환 방지).
+/// Moves a group under another; moving it into its own subtree is rejected.
 Future<void> groupMove({required String id, required String parentId}) =>
     RustLib.instance.api.crateApiGroupMove(id: id, parentId: parentId);
 
-/// 그룹 삭제. 안의 메모/하위 그룹은 지워지지 않고 상위로 올라온다.
+/// Deletes a group; its memos and subgroups move up instead of being deleted.
 Future<void> groupDelete({required String id}) =>
     RustLib.instance.api.crateApiGroupDelete(id: id);
 
-/// 다른 기기의 로그를 병합해 로컬 상태를 갱신한다.
-/// (전송 계층이 vault 디렉터리에 새 로그를 가져다 놓은 뒤 호출)
+/// Merges the other devices' logs into the local state; call it after the transport has
+/// delivered new logs.
 Future<void> syncRebuild() => RustLib.instance.api.crateApiSyncRebuild();
 
-/// QR 스캔으로 받은 페어링 코드 검증 + 기기 ID 추출.
-/// (모바일 Syncthing 연동 전까지는 검증/표시에만 쓴다.)
+/// Validates a scanned pairing code and extracts the device id. Until mobile Syncthing
+/// lands, this is only used to check and display it.
 Future<String> pairingDecode({required String code}) =>
     RustLib.instance.api.crateApiPairingDecode(code: code);
 
-/// Dart 로 넘기는 첨부 사진 표현.
+/// A photo attachment as handed to Dart.
 ///
-/// 바이트는 들어 있지 않다 — 사진은 수 MB 라 목록마다 실어 나르면 낭비다.
-/// 그릴 때 [`attachment_bytes`] 로 해시를 주고 따로 받는다.
+/// The bytes are not included: photos run to megabytes and carrying them in every list
+/// would be waste. Fetch them by hash with [`attachment_bytes`] when drawing.
 class FfiAttachment {
   final String id;
   final String memoId;
@@ -141,11 +140,11 @@ class FfiAttachment {
   final String name;
   final String mime;
 
-  /// 원본 픽셀 크기 (비율 계산용, 모르면 0).
+  /// Original pixel size for the aspect ratio; 0 when unknown.
   final PlatformInt64 widthPx;
   final PlatformInt64 heightPx;
 
-  /// 표시 너비 (em 의 1/1000). 실제 픽셀 = 이 값/1000 × 이 플랫폼 기본 폰트 px.
+  /// Display width in 1/1000 em; pixels = value / 1000 * the platform's base font px.
   final PlatformInt64 widthEmMilli;
   final PlatformInt64 createdAt;
 
@@ -189,7 +188,7 @@ class FfiAttachment {
           createdAt == other.createdAt;
 }
 
-/// Dart 로 넘기는 그룹(폴더) 표현.
+/// A group (folder) as handed to Dart.
 class FfiGroup {
   final String id;
   final String name;
@@ -225,7 +224,7 @@ class FfiGroup {
           updatedAt == other.updatedAt;
 }
 
-/// Dart 로 넘기는 메모 표현. (코어 `Memo` 와 동일 필드; frb 가 Dart 클래스로 변환)
+/// A memo as handed to Dart; same fields as the core `Memo`.
 class FfiMemo {
   final String id;
   final String title;
@@ -273,12 +272,12 @@ class FfiMemo {
           updatedAt == other.updatedAt;
 }
 
-/// 모바일 UI 문구 한 벌 (현재 언어). Dart 가 시작할 때 한 번 받아 들고 쓴다.
+/// The mobile UI strings in the current language; Dart fetches these once at startup.
 ///
-/// 문구를 Dart 에 따로 두면 언어가 갈라진다 — 코어 에러는 카탈로그, 화면 문구는
-/// 하드코딩이 되어 한쪽만 번역된다. 키를 **Rust 에서** 읽어 넘기므로 `ymemo-i18n` 의
-/// "코드가 쓰는 키가 카탈로그에 있는지" 테스트가 모바일 문구까지 함께 지켜 준다.
-/// (언어를 바꾼 뒤엔 [`set_language`] 를 부르고 이걸 다시 받으면 된다.)
+/// Keeping them in Dart instead would split the languages — catalog for core errors,
+/// hardcoded for the screens. Reading the keys **in Rust** also puts mobile strings under
+/// `ymemo-i18n`'s "every key used in code exists in the catalog" test. After
+/// [`set_language`], fetch this again.
 class FfiStrings {
   final String addPhoto;
   final String bodyHint;

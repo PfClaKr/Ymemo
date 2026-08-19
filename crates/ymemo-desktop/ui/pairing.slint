@@ -2,30 +2,30 @@ import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox } from "std-widge
 import { Strings } from "@i18n";
 import { Palette, TabButton } from "theme.slint";
 
-// 기기 페어링 패널.
-//  - 기본: 같은 네트워크에서 6자리 코드로 연결 (이 기기 코드 표시 + 상대 코드 입력).
-//  - 접이식 폴백: QR / 긴 device-id 직접 등록 (다른 네트워크용).
-// 현재 이 vault 를 공유 중인 다른 기기 한 대.
+// Device pairing panel.
+//  - Default: a 6-digit code on the same network (ours shown, theirs entered).
+//  - Fallback: QR or a pasted device id, for devices on different networks.
+// One other device currently sharing this vault.
 export struct SharedDeviceRow {
-    id: string,        // syncthing device-id (해제 시 식별자)
-    name: string,      // 사람이 읽을 이름 (없으면 빈 문자열 → id 축약 표시)
-    connected: bool,   // 지금 연결돼 있는지
+    id: string,        // syncthing device id, also the unshare handle
+    name: string,      // human-readable name; empty falls back to a shortened id
+    connected: bool,
 }
 
 export component PairingPanel inherits VerticalLayout {
     in property <bool> available;
-    in property <string> my-code;          // 이 기기의 긴 device-id 코드 (폴백)
+    in property <string> my-code;          // this device's full pairing code (fallback)
     in property <image> qr;
-    in property <string> message;          // 수동 등록 결과
-    in property <string> lan-code;         // 이 기기의 현재 6자리 코드
-    in property <string> lan-message;      // LAN 연결 결과
-    in property <[SharedDeviceRow]> devices;  // 현재 공유 중인 기기들
+    in property <string> message;          // result of a manual registration
+    in property <string> lan-code;         // this device's current 6-digit code
+    in property <string> lan-message;      // result of a LAN connection
+    in property <[SharedDeviceRow]> devices;  // devices sharing the vault
     in property <color> ink: #5c5c25;
     callback add-peer(string);
     callback lan-join(string);
-    callback unshare(string);              // 인자: 해제할 device-id
+    callback unshare(string);              // device id to unshare
 
-    // 지금 보고 있는 탭. false = 같은 Wi-Fi(6자리), true = 다른 네트워크(QR·device-id).
+    // Active tab: false is same Wi-Fi (6 digits), true is another network (QR, device id).
     private property <bool> remote: false;
 
     spacing: 8px;
@@ -39,7 +39,7 @@ export component PairingPanel inherits VerticalLayout {
             color: root.ink;
         }
 
-        // ---- 연결 방식 탭 ----
+        // ---- Method tabs ----
         HorizontalLayout {
             TabButton {
                 label: Strings.ui_pair_tab_lan;
@@ -55,7 +55,7 @@ export component PairingPanel inherits VerticalLayout {
             }
         }
 
-        // ---- 방식 1: 같은 네트워크 — 6자리 코드 ----
+        // ---- Method 1: same network, 6-digit code ----
         if !root.remote: VerticalLayout {
             spacing: 6px;
             Text {
@@ -65,7 +65,7 @@ export component PairingPanel inherits VerticalLayout {
                 opacity: 0.8;
                 wrap: word-wrap;
             }
-            // 이 기기의 6자리 코드 (크게).
+            // This device's code, large.
             Text {
                 text: root.lan-code == "" ? "------" : root.lan-code;
                 font-size: 26px;
@@ -74,7 +74,7 @@ export component PairingPanel inherits VerticalLayout {
                 color: root.ink;
                 horizontal-alignment: center;
             }
-            // 상대 코드 입력 → LAN 연결.
+            // Enter their code to connect over the LAN.
             HorizontalLayout {
                 spacing: 6px;
                 lan := LineEdit {
@@ -95,7 +95,7 @@ export component PairingPanel inherits VerticalLayout {
             }
         }
 
-        // ---- 방식 2 (폴백): 다른 네트워크 — QR / 긴 device-id ----
+        // ---- Method 2 (fallback): another network, QR or device id ----
         if root.remote: VerticalLayout {
             spacing: 6px;
             Text {
@@ -137,7 +137,7 @@ export component PairingPanel inherits VerticalLayout {
             }
         }
 
-        // ---- 현재 공유 중인 기기 목록 (탭과 무관하게 항상 보인다) ----
+        // ---- Shared devices, always visible regardless of tab ----
         Rectangle { height: 1px; background: root.ink; opacity: 0.25; }
         Text {
             text: Strings.ui_pair_devices_title;
@@ -153,7 +153,7 @@ export component PairingPanel inherits VerticalLayout {
         }
         for dev in root.devices: HorizontalLayout {
             spacing: 6px;
-            // 연결 상태 점.
+            // Connection dot.
             Text {
                 text: dev.connected ? "●" : "○";
                 font-size: 11px;
