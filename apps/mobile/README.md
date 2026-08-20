@@ -143,20 +143,47 @@ builds the APKs and attaches them to the GitHub Release, **split per ABI**:
 One APK with all three would be 76 MB. Much of the size is the Flutter engine (~12 MB) and
 ML Kit for QR scanning (`libbarhopper_v3.so`, ~5 MB); our Rust library is 3-5 MB per ABI.
 
-> **Signing:** as `flutter create` leaves it, release APKs are **signed with the debug key**.
-> They install (with "unknown sources" enabled) but cannot go to the Play Store, and moving to
-> a real key later means **existing installs cannot be updated in place** — a different
-> signature requires a reinstall. Real signing means taking a keystore from secrets and
-> filling in `signingConfigs`, as the windows-desktop job does with its certificate.
+### Signing
+
+**Android decides whether an update may replace an install by comparing signatures.** The
+debug key `flutter create` leaves behind is generated per machine, so a CI runner makes up a
+new one every build: those APKs cannot be installed over each other, and the user's only way
+forward is uninstall-and-reinstall, which takes their memos with it. The keystore has to exist
+before the first release anyone is expected to update, and it has to be kept — losing it means
+no future build can ever update those installs.
+
+Create one (once, and back it up somewhere safe):
+
+```bash
+keytool -genkeypair -v -keystore ymemo.jks -keyalg RSA -keysize 2048 -validity 10000 \
+  -alias ymemo
+```
+
+Local release builds read it from `apps/mobile/android/key.properties` (gitignored):
+
+```properties
+storeFile=/absolute/path/to/ymemo.jks
+storePassword=…
+keyAlias=ymemo
+keyPassword=…
+```
+
+CI reads the same four values from repository secrets — `ANDROID_KEYSTORE_BASE64`
+(`base64 -w0 ymemo.jks`), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
+`ANDROID_KEY_PASSWORD` — and warns in the log when they are missing. Either way, a build
+without a keystore still succeeds with the debug key, which is fine for testing and never for
+a release.
+
+Uninstalling on Android is clean by construction: the app runs no background service and
+Android deletes its private directory with it, so nothing is left behind.
 
 The Flutter and NDK versions CI uses are pinned in `env` at the top of `release.yml`. The NDK
 must match `ndkVersion` in `android/app/build.gradle.kts`.
 
 ## Remaining work
 
-- [ ] Mobile Syncthing (bundled gomobile `.aar`). **Until then mobile is local-only**: nothing
-      can deliver files into the vault directory, so the sync button has nothing to do.
+- [ ] Mobile Syncthing. **Until then mobile is local-only**: nothing can deliver files into
+      the vault directory, so the sync button has nothing to do.
 - [ ] Group (folder) screen — the FFI (`group_*`) exists, only the Dart UI is missing.
-- [ ] Reading pairing codes by QR scan, wired to `pairing_decode`.
 - [ ] cargokit integration, so gradle and Xcode build the Rust automatically.
 - [ ] Auto-lock and session policy, the equivalent of the desktop's `settings.rs`.

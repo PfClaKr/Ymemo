@@ -16,11 +16,11 @@
 #   --split-per-abi: one fat APK would be 76MB while a device only ever uses its own ABI, so
 #   split it into 23-32MB each. Modern phones are almost all arm64-v8a; armeabi-v7a covers
 #   older 32-bit devices and x86_64 the emulator.
-#   **Signing:** as flutter create leaves it, the release APK is signed with the *debug* key
-#   (see signingConfig in apps/mobile/android/app/build.gradle.kts). It installs and
-#   distributes fine, but cannot go to the Play Store and needs "unknown sources" enabled.
-#   Real signing means a keystore from secrets, as the windows-desktop job does with its
-#   certificate.
+#   **Signing:** the APKs are signed with the release keystore when the ANDROID_KEYSTORE_*
+#   secrets are set, and with the debug key otherwise — see the build step below. The debug
+#   key is generated per machine, so debug-signed releases cannot be installed over one
+#   another and cannot go to the Play Store; set the secrets before the first release users
+#   are expected to update.
 # iOS stops at the library; an IPA follows once signing is set up.
 #
 # Only GitHub-owned actions (actions/*) are used, so this still runs under a policy that
@@ -205,11 +205,32 @@ jobs:
         run: |
           cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \
             -o apps/mobile/android/app/src/main/jniLibs build --release -p ymemo-ffi
+      # Signing: with the keystore secrets the APKs are signed with the release key, which is
+      # what lets a user install a new version over the old one. Without them the build falls
+      # back to the debug key (see apps/mobile/android/app/build.gradle.kts) and every release
+      # gets a different, runner-generated signature that no earlier install accepts.
+      #   ANDROID_KEYSTORE_BASE64   : the keystore (.jks), base64 encoded
+      #   ANDROID_KEYSTORE_PASSWORD : its password
+      #   ANDROID_KEY_ALIAS         : the key alias inside it
+      #   ANDROID_KEY_PASSWORD      : that key's password (defaults to the store password)
       - name: Build the apk
         working-directory: apps/mobile
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          YMEMO_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          YMEMO_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          YMEMO_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "keystore found, signing the apks with the release key"
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/ymemo.jks"
+            export YMEMO_KEYSTORE_FILE="$RUNNER_TEMP/ymemo.jks"
+          else
+            echo "::warning::no android keystore secrets; the apks are signed with the debug key and cannot update an existing install"
+          fi
           flutter pub get
           flutter build apk --release --split-per-abi
+          rm -f "$RUNNER_TEMP/ymemo.jks"
           version="${GITHUB_REF_NAME#v}"
           for abi in arm64-v8a armeabi-v7a x86_64; do
             mv "build/app/outputs/flutter-apk/app-$abi-release.apk" \
