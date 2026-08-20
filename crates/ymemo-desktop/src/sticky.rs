@@ -82,6 +82,36 @@ pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) {
     }
 }
 
+/// Writes out every sticky's pending edit and stops its debounce timer. Returns the ids of
+/// the open stickies, in no particular order.
+///
+/// Called wherever the windows are about to stop existing — locking and quitting — because
+/// the autosave is debounced and the last keystrokes are otherwise still only in the widget.
+/// Two passes, since `save_memo` borrows the sticky map itself.
+pub(crate) fn flush_dirty(ctx: &Ctx) -> Vec<String> {
+    let ids: Vec<String> = ctx.stickies.borrow().keys().cloned().collect();
+    for id in &ids {
+        let pending = {
+            let map = ctx.stickies.borrow();
+            match map.get(id) {
+                Some(e) if e.dirty.get() => {
+                    e.save_timer.stop();
+                    Some(e.window.get_memo_text().to_string())
+                }
+                Some(e) => {
+                    e.save_timer.stop();
+                    None
+                }
+                None => None,
+            }
+        };
+        if let Some(text) = pending {
+            save_memo(ctx, id, &text);
+        }
+    }
+    ids
+}
+
 /// Creates a memo and opens its sticky; shared by the + button in both windows.
 pub(crate) fn new_memo(ctx: &Ctx) {
     touch(ctx);
