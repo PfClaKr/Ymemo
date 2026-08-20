@@ -20,6 +20,13 @@ use std::time::{Duration, Instant};
 /// How long to wait for a first start, key generation included.
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Id of the vault folder inside Syncthing.
+///
+/// **Every device must use the same one.** Syncthing matches shared folders by id, so a
+/// desktop and a phone that disagree here would pair happily and then sync nothing. That is
+/// why it lives in the core rather than in one of the front ends.
+pub const VAULT_FOLDER_ID: &str = "ymemo-vault";
+
 /// A running Syncthing child process plus its REST client. Dropping it shuts the daemon
 /// down (REST shutdown first, then kill).
 pub struct Syncthing {

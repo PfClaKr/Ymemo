@@ -13,9 +13,10 @@
 #
 # Android builds all the way to an APK. The frb bindings and the android/ project are
 # committed, so CI needs no codegen.
-#   --split-per-abi: one fat APK would be 76MB while a device only ever uses its own ABI, so
-#   split it into 23-32MB each. Modern phones are almost all arm64-v8a; armeabi-v7a covers
-#   older 32-bit devices and x86_64 the emulator.
+#   --split-per-abi: one fat APK would be enormous while a device only ever uses its own ABI,
+#   so split it per ABI. Modern phones are almost all arm64-v8a; armeabi-v7a covers older
+#   32-bit devices and x86_64 the emulator. Each APK carries two native pieces: the Rust core
+#   and the bundled syncthing (~20MB), so expect roughly 50MB per ABI.
 #   **Signing:** the APKs are signed with the release keystore when the ANDROID_KEYSTORE_*
 #   secrets are set, and with the debug key otherwise — see the build step below. The debug
 #   key is generated per machine, so debug-signed releases cannot be installed over one
@@ -205,6 +206,59 @@ jobs:
         run: |
           cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \
             -o apps/mobile/android/app/src/main/jniLibs build --release -p ymemo-ffi
+      # The bundled sync daemon, from the same syncthing version the desktop ships.
+      #
+      # It goes in as `jniLibs/<abi>/libsyncthing.so` because the native library directory is
+      # the only place Android still lets an app execute a binary from — the `.so` name is a
+      # lie the platform requires, not a shared library. A binary from syncthing's own release
+      # page cannot be used: those are non-PIE static linux builds and Android refuses to exec
+      # them, so it is built here.
+      #
+      # Every flag below was earned; none is decoration:
+      #   GOOS=android + NDK CC — Go's own net package says "DNS requests don't work on
+      #     Android, so prefer the cgo resolver" (golang #10714). Without cgo the daemon
+      #     cannot resolve the discovery and relay servers, leaving it LAN-only.
+      #   -tags noassets — drops syncthing's embedded web GUI (~6MB per ABI). We never open
+      #     it, and without this the build needs a separate `go run build.go assets` step
+      #     because the generated bundle is not in the source tarball.
+      #   -tags noupgrade — compiles the self-updater out; the desktop's STNOUPGRADE only
+      #     disables it at runtime.
+      #   -checklinkname=0 — syncthing depends on wlynxg/anet, which reaches into
+      #     net.zoneCache with //go:linkname to work around Android's netlink restrictions.
+      #     Go 1.23+ rejects that by default and the link fails outright.
+      #
+      # API 24 must stay in step with `minSdk` in apps/mobile/android/app/build.gradle.kts.
+      - uses: actions/setup-go@v5
+        with:
+          # syncthing's go.mod asks for 1.25.
+          go-version: "1.25"
+          cache: false
+      - name: Build syncthing for all ABIs
+        env:
+          ANDROID_API: "24"
+        run: |
+          curl -sL -o st-src.tar.gz \
+            "https://github.com/syncthing/syncthing/archive/refs/tags/${SYNCTHING_VERSION}.tar.gz"
+          mkdir -p st-src && tar xzf st-src.tar.gz -C st-src --strip-components=1
+          ndk="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          out="$GITHUB_WORKSPACE/apps/mobile/android/app/src/main/jniLibs"
+          # <abi> <GOARCH> <clang triple prefix> [GOARM]
+          build_abi() {
+            echo "::group::syncthing for $1"
+            mkdir -p "$out/$1"
+            (cd st-src && CGO_ENABLED=1 GOOS=android GOARCH="$2" GOARM="${4:-}" \
+              CC="$ndk/$3$ANDROID_API-clang" \
+              go build -buildmode=pie -tags "noupgrade noassets" \
+                -ldflags "-s -w -checklinkname=0" \
+                -o "$out/$1/libsyncthing.so" ./cmd/syncthing)
+            # Must say "pie executable ... interpreter /system/bin/linker64"; anything else
+            # will not start on a device.
+            file "$out/$1/libsyncthing.so"
+            echo "::endgroup::"
+          }
+          build_abi arm64-v8a   arm64 aarch64-linux-android
+          build_abi armeabi-v7a arm   armv7a-linux-androideabi 7
+          build_abi x86_64      amd64 x86_64-linux-android
       # Signing: with the keystore secrets the APKs are signed with the release key, which is
       # what lets a user install a new version over the old one. Without them the build falls
       # back to the debug key (see apps/mobile/android/app/build.gradle.kts) and every release

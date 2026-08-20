@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `with_vault`
+// These functions are ignored because they are not marked as `pub`: `lan_lock`, `share_with_peer`, `sync_lock`, `with_sync`, `with_vault`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `from`, `from`, `from`
 
 /// Sets the language of core error messages (`"ko"`, `"en"`, or a locale like `"ko-KR"`).
@@ -124,10 +124,70 @@ Future<void> groupDelete({required String id}) =>
 /// delivered new logs.
 Future<void> syncRebuild() => RustLib.instance.api.crateApiSyncRebuild();
 
-/// Validates a scanned pairing code and extracts the device id. Until mobile Syncthing
-/// lands, this is only used to check and display it.
+/// Validates a scanned pairing code and extracts the device id, without pairing.
 Future<String> pairingDecode({required String code}) =>
     RustLib.instance.api.crateApiPairingDecode(code: code);
+
+/// Starts the daemon and registers the vault directory, returning this device's pairing code.
+///
+/// Idempotent, which is what makes it safe to call on every resume. The first start generates
+/// the device key and can take a few seconds; flutter_rust_bridge runs this off the UI thread
+/// on its own.
+Future<String> syncStart(
+        {required String binaryPath,
+        required String homeDir,
+        required String vaultDir}) =>
+    RustLib.instance.api.crateApiSyncStart(
+        binaryPath: binaryPath, homeDir: homeDir, vaultDir: vaultDir);
+
+/// Stops the daemon. Safe to call when it is not running.
+Future<void> syncStop() => RustLib.instance.api.crateApiSyncStop();
+
+/// Whether the daemon is up. Cheap: it does not talk to it.
+Future<bool> syncRunning() => RustLib.instance.api.crateApiSyncRunning();
+
+/// This device's pairing code (`YMEMO1:<device-id>`), for the other device to scan or type.
+Future<String> syncPairingCode() =>
+    RustLib.instance.api.crateApiSyncPairingCode();
+
+/// Pairs with a scanned or typed code: registers the peer and shares the vault with it.
+///
+/// This is **one half of pairing**. The other device has to do the same with our code, or
+/// syncthing will never connect the two.
+Future<void> syncPairWith({required String code}) =>
+    RustLib.instance.api.crateApiSyncPairWith(code: code);
+
+/// Devices this vault is shared with, ourselves excluded.
+Future<List<FfiSharedDevice>> syncDevices() =>
+    RustLib.instance.api.crateApiSyncDevices();
+
+/// Drops a peer. Only this side stops syncing; the other device keeps its own entry until it
+/// unpairs too.
+Future<void> syncUnpair({required String deviceId}) =>
+    RustLib.instance.api.crateApiSyncUnpair(deviceId: deviceId);
+
+/// Enters pairing mode and returns the code to show. Needs the daemon, since the code's whole
+/// purpose is to hand over its device id.
+Future<String> lanStart() => RustLib.instance.api.crateApiLanStart();
+
+/// The code currently on offer. It rotates every minute, so the screen re-reads it.
+Future<String?> lanCode() => RustLib.instance.api.crateApiLanCode();
+
+/// Leaves pairing mode: the socket closes and the code stops being answered.
+Future<void> lanStop() => RustLib.instance.api.crateApiLanStop();
+
+/// Picks up devices that paired with **us** (they typed our code) and shares the vault with
+/// each. Returns their ids, for the screen to report. Poll it while pairing mode is on.
+Future<List<String>> lanPollPaired() =>
+    RustLib.instance.api.crateApiLanPollPaired();
+
+/// Pairs with the device showing `code`: broadcasts for it, and on an answer shares the vault
+/// with it. `None` means nobody answered in time — a wrong or expired code, or a network that
+/// drops broadcasts.
+///
+/// Blocks for up to `timeout_secs`; flutter_rust_bridge keeps that off the UI thread.
+Future<String?> lanJoin({required String code, required BigInt timeoutSecs}) =>
+    RustLib.instance.api.crateApiLanJoin(code: code, timeoutSecs: timeoutSecs);
 
 /// A photo attachment as handed to Dart.
 ///
@@ -272,6 +332,34 @@ class FfiMemo {
           updatedAt == other.updatedAt;
 }
 
+/// Another device sharing this vault.
+class FfiSharedDevice {
+  /// Syncthing device id — also what unpairing takes.
+  final String id;
+
+  /// Name the peer announced; empty when it has none.
+  final String name;
+  final bool connected;
+
+  const FfiSharedDevice({
+    required this.id,
+    required this.name,
+    required this.connected,
+  });
+
+  @override
+  int get hashCode => id.hashCode ^ name.hashCode ^ connected.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiSharedDevice &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          connected == other.connected;
+}
+
 /// The mobile UI strings in the current language; Dart fetches these once at startup.
 ///
 /// Keeping them in Dart instead would split the languages — catalog for core errors,
@@ -283,10 +371,24 @@ class FfiStrings {
   final String bodyHint;
   final String cameraError;
   final String close;
+  final String connected;
+  final String copied;
+  final String copy;
+  final String disconnected;
+  final String lanConnect;
+  final String lanDone;
+  final String lanEnterCode;
+  final String lanMyCode;
+  final String lanNotFound;
+  final String lanPairing;
+  final String lanSearching;
   final String listTitle;
   final String masterPassword;
+  final String myCode;
   final String newMemo;
+  final String noDevices;
   final String opening;
+  final String pairAdded;
   final String photoCamera;
   final String photoGallery;
   final String photoMissing;
@@ -294,22 +396,39 @@ class FfiStrings {
   final String photoSize;
   final String save;
   final String scanHint;
-  final String scanPairingUnavailable;
   final String scanQr;
   final String scanResult;
+  final String syncDevices;
   final String syncNow;
+  final String syncStarting;
+  final String syncUnavailable;
   final String titleHint;
   final String unlock;
+  final String unpair;
 
   const FfiStrings({
     required this.addPhoto,
     required this.bodyHint,
     required this.cameraError,
     required this.close,
+    required this.connected,
+    required this.copied,
+    required this.copy,
+    required this.disconnected,
+    required this.lanConnect,
+    required this.lanDone,
+    required this.lanEnterCode,
+    required this.lanMyCode,
+    required this.lanNotFound,
+    required this.lanPairing,
+    required this.lanSearching,
     required this.listTitle,
     required this.masterPassword,
+    required this.myCode,
     required this.newMemo,
+    required this.noDevices,
     required this.opening,
+    required this.pairAdded,
     required this.photoCamera,
     required this.photoGallery,
     required this.photoMissing,
@@ -317,12 +436,15 @@ class FfiStrings {
     required this.photoSize,
     required this.save,
     required this.scanHint,
-    required this.scanPairingUnavailable,
     required this.scanQr,
     required this.scanResult,
+    required this.syncDevices,
     required this.syncNow,
+    required this.syncStarting,
+    required this.syncUnavailable,
     required this.titleHint,
     required this.unlock,
+    required this.unpair,
   });
 
   @override
@@ -331,10 +453,24 @@ class FfiStrings {
       bodyHint.hashCode ^
       cameraError.hashCode ^
       close.hashCode ^
+      connected.hashCode ^
+      copied.hashCode ^
+      copy.hashCode ^
+      disconnected.hashCode ^
+      lanConnect.hashCode ^
+      lanDone.hashCode ^
+      lanEnterCode.hashCode ^
+      lanMyCode.hashCode ^
+      lanNotFound.hashCode ^
+      lanPairing.hashCode ^
+      lanSearching.hashCode ^
       listTitle.hashCode ^
       masterPassword.hashCode ^
+      myCode.hashCode ^
       newMemo.hashCode ^
+      noDevices.hashCode ^
       opening.hashCode ^
+      pairAdded.hashCode ^
       photoCamera.hashCode ^
       photoGallery.hashCode ^
       photoMissing.hashCode ^
@@ -342,12 +478,15 @@ class FfiStrings {
       photoSize.hashCode ^
       save.hashCode ^
       scanHint.hashCode ^
-      scanPairingUnavailable.hashCode ^
       scanQr.hashCode ^
       scanResult.hashCode ^
+      syncDevices.hashCode ^
       syncNow.hashCode ^
+      syncStarting.hashCode ^
+      syncUnavailable.hashCode ^
       titleHint.hashCode ^
-      unlock.hashCode;
+      unlock.hashCode ^
+      unpair.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -358,10 +497,24 @@ class FfiStrings {
           bodyHint == other.bodyHint &&
           cameraError == other.cameraError &&
           close == other.close &&
+          connected == other.connected &&
+          copied == other.copied &&
+          copy == other.copy &&
+          disconnected == other.disconnected &&
+          lanConnect == other.lanConnect &&
+          lanDone == other.lanDone &&
+          lanEnterCode == other.lanEnterCode &&
+          lanMyCode == other.lanMyCode &&
+          lanNotFound == other.lanNotFound &&
+          lanPairing == other.lanPairing &&
+          lanSearching == other.lanSearching &&
           listTitle == other.listTitle &&
           masterPassword == other.masterPassword &&
+          myCode == other.myCode &&
           newMemo == other.newMemo &&
+          noDevices == other.noDevices &&
           opening == other.opening &&
+          pairAdded == other.pairAdded &&
           photoCamera == other.photoCamera &&
           photoGallery == other.photoGallery &&
           photoMissing == other.photoMissing &&
@@ -369,10 +522,13 @@ class FfiStrings {
           photoSize == other.photoSize &&
           save == other.save &&
           scanHint == other.scanHint &&
-          scanPairingUnavailable == other.scanPairingUnavailable &&
           scanQr == other.scanQr &&
           scanResult == other.scanResult &&
+          syncDevices == other.syncDevices &&
           syncNow == other.syncNow &&
+          syncStarting == other.syncStarting &&
+          syncUnavailable == other.syncUnavailable &&
           titleHint == other.titleHint &&
-          unlock == other.unlock;
+          unlock == other.unlock &&
+          unpair == other.unpair;
 }

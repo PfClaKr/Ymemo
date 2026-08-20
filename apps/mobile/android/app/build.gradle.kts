@@ -49,7 +49,10 @@ android {
         applicationId = "dev.ymemo.ymemo_mobile"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // Never below 24: the bundled syncthing is compiled against the NDK's API 24 headers
+        // (ANDROID_API in the release workflow), and a binary built for a newer API than the
+        // device it runs on fails to load. Bump both together, never just one.
+        minSdk = maxOf(flutter.minSdkVersion, 24)
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
@@ -57,6 +60,22 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+    }
+
+    // ---- Bundled sync daemon -------------------------------------------------------------
+    // syncthing rides along as `jniLibs/<abi>/libsyncthing.so`, because the native library
+    // directory is the only place Android still lets an app execute a binary from.
+    //
+    //  - useLegacyPackaging: without it the .so stays compressed inside the APK and is never
+    //    unpacked, so there is no file to execute. This applies to the Rust library too —
+    //    a slightly larger install, and the price of shipping a daemon.
+    //  - keepDebugSymbols: AGP strips native libraries by default, and stripping a Go binary
+    //    can leave it unrunnable. Same reason the .rpm turns stripping off.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+            keepDebugSymbols += "**/libsyncthing.so"
+        }
     }
 
     signingConfigs {
