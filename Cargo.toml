@@ -53,8 +53,10 @@ argon2 = "0.5"            # Argon2id key derivation
 rand = "0.8"              # OsRng for salts and nonces
 sha2 = "0.10"             # blob content hashes (file name + convergent nonce)
 
-# HTTP client for Syncthing's REST API (localhost only, so no TLS)
-ureq = { version = "3", default-features = false, features = ["json"] }
+# HTTP client. Syncthing's REST API is localhost and needs no TLS, but the update check talks
+# to api.github.com, so rustls is in. The roots are the bundled Mozilla set rather than the
+# platform's: one behaviour on every OS, and nothing to configure on Android.
+ureq = { version = "3", default-features = false, features = ["json", "rustls"] }
 
 # Flutter binding runtime. The runtime, the codegen CLI and the Dart package must all be
 # the exact same version, hence the pin (see apps/mobile/pubspec.yaml).

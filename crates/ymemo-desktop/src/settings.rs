@@ -25,6 +25,9 @@ pub const MERGE_SECONDS_RANGE: (i32, i32) = (3, 3600);
 pub const UNLOCK_DAYS_MAX: i32 = 365;
 /// Maximum idle auto-lock in minutes; 0 disables it.
 pub const IDLE_MINUTES_MAX: i32 = 1440;
+/// Gap between automatic update checks. Daily is often enough for a release cadence measured
+/// in weeks, and it keeps the request rare enough to be unremarkable.
+const UPDATE_CHECK_INTERVAL_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// Device-local preferences; every field defaults, so older files still load.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -42,6 +45,11 @@ pub struct Settings {
     pub default_opacity: i32,
     /// How often other devices' changes are pulled in, in seconds.
     pub merge_seconds: i32,
+    /// Whether to ask GitHub about newer releases. The app's only outbound request, so it is
+    /// the user's to refuse; see `ymemo_core::update`.
+    pub update_check: bool,
+    /// When that last happened (epoch millis), so a restart does not mean another request.
+    pub last_update_check: i64,
 }
 
 impl Default for Settings {
@@ -53,6 +61,8 @@ impl Default for Settings {
             default_color: "yellow".into(),
             default_opacity: 100,
             merge_seconds: 15,
+            update_check: true,
+            last_update_check: 0,
         }
     }
 }
@@ -98,6 +108,16 @@ impl Settings {
         self.merge_seconds = self
             .merge_seconds
             .clamp(MERGE_SECONDS_RANGE.0, MERGE_SECONDS_RANGE.1);
+        // A clock that went backwards, or a hand-edited file, must not park the next check
+        // in the future forever.
+        if self.last_update_check < 0 || self.last_update_check > now_millis() {
+            self.last_update_check = 0;
+        }
+    }
+
+    /// Whether an update check is due: enabled, and not already done today.
+    pub fn update_check_due(&self) -> bool {
+        self.update_check && now_millis() - self.last_update_check >= UPDATE_CHECK_INTERVAL_MS
     }
 
     /// Resolves `"auto"` against the system locale.
@@ -249,12 +269,18 @@ mod tests {
             default_color: "chartreuse".into(),
             default_opacity: 1,
             merge_seconds: 0,
+            update_check: true,
+            // A timestamp from the future, as a clock that went backwards would leave.
+            last_update_check: i64::MAX,
         };
         s.sanitize();
         assert_eq!(s.lang, "auto");
         assert_eq!(s.unlock_days, UNLOCK_DAYS_MAX);
         assert_eq!(s.idle_lock_minutes, 0);
         assert_eq!(s.default_color, "yellow");
+        // A future timestamp is dropped, so the next check is not postponed forever.
+        assert_eq!(s.last_update_check, 0);
+        assert!(s.update_check_due());
         assert!(s.default_opacity >= 20); // raised to the core's MIN_OPACITY
         assert_eq!(s.merge_seconds, MERGE_SECONDS_RANGE.0);
     }

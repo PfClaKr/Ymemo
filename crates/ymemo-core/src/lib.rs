@@ -12,6 +12,7 @@ pub mod crypto;
 pub mod lan_pair;
 pub mod pairing;
 pub mod sync;
+pub mod update;
 pub mod vault;
 
 use anyhow::Result;

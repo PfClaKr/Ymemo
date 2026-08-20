@@ -46,10 +46,19 @@ export component SettingsWindow inherits Window {
     in property <bool> unlocked: false;
     // Running version (CARGO_PKG_VERSION), for bug reports.
     in property <string> app-version;
+    // Whether to ask GitHub about new releases. The only outbound request the app makes, so
+    // it is a setting rather than a given.
+    in-out property <bool> update-check: true;
+    // Version of a newer release, empty when there is none (or none known yet).
+    in property <string> update-version;
+    // One line about the last check: in progress, up to date, or why it failed.
+    in property <string> update-status;
 
     callback apply();
     callback lock-now();
     callback close-requested();
+    callback check-update();
+    callback open-update();
 
     VerticalLayout {
         padding: 16px;
@@ -161,6 +170,48 @@ export component SettingsWindow inherits Window {
                 minimum: 3;
                 maximum: 3600;
                 value <=> root.merge-seconds;
+            }
+        }
+
+        // ---- Updates ----
+        SettingRow {
+            label: Strings.ui_settings_update_check;
+            hint: Strings.ui_settings_update_check_hint;
+            HorizontalLayout {
+                spacing: 6px;
+                TabButton {
+                    label: Strings.ui_settings_update_on;
+                    active: root.update-check;
+                    ink: #d8d2c2;
+                    clicked => { root.update-check = true; }
+                }
+                TabButton {
+                    label: Strings.ui_settings_update_off;
+                    active: !root.update-check;
+                    ink: #d8d2c2;
+                    clicked => { root.update-check = false; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Button {
+                    text: Strings.ui_settings_check_now;
+                    clicked => { root.check-update(); }
+                }
+            }
+        }
+
+        if root.update-status != "": Text {
+            text: root.update-status;
+            font-size: 11px;
+            color: root.update-version != "" ? #e8d98a : #a8a294;
+            wrap: word-wrap;
+        }
+
+        if root.update-version != "": HorizontalLayout {
+            alignment: start;
+            Button {
+                text: Strings.ui_update_open;
+                primary: true;
+                clicked => { root.open-update(); }
             }
         }
 

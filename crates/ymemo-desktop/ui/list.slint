@@ -53,6 +53,9 @@ export component ListWindow inherits Window {
     callback sync-toggled(bool);
     callback open-settings();
     callback lock-now();
+    // Newer release, empty when there is none; the banner below opens its page.
+    in property <string> update-version;
+    callback open-update();
 
     private property <bool> show-sync: false;
     changed show-sync => { root.sync-toggled(self.show-sync); }
@@ -106,6 +109,36 @@ export component ListWindow inherits Window {
             Button {
                 text: "＋";
                 clicked => { root.commit-edit(); root.new-memo(); }
+            }
+        }
+
+        // A new release: one line, dismissed by updating or by turning the check off in
+        // settings. Never a dialog — this is a memo app, not an updater.
+        if root.update-version != "": Rectangle {
+            height: 26px;
+            border-radius: 6px;
+            background: #3c3730;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 6px;
+                Text {
+                    text: Strings.ui_update_available + " " + root.update-version;
+                    font-size: 11px;
+                    color: #e8d98a;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: Strings.ui_update_open;
+                    font-size: 11px;
+                    color: #9ec5e8;
+                    vertical-alignment: center;
+                }
+            }
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.open-update(); }
             }
         }
 

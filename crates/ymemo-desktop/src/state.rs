@@ -13,7 +13,7 @@ use slint::VecModel;
 use ymemo_core::vault::Vault;
 
 use crate::settings::Settings;
-use crate::{ListRow, ListWindow, LockWindow, StickyWindow};
+use crate::{ListRow, ListWindow, LockWindow, SettingsWindow, StickyWindow};
 
 pub(crate) type SharedVault = Rc<RefCell<Option<Vault>>>;
 
@@ -68,6 +68,8 @@ thread_local! {
 pub(crate) struct AppUi {
     pub(crate) lock: LockWindow,
     pub(crate) list: ListWindow,
+    /// Built once at startup and only shown or hidden, so a strong handle is fine.
+    pub(crate) settings: SettingsWindow,
     pub(crate) unlocked: Rc<Cell<bool>>,
     /// So the tray's "lock" runs the same lock path.
     pub(crate) ctx: Ctx,
