@@ -1,0 +1,204 @@
+// Sync lifecycle for the mobile app.
+//
+// The daemon is the same bundled syncthing the desktop runs, driven by the same core code
+// (crates/ymemo-ffi exposes it as sync_*). Two things are mobile-specific:
+//
+//  - **Where the binary is.** Android only executes binaries from the native library
+//    directory, so it ships as `libsyncthing.so` and MainActivity hands the path over the
+//    `dev.ymemo/native` channel. No path, no sync: the app then runs local-only rather than
+//    refusing to start, which is what a debug build without the bundled daemon does.
+//  - **When it runs.** Only while the app is in the foreground. Android freezes background
+//    processes anyway, so keeping it alive would mean a foreground service and a permanent
+//    notification for a memo app that syncs perfectly well whenever it is opened.
+//
+// It starts **before the vault is unlocked**, exactly as on the desktop: a brand-new device
+// has to pair and receive vault.json first, or unlocking would create a second vault with a
+// different salt and the two would never converge.
+
+import 'dart:io' show Platform;
+
+import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
+
+import 'src/rust/api.dart' as ffi;
+
+/// Where the app keeps the daemon's own state and the synced vault.
+class SyncPaths {
+  const SyncPaths({required this.homeDir, required this.vaultDir});
+
+  /// syncthing's config and database — device-local, never synced.
+  final String homeDir;
+
+  /// The shared folder: vault.json and the per-device logs.
+  final String vaultDir;
+}
+
+/// Runs the daemon while the app is in the foreground and exposes what the UI shows.
+///
+/// A [ChangeNotifier] rather than anything larger: three screens read it and nothing else in
+/// the app has state worth a framework.
+class SyncController extends ChangeNotifier with WidgetsBindingObserver {
+  SyncController(this.paths);
+
+  static const MethodChannel _native = MethodChannel('dev.ymemo/native');
+
+  /// How long a join broadcasts before giving up. Each attempt costs both sides an Argon2
+  /// derivation, so this is a handful of retries, not a busy loop.
+  static const int _joinTimeoutSecs = 8;
+
+  final SyncPaths paths;
+
+  String? _binaryPath;
+  String? _code;
+  String? _error;
+  bool _starting = false;
+
+  /// This device's pairing code, once the daemon is up.
+  String? get pairingCode => _code;
+
+  /// The last failure, in the catalog's language; cleared by a successful start.
+  String? get error => _error;
+
+  bool get starting => _starting;
+  bool get running => _code != null;
+
+  /// False when this build ships no daemon — the UI says so instead of offering pairing.
+  bool get available => _binaryPath != null;
+
+  /// Begins observing the lifecycle and starts the daemon. Call once, at app start.
+  Future<void> init() async {
+    WidgetsBinding.instance.addObserver(this);
+    _binaryPath = await _findBinary();
+    if (_binaryPath == null) {
+      notifyListeners(); // available == false; the UI explains it
+      return;
+    }
+    await start();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        start();
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+      case AppLifecycleState.hidden:
+        stop();
+      case AppLifecycleState.inactive:
+        break; // a passing overlay is not a reason to tear the daemon down
+    }
+  }
+
+  /// Starts the daemon if it is not already running. Safe to call repeatedly — the Rust side
+  /// is idempotent — which is what makes it usable straight from the lifecycle callback.
+  Future<void> start() async {
+    final binary = _binaryPath;
+    if (binary == null || _starting) return;
+    _starting = true;
+    notifyListeners();
+    try {
+      // The first start generates the device key and takes a few seconds; this runs on a
+      // worker thread, so the UI keeps drawing.
+      _code = await ffi.syncStart(
+        binaryPath: binary,
+        homeDir: paths.homeDir,
+        vaultDir: paths.vaultDir,
+      );
+      _error = null;
+    } catch (e) {
+      _code = null;
+      _error = '$e';
+    } finally {
+      _starting = false;
+      notifyListeners();
+    }
+  }
+
+  /// Stops the daemon. Errors are swallowed: this runs while the app is going away.
+  Future<void> stop() async {
+    if (_code == null && !_starting) return;
+    // Pairing mode goes with it. The socket is moot once Android freezes us, but the wifi
+    // multicast lock would keep the radio awake in the background for nothing.
+    await lanStop();
+    try {
+      await ffi.syncStop();
+    } catch (_) {
+      // Nothing useful to do — the process is being backgrounded either way.
+    }
+    _code = null;
+    notifyListeners();
+  }
+
+  /// Registers a scanned or typed code. Only half of pairing: the other device has to add
+  /// this one's code too.
+  Future<void> pairWith(String code) => ffi.syncPairWith(code: code);
+
+  // ---- LAN pairing (the 6-digit code) -----------------------------------------------
+  //
+  // Both halves at once: whichever side answers registers the other, so unlike the QR path
+  // there is nothing left to do on the other device. Pairing mode is on only while the
+  // screen is open — it holds a UDP socket and a wifi multicast lock.
+
+  /// Enters pairing mode; returns the code to show, or null when there is no daemon to pair.
+  Future<String?> lanStart() async {
+    if (!running) return null;
+    // Without the multicast lock the wifi stack quietly drops the other device's broadcast.
+    // Failing to take it is not fatal: on many devices the packet arrives anyway.
+    await _invoke<bool>('acquireMulticastLock');
+    return ffi.lanStart();
+  }
+
+  /// Leaves pairing mode and drops the lock. Safe to call when it was never entered.
+  Future<void> lanStop() async {
+    await _invoke<void>('releaseMulticastLock');
+    try {
+      await ffi.lanStop();
+    } catch (_) {
+      // The screen is closing; there is nothing to report it to.
+    }
+  }
+
+  /// The code currently on offer — it rotates every minute, so the screen re-reads it.
+  Future<String?> lanCode() => ffi.lanCode();
+
+  /// Devices that used *our* code, already registered by the Rust side.
+  Future<List<String>> lanPollPaired() => ffi.lanPollPaired();
+
+  /// Pairs with the device showing [code]. Null means nobody answered in time.
+  Future<String?> lanJoin(String code) =>
+      ffi.lanJoin(code: code, timeoutSecs: BigInt.from(_joinTimeoutSecs));
+
+  /// Peers this vault is shared with. Empty while the daemon is down.
+  Future<List<ffi.FfiSharedDevice>> devices() async {
+    if (!running) return const [];
+    return ffi.syncDevices();
+  }
+
+  Future<void> unpair(String deviceId) => ffi.syncUnpair(deviceId: deviceId);
+
+  /// Calls the host, treating an absent implementation as "not available" — every one of
+  /// these is an optimisation the app can live without.
+  Future<T?> _invoke<T>(String method) async {
+    try {
+      return await _native.invokeMethod<T>(method);
+    } on PlatformException catch (e) {
+      debugPrint('$method failed: ${e.message}');
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  /// The daemon's path, or null where there is none to run.
+  Future<String?> _findBinary() async {
+    if (!Platform.isAndroid) return null; // iOS cannot exec a bundled binary at all
+    return _invoke<String>('syncBinaryPath');
+  }
+}

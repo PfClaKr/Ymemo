@@ -5,6 +5,11 @@
 //! between devices, while `Vault::rebuild` does the merging. Logs are per-device and
 //! append-only so files never conflict, and their contents are already E2E encrypted, so
 //! the transport does not have to be trusted.
+//!
+//! **The daemon never outlives the app.** `Drop` shuts it down on a clean exit, and the OS
+//! takes care of the unclean ones: a job object on Windows, `PR_SET_PDEATHSIG` on Linux.
+//! Without that an orphan keeps `ymemo-sync` locked (Windows) or keeps syncing a vault whose
+//! app is gone (Linux), which is exactly what makes installing and uninstalling messy.
 
 use anyhow::{anyhow, bail, Context, Result};
 use ymemo_i18n::t;
@@ -15,12 +20,23 @@ use std::time::{Duration, Instant};
 /// How long to wait for a first start, key generation included.
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Id of the vault folder inside Syncthing.
+///
+/// **Every device must use the same one.** Syncthing matches shared folders by id, so a
+/// desktop and a phone that disagree here would pair happily and then sync nothing. That is
+/// why it lives in the core rather than in one of the front ends.
+pub const VAULT_FOLDER_ID: &str = "ymemo-vault";
+
 /// A running Syncthing child process plus its REST client. Dropping it shuts the daemon
 /// down (REST shutdown first, then kill).
 pub struct Syncthing {
     child: Child,
     base_url: String,
     api_key: String,
+    /// Windows: the job object that kills the daemon when this process goes away. Nothing
+    /// reads it; it only has to stay open. See [`kill_with_parent`].
+    #[cfg(windows)]
+    _job: Option<JobHandle>,
 }
 
 /// Another device sharing this vault, as returned by [`Syncthing::shared_devices`].
@@ -93,11 +109,27 @@ impl Syncthing {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
+        // Linux: ask the kernel to signal the daemon when we die (see kill_with_parent).
+        #[cfg(target_os = "linux")]
+        unsafe {
+            use std::os::unix::process::CommandExt;
+            cmd.pre_exec(|| {
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                // The parent may already have died between fork and here, in which case the
+                // signal was missed; getppid() == 1 catches that window.
+                if libc::getppid() == 1 {
+                    libc::raise(libc::SIGTERM);
+                }
+                Ok(())
+            });
+        }
         let child = cmd
             .spawn()
             .with_context(|| t!("core.syncthing_spawn_failed", path = binary.display()))?;
 
         let mut st = Self {
+            #[cfg(windows)]
+            _job: kill_with_parent(&child),
             child,
             base_url: format!("http://{gui}"),
             api_key: String::new(),
@@ -297,6 +329,64 @@ impl Syncthing {
 impl Drop for Syncthing {
     fn drop(&mut self) {
         let _ = self.shutdown_inner();
+    }
+}
+
+/// Windows: put the daemon in a job object that kills its members once the last handle to it
+/// closes — which the kernel does for us when this process ends, however it ends.
+///
+/// `Drop` only covers a clean exit. An installer, Task Manager or a crash terminates us
+/// without running any of it, and the orphaned daemon then keeps `ymemo-sync.exe` locked, so
+/// installing or uninstalling over it fails or demands a reboot. The job closes that hole;
+/// the Linux counterpart is `PR_SET_PDEATHSIG` in [`Syncthing::spawn`].
+///
+/// `None` when the job cannot be created (an old Windows nested-job restriction, say): the
+/// daemon then behaves as before rather than the app failing to start.
+#[cfg(windows)]
+fn kill_with_parent(child: &Child) -> Option<JobHandle> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject,
+        JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            return None;
+        }
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let ok = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            std::ptr::addr_of!(info).cast(),
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        ) != 0
+            && AssignProcessToJobObject(job, child.as_raw_handle() as _) != 0;
+        if !ok {
+            CloseHandle(job);
+            return None;
+        }
+        Some(JobHandle(job))
+    }
+}
+
+/// Owns the job handle from [`kill_with_parent`]; closing it kills the daemon.
+#[cfg(windows)]
+pub struct JobHandle(windows_sys::Win32::Foundation::HANDLE);
+
+// A job handle is just a kernel handle, safe to move between threads. The raw pointer inside
+// is what makes the compiler doubt it.
+#[cfg(windows)]
+unsafe impl Send for JobHandle {}
+
+#[cfg(windows)]
+impl Drop for JobHandle {
+    fn drop(&mut self) {
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
     }
 }
 

@@ -7,30 +7,61 @@
 // language of the core's error messages. To add one, put a `mobile.*` key in ko.json and
 // en.json and a field in FfiStrings in crates/ymemo-ffi; the ymemo-i18n tests check it.
 
+import 'dart:async';
 import 'dart:io' show Platform;
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'src/rust/api.dart';
 import 'src/rust/frb_generated.dart';
+import 'sync.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await RustLib.init();
   // Keep core errors and UI text in one language; an unknown locale falls back to the system one.
   await setLanguage(code: Platform.localeName);
-  runApp(YmemoApp(strings: await mobileStrings()));
+
+  // Every path the app uses is derived here, once. The vault directory in particular is
+  // shared between the two: it is what the daemon syncs and what the vault is opened from,
+  // and two spellings of it would mean syncing one directory while reading another.
+  final docs = await getApplicationDocumentsDirectory();
+  final sync = SyncController(SyncPaths(
+    homeDir: '${docs.path}/syncthing',
+    vaultDir: '${docs.path}/vault',
+  ));
+
+  runApp(YmemoApp(
+    strings: await mobileStrings(),
+    sync: sync,
+    cacheDbPath: '${docs.path}/ymemo.db',
+  ));
+
+  // Not awaited: the daemon's first start generates a device key and takes seconds, and the
+  // lock screen has nothing to wait for. It comes up **before unlocking** on purpose — a new
+  // device pairs and receives vault.json first, otherwise unlocking would create a second
+  // vault with a different salt that could never converge with the first.
+  unawaited(sync.init());
 }
 
 class YmemoApp extends StatelessWidget {
-  const YmemoApp({super.key, required this.strings});
+  const YmemoApp({
+    super.key,
+    required this.strings,
+    required this.sync,
+    required this.cacheDbPath,
+  });
 
   final FfiStrings strings;
+  final SyncController sync;
+
+  /// Device-local SQLite cache; rebuilt from the logs, never synced.
+  final String cacheDbPath;
 
   @override
   Widget build(BuildContext context) {
@@ -40,16 +71,26 @@ class YmemoApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFE6D24A)),
         useMaterial3: true,
       ),
-      home: LockScreen(strings: strings),
+      home: LockScreen(strings: strings, sync: sync, cacheDbPath: cacheDbPath),
     );
   }
 }
 
 /// Lock screen: opens the vault with the master password, creating it if needed.
+///
+/// Pairing is reachable from here, before any password: a device that has just been installed
+/// has to receive the existing vault.json before it can be unlocked at all.
 class LockScreen extends StatefulWidget {
-  const LockScreen({super.key, required this.strings});
+  const LockScreen({
+    super.key,
+    required this.strings,
+    required this.sync,
+    required this.cacheDbPath,
+  });
 
   final FfiStrings strings;
+  final SyncController sync;
+  final String cacheDbPath;
 
   @override
   State<LockScreen> createState() => _LockScreenState();
@@ -64,16 +105,17 @@ class _LockScreenState extends State<LockScreen> {
     if (_password.text.isEmpty || _busy) return;
     setState(() => _busy = true);
     try {
-      final docs = await getApplicationDocumentsDirectory();
-      // vault/ is the directory that will be synced; local-only until Syncthing lands.
+      // The same directory the daemon shares (see main), so what arrives is what is opened.
       await vaultOpen(
-        vaultDir: '${docs.path}/vault',
-        cacheDbPath: '${docs.path}/ymemo.db',
+        vaultDir: widget.sync.paths.vaultDir,
+        cacheDbPath: widget.cacheDbPath,
         password: _password.text,
       );
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => MemoListScreen(strings: widget.strings)),
+        MaterialPageRoute(
+          builder: (_) => MemoListScreen(strings: widget.strings, sync: widget.sync),
+        ),
       );
     } catch (e) {
       // Core errors already arrive in the current language.
@@ -86,6 +128,12 @@ class _LockScreenState extends State<LockScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        // No title: the lock screen says what it is. The action is here so a fresh install
+        // can pair before it has a vault to unlock.
+        backgroundColor: Colors.transparent,
+        actions: [SyncButton(strings: widget.strings, sync: widget.sync)],
+      ),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -120,26 +168,51 @@ class _LockScreenState extends State<LockScreen> {
 
 /// Memo list, with add, open and delete.
 class MemoListScreen extends StatefulWidget {
-  const MemoListScreen({super.key, required this.strings});
+  const MemoListScreen({super.key, required this.strings, required this.sync});
 
   final FfiStrings strings;
+  final SyncController sync;
 
   @override
   State<MemoListScreen> createState() => _MemoListScreenState();
 }
 
 class _MemoListScreenState extends State<MemoListScreen> {
+  /// How often logs that have arrived are merged in, matching the desktop's timer. The
+  /// daemon delivers files whenever it likes; this is what turns them into memos on screen.
+  static const _mergeInterval = Duration(seconds: 15);
+
   List<FfiMemo> _memos = [];
+  Timer? _merge;
 
   @override
   void initState() {
     super.initState();
     _reload();
+    _merge = Timer.periodic(_mergeInterval, (_) => _mergeNow());
+  }
+
+  @override
+  void dispose() {
+    _merge?.cancel();
+    super.dispose();
   }
 
   Future<void> _reload() async {
     final memos = await memoList();
     if (mounted) setState(() => _memos = memos);
+  }
+
+  /// Folds in whatever the other devices have delivered, then redraws.
+  Future<void> _mergeNow() async {
+    try {
+      await syncRebuild();
+    } catch (e) {
+      // A merge failure is not worth interrupting note-taking over; the next tick retries.
+      debugPrint('merge failed: $e');
+      return;
+    }
+    await _reload();
   }
 
   /// Creates an empty memo and opens the editor; fewer taps than asking for a title first.
@@ -170,21 +243,13 @@ class _MemoListScreenState extends State<MemoListScreen> {
       appBar: AppBar(
         title: Text(widget.strings.listTitle),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.qr_code_scanner),
-            tooltip: widget.strings.scanQr,
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => ScanScreen(strings: widget.strings)),
-            ),
-          ),
+          SyncButton(strings: widget.strings, sync: widget.sync),
           IconButton(
             icon: const Icon(Icons.sync),
             tooltip: widget.strings.syncNow,
-            onPressed: () async {
-              // Picks up any logs other devices have delivered to the vault directory.
-              await syncRebuild();
-              await _reload();
-            },
+            // The timer does this every 15s; the button is for when you are waiting on a
+            // memo you just wrote on the other device.
+            onPressed: _mergeNow,
           ),
         ],
       ),
@@ -404,19 +469,364 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   }
 }
 
-/// Scans another device's pairing QR.
+/// Scans another device's pairing QR and registers it.
 ///
-/// The core validates the format (`pairingDecode`), so a format change leaves Dart alone.
-/// The scanned device **cannot actually be registered** yet: without mobile Syncthing
-/// (gomobile) there is no way to add a peer to the shared folder. So this only validates and
-/// says so on screen, rather than failing quietly and leaving the user guessing.
+/// The core validates the format and does the registering (`syncPairWith`), so a change to
+/// either leaves Dart alone. This is only ever half the job — the scanned device has to be
+/// given this one's code too — which is what the message on the way out says.
 class ScanScreen extends StatefulWidget {
-  const ScanScreen({super.key, required this.strings});
+  const ScanScreen({super.key, required this.strings, required this.sync});
 
   final FfiStrings strings;
+  final SyncController sync;
 
   @override
   State<ScanScreen> createState() => _ScanScreenState();
+}
+
+/// App-bar button opening the sync screen, with the daemon's state on its face: a spinner
+/// while it starts, a struck-through icon when there is nothing to sync with.
+class SyncButton extends StatelessWidget {
+  const SyncButton({super.key, required this.strings, required this.sync});
+
+  final FfiStrings strings;
+  final SyncController sync;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: sync,
+      builder: (context, _) {
+        final Widget icon;
+        if (sync.starting) {
+          icon = const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          );
+        } else if (sync.running) {
+          icon = const Icon(Icons.devices);
+        } else {
+          icon = const Icon(Icons.cloud_off);
+        }
+        return IconButton(
+          icon: icon,
+          tooltip: strings.syncDevices,
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => SyncScreen(strings: strings, sync: sync)),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Pairing and the list of paired devices.
+///
+/// Pairing is **mutual**: adding the other device here only opens this side. Hence the code
+/// at the top — the other device has to be given it, by QR from the desktop's window or by
+/// typing it in. Until both sides have done their half, syncthing never connects the two.
+class SyncScreen extends StatefulWidget {
+  const SyncScreen({super.key, required this.strings, required this.sync});
+
+  final FfiStrings strings;
+  final SyncController sync;
+
+  @override
+  State<SyncScreen> createState() => _SyncScreenState();
+}
+
+class _SyncScreenState extends State<SyncScreen> {
+  /// How often the shown code is re-read and incoming pairings are collected. The code
+  /// rotates once a minute; this is only so the screen never shows a stale one.
+  static const _lanPollInterval = Duration(seconds: 1);
+
+  List<FfiSharedDevice> _devices = const [];
+
+  final _lanInput = TextEditingController();
+  String? _lanCode;
+  String? _lanMessage;
+  bool _joining = false;
+  Timer? _lanPoll;
+
+  @override
+  void initState() {
+    super.initState();
+    _reloadDevices();
+    _startLan();
+  }
+
+  @override
+  void dispose() {
+    _lanPoll?.cancel();
+    _lanInput.dispose();
+    // Leaves pairing mode: closes the socket and drops the wifi multicast lock. Anything
+    // still in flight is finished by the Rust side on its own thread.
+    widget.sync.lanStop();
+    super.dispose();
+  }
+
+  /// Enters pairing mode for as long as this screen is open.
+  Future<void> _startLan() async {
+    try {
+      final code = await widget.sync.lanStart();
+      if (!mounted) return;
+      setState(() => _lanCode = code);
+      if (code != null) {
+        _lanPoll = Timer.periodic(_lanPollInterval, (_) => _pollLan());
+      }
+    } catch (e) {
+      if (mounted) setState(() => _lanMessage = '$e');
+    }
+  }
+
+  /// Refreshes the displayed code and picks up devices that used it. The Rust side has
+  /// already registered them; this only has to say so and redraw the list.
+  Future<void> _pollLan() async {
+    try {
+      final code = await widget.sync.lanCode();
+      if (code == null) {
+        // Backgrounding the app leaves pairing mode; coming back re-enters it. Null again
+        // just means the daemon is not up yet, and the next tick tries once more.
+        final restarted = await widget.sync.lanStart();
+        if (mounted) setState(() => _lanCode = restarted);
+        return;
+      }
+      final paired = await widget.sync.lanPollPaired();
+      if (!mounted) return;
+      setState(() {
+        _lanCode = code;
+        if (paired.isNotEmpty) _lanMessage = widget.strings.lanDone;
+      });
+      if (paired.isNotEmpty) await _reloadDevices();
+    } catch (e) {
+      debugPrint('lan poll failed: $e');
+    }
+  }
+
+  /// Joiner side: broadcast for the device showing the typed code.
+  Future<void> _joinLan() async {
+    final code = _lanInput.text.trim();
+    if (code.isEmpty || _joining) return;
+    setState(() {
+      _joining = true;
+      _lanMessage = widget.strings.lanSearching;
+    });
+    try {
+      final peer = await widget.sync.lanJoin(code);
+      if (!mounted) return;
+      setState(() {
+        _lanMessage = peer == null ? widget.strings.lanNotFound : widget.strings.lanDone;
+        if (peer != null) _lanInput.clear();
+      });
+      if (peer != null) await _reloadDevices();
+    } catch (e) {
+      // A malformed code is rejected by the core, in the user's language.
+      if (mounted) setState(() => _lanMessage = '$e');
+    } finally {
+      if (mounted) setState(() => _joining = false);
+    }
+  }
+
+  Future<void> _reloadDevices() async {
+    try {
+      final devices = await widget.sync.devices();
+      if (mounted) setState(() => _devices = devices);
+    } catch (e) {
+      debugPrint('could not list devices: $e');
+    }
+  }
+
+  Future<void> _copyCode() async {
+    final code = widget.sync.pairingCode;
+    if (code == null) return;
+    await Clipboard.setData(ClipboardData(text: code));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(widget.strings.copied)),
+    );
+  }
+
+  Future<void> _scan() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ScanScreen(strings: widget.strings, sync: widget.sync),
+      ),
+    );
+    await _reloadDevices();
+  }
+
+  Future<void> _unpair(FfiSharedDevice device) async {
+    try {
+      await widget.sync.unpair(device.id);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+    await _reloadDevices();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.strings.syncDevices),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: widget.strings.syncNow,
+            onPressed: _reloadDevices,
+          ),
+        ],
+      ),
+      body: ListenableBuilder(
+        listenable: widget.sync,
+        builder: (context, _) => ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _status(context),
+            if (_lanCode != null || _lanMessage != null) ...[
+              const Divider(height: 32),
+              _lanSection(context),
+            ],
+            const Divider(height: 32),
+            Text(widget.strings.syncDevices,
+                style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            if (_devices.isEmpty)
+              Text(widget.strings.noDevices,
+                  style: Theme.of(context).textTheme.bodySmall)
+            else
+              for (final device in _devices)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    device.connected ? Icons.link : Icons.link_off,
+                    color: device.connected ? Colors.green : null,
+                  ),
+                  title: Text(device.name.isEmpty ? device.id : device.name),
+                  subtitle: Text(device.connected
+                      ? widget.strings.connected
+                      : widget.strings.disconnected),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete_outline),
+                    tooltip: widget.strings.unpair,
+                    onPressed: () => _unpair(device),
+                  ),
+                ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Pairing over the local network: six digits instead of a 63-character device id.
+  ///
+  /// Both directions are offered because either device can be the one doing the typing, and
+  /// whichever way round it goes, one exchange registers **both** sides.
+  Widget _lanSection(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(widget.strings.lanPairing, style: Theme.of(context).textTheme.titleMedium),
+        if (_lanCode != null) ...[
+          const SizedBox(height: 8),
+          Text(widget.strings.lanMyCode, style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: 4),
+          Text(
+            // Spaced out, because this gets read aloud across a room.
+            _lanCode!.split('').join(' '),
+            style: const TextStyle(fontSize: 30, letterSpacing: 2, fontFeatures: [ui.FontFeature.tabularFigures()]),
+          ),
+        ],
+        const SizedBox(height: 12),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _lanInput,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                decoration: InputDecoration(
+                  labelText: widget.strings.lanEnterCode,
+                  counterText: '',
+                ),
+                onSubmitted: (_) => _joinLan(),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: FilledButton(
+                onPressed: _joining ? null : _joinLan,
+                child: Text(widget.strings.lanConnect),
+              ),
+            ),
+          ],
+        ),
+        if (_lanMessage != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(_lanMessage!, style: Theme.of(context).textTheme.bodySmall),
+          ),
+      ],
+    );
+  }
+
+  /// The top block: what the daemon is doing, and this device's code once it is up.
+  Widget _status(BuildContext context) {
+    final sync = widget.sync;
+    if (!sync.available) {
+      return Text(widget.strings.syncUnavailable);
+    }
+    if (sync.starting) {
+      return Row(
+        children: [
+          const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+          const SizedBox(width: 12),
+          Text(widget.strings.syncStarting),
+        ],
+      );
+    }
+    final code = sync.pairingCode;
+    if (code == null) {
+      // Started and failed: show the core's message rather than a bare "unavailable".
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(sync.error ?? widget.strings.syncUnavailable,
+              style: const TextStyle(color: Colors.red)),
+          const SizedBox(height: 8),
+          OutlinedButton(onPressed: sync.start, child: Text(widget.strings.syncNow)),
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(widget.strings.myCode, style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        SelectableText(code, style: const TextStyle(fontFamily: 'monospace')),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          children: [
+            OutlinedButton.icon(
+              onPressed: _copyCode,
+              icon: const Icon(Icons.copy, size: 18),
+              label: Text(widget.strings.copy),
+            ),
+            FilledButton.icon(
+              onPressed: _scan,
+              icon: const Icon(Icons.qr_code_scanner, size: 18),
+              label: Text(widget.strings.scanQr),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 }
 
 class _ScanScreenState extends State<ScanScreen> {
@@ -446,6 +856,7 @@ class _ScanScreenState extends State<ScanScreen> {
     final navigator = Navigator.of(context);
     try {
       final deviceId = await pairingDecode(code: raw);
+      await widget.sync.pairWith(raw);
       await _controller.stop();
       if (!mounted) return;
       await showDialog<void>(
@@ -458,8 +869,10 @@ class _ScanScreenState extends State<ScanScreen> {
             children: [
               SelectableText(deviceId),
               const SizedBox(height: 12),
+              // Pairing is mutual; without this line the user would wait forever for a
+              // connection that needs a step on the other device.
               Text(
-                widget.strings.scanPairingUnavailable,
+                widget.strings.pairAdded,
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],

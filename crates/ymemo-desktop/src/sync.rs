@@ -13,8 +13,9 @@ use crate::state::Ctx;
 use crate::sticky::sticky_text;
 use crate::{ListWindow, SharedDeviceRow};
 
-/// Fixed id of the vault folder in Syncthing; the same on every device.
-pub(crate) const SYNC_FOLDER_ID: &str = "ymemo-vault";
+/// Fixed id of the vault folder in Syncthing; the same on every device, so it is defined
+/// once in the core and mobile uses that same constant.
+pub(crate) use ymemo_core::sync::VAULT_FOLDER_ID as SYNC_FOLDER_ID;
 
 /// Turns a core `SharedDevice` into a Slint row, falling back to the first 7 characters of
 /// the device id when there is no name (Slint cannot slice strings).

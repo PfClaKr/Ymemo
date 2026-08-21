@@ -35,6 +35,7 @@ slint::include_modules!();
 include!(concat!(env!("OUT_DIR"), "/i18n_apply.rs"));
 
 mod icon;
+mod instance;
 mod list;
 mod lock;
 mod pairing;
@@ -81,7 +82,8 @@ fn select_renderer() {
     }
 }
 
-/// Platform data directory, e.g. ~/.local/share/Ymemo on Linux.
+/// Platform data directory, e.g. ~/.local/share/ymemo on Linux, %APPDATA%\ymemo\Ymemo\data
+/// on Windows.
 fn data_dir() -> std::path::PathBuf {
     if let Some(dirs) = directories::ProjectDirs::from("dev", "ymemo", "Ymemo") {
         let dir = dirs.data_dir().to_path_buf();
@@ -100,6 +102,29 @@ fn main() -> Result<()> {
         std::env::remove_var("WAYLAND_DISPLAY");
     }
 
+    let dir = data_dir();
+
+    // `ymemo --quit` is not a session, it is a message: tell a running instance to save and
+    // exit, wait for it, and return. Installers and package scripts use it to get the app and
+    // its sync daemon out of the way without killing them (see packaging/).
+    if std::env::args().skip(1).any(|a| a == "--quit") {
+        return if instance::quit_running(&dir) {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("Ymemo did not quit within the timeout"))
+        };
+    }
+
+    // Only one instance per user: a second one would run a second sync daemon over the same
+    // syncthing home and write the same cache. It happens easily enough — the Windows
+    // installer's startup task plus a click on the icon of an app that lives in the tray.
+    let Some(_instance) = instance::acquire(&dir) else {
+        instance::send_show(&dir); // hand the running one the foreground instead
+        eprintln!("Ymemo is already running; asked it to show itself");
+        return Ok(());
+    };
+    instance::serve(&dir);
+
     select_renderer();
 
     let lock = LockWindow::new()?;
@@ -107,7 +132,6 @@ fn main() -> Result<()> {
 
     // Syncthing starts before unlocking (it needs no key), so a new device can pair first,
     // receive vault.json and the logs, and only then be asked for the password.
-    let dir = data_dir();
     let vault_dir = dir.join("vault");
     let _ = std::fs::create_dir_all(&vault_dir);
     let st = start_syncthing(&dir, &vault_dir);
@@ -540,5 +564,15 @@ fn main() -> Result<()> {
         lock.show()?;
     }
     slint::run_event_loop_until_quit()?;
+
+    // Shut the daemon down explicitly. Waiting for `Syncthing`'s `Drop` would not do: window
+    // callbacks (and the thread-local `APP`) hold their own `Rc` clones of this and outlive
+    // `main`, so on exit the daemon would be killed by the OS instead — a safety net meant
+    // for crashes, not for the ordinary way of quitting.
+    if let Some(st) = syncthing.borrow_mut().take() {
+        if let Err(e) = st.shutdown() {
+            eprintln!("the sync daemon did not shut down cleanly: {e}");
+        }
+    }
     Ok(())
 }

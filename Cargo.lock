@@ -6926,6 +6926,7 @@ dependencies = [
  "argon2",
  "automerge",
  "chacha20poly1305",
+ "libc",
  "rand 0.8.7",
  "rusqlite",
  "serde",
@@ -6933,6 +6934,7 @@ dependencies = [
  "sha2 0.10.9",
  "ureq",
  "uuid",
+ "windows-sys 0.61.2",
  "ymemo-i18n",
 ]
 
@@ -6945,6 +6947,7 @@ dependencies = [
  "i-slint-backend-winit",
  "image",
  "ksni",
+ "libc",
  "qrcode",
  "rfd",
  "serde",
@@ -6952,6 +6955,7 @@ dependencies = [
  "slint",
  "slint-build",
  "tray-icon",
+ "windows-sys 0.61.2",
  "winresource",
  "ymemo-core",
  "ymemo-i18n",

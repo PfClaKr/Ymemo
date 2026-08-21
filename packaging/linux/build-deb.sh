@@ -89,6 +89,89 @@ Description: local-first, P2P encrypted sticky notes
  its own. It bundles its sync transport (syncthing), which is removed along with it.
 EOF
 
+# Stop a running Ymemo before its files go away. Same sequence as `%preun` in ymemo.spec —
+# **keep the two in step** (the spec doubles the % in `stat -c %U`, which is its only
+# difference).
+#
+# Removing the package while the app runs used to leave both processes alive: the app keeps
+# an unlinked binary running and the sync daemon keeps syncing a vault whose app is gone,
+# until the user logs out. `ymemo --quit` asks the app to save and exit, and the daemon
+# follows it (PR_SET_PDEATHSIG, see ymemo_core::sync).
+#
+# Processes are found by their executable, not the command line — /usr/bin/ymemo is a symlink
+# and argv[0] is whatever the .desktop or the shell used.
+cat > "$ROOT/DEBIAN/prerm" <<'EOF'
+#!/bin/sh
+set -e
+
+# Only on removal; an upgrade must not close a window the user is typing in.
+case "$1" in remove|purge) ;; *) exit 0;; esac
+
+# The stop sequence, in order of politeness. It only ever touches processes running the
+# packaged binaries, found through /proc/PID/exe rather than the command line: /usr/bin/ymemo
+# is a symlink and argv[0] is whatever the .desktop file or the shell used. An unlinked binary
+# reads back with " (deleted)" appended, hence the second form in each pattern.
+PIDS=""    # every ymemo process
+OWNERS=""  # the users running the app itself
+for proc in /proc/[0-9]*; do
+  exe=$(readlink "$proc/exe" 2>/dev/null) || continue
+  case "$exe" in
+    /usr/lib/ymemo/ymemo|"/usr/lib/ymemo/ymemo (deleted)")
+      owner=$(stat -c %U "$proc" 2>/dev/null) || owner=""
+      case " $OWNERS " in
+        *" $owner "*) ;;
+        *) [ -z "$owner" ] || OWNERS="$OWNERS $owner";;
+      esac
+      ;;
+    /usr/lib/ymemo/ymemo-sync|"/usr/lib/ymemo/ymemo-sync (deleted)") ;;
+    *) continue;;
+  esac
+  PIDS="$PIDS ${proc#/proc/}"
+done
+[ -n "$PIDS" ] || exit 0
+
+# Which of them are still there. `kill -0` is a shell builtin, so polling costs nothing.
+ALIVE=""
+refresh_alive() {
+  ALIVE=""
+  for pid in $PIDS; do
+    if kill -0 "$pid" 2>/dev/null; then ALIVE="$ALIVE $pid"; fi
+  done
+}
+
+# Wait up to $1 tenths of a second for everything to exit on its own.
+wait_for_exit() {
+  i=0
+  while [ $i -lt "$1" ]; do
+    refresh_alive
+    [ -n "$ALIVE" ] || return 0
+    sleep 0.1
+    i=$((i + 1))
+  done
+  refresh_alive
+}
+
+# 1. Ask nicely. --quit reaches the running instance over a loopback socket whose port lives
+#    in that user's data directory, so it has to run as the owner of the process.
+for owner in $OWNERS; do
+  su -s /bin/sh -c '/usr/lib/ymemo/ymemo --quit' "$owner" >/dev/null 2>&1 || true
+done
+wait_for_exit 30
+
+# 2. SIGTERM whatever ignored that. The daemon exits with the app anyway (PR_SET_PDEATHSIG,
+#    see ymemo_core::sync), so this is mostly for the app itself.
+if [ -n "$ALIVE" ]; then
+  kill -TERM $ALIVE 2>/dev/null || true
+  wait_for_exit 30
+fi
+
+# 3. Last resort, so the removal never stalls on a hung process.
+if [ -n "$ALIVE" ]; then
+  kill -KILL $ALIVE 2>/dev/null || true
+fi
+exit 0
+EOF
+
 # Refresh the icon and desktop databases, where they exist.
 cat > "$ROOT/DEBIAN/postinst" <<'EOF'
 #!/bin/sh
@@ -109,7 +192,7 @@ if command -v update-desktop-database >/dev/null 2>&1; then
 fi
 exit 0
 EOF
-chmod 755 "$ROOT/DEBIAN/postinst" "$ROOT/DEBIAN/postrm"
+chmod 755 "$ROOT/DEBIAN/prerm" "$ROOT/DEBIAN/postinst" "$ROOT/DEBIAN/postrm"
 
 # ---- Build ----
 mkdir -p "$OUTDIR"

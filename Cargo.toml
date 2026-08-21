@@ -56,6 +56,19 @@ sha2 = "0.10"             # blob content hashes (file name + convergent nonce)
 # HTTP client for Syncthing's REST API (localhost only, so no TLS)
 ureq = { version = "3", default-features = false, features = ["json"] }
 
+# Process lifetime plumbing, per OS. The sync daemon must never outlive the app: a killed
+# app (installer, task manager, crash) that leaves it running keeps its binary locked on
+# Windows and keeps syncing on Linux, which is what makes uninstalling messy.
+#  - unix: prctl(PR_SET_PDEATHSIG) on the child, and flock for the single-instance lock
+#  - windows: a job object with KILL_ON_JOB_CLOSE, and a named mutex for that same lock
+libc = "0.2"
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
 # Flutter binding runtime. The runtime, the codegen CLI and the Dart package must all be
 # the exact same version, hence the pin (see apps/mobile/pubspec.yaml).
 flutter_rust_bridge = "=2.11.1"

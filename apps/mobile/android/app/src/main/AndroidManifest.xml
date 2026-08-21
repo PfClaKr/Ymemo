@@ -1,9 +1,19 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- For scanning pairing QRs; the only permission the app asks for. Memos stay in the
-         app-private directory, and networking will belong to Syncthing. -->
+    <!-- For scanning pairing QRs. Memos stay in the app-private directory. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Installable on devices without a camera; only QR scanning is unavailable. -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <!-- The bundled sync daemon talks to the user's other devices directly. Both are normal
+         permissions: granted at install, never prompted for. Nothing is sent to a server of
+         ours — there isn't one — and what does travel is already E2E encrypted. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Lets the daemon notice it is on wifi again instead of retrying blindly. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- LAN pairing listens for a broadcast, and the wifi stack drops packets not addressed
+         to this device unless a multicast lock is held (see MainActivity). Also a normal
+         permission; the lock itself is only taken while the pairing screen is open. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
     <application
         android:label="Ymemo"

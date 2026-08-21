@@ -1,8 +1,36 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+// ---- Release signing --------------------------------------------------------------------
+// **An APK's signature is what lets Android update it in place.** The debug key `flutter
+// create` leaves behind is generated per machine, so a CI runner invents a new one on every
+// build and each release refuses to install over the last: users would have to uninstall,
+// losing everything on the device. So the release build takes a real keystore, from
+// `android/key.properties` locally or the environment on CI. The keystore itself is never in
+// the repo (`key.properties` is gitignored).
+//
+// Without one the build still works and falls back to the debug key — fine for a quick local
+// release build, never for something handed to a user. See apps/mobile/README.md.
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("key.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+
+fun signingSetting(key: String, env: String): String? =
+    keystoreProperties.getProperty(key) ?: System.getenv(env)
+
+val releaseStoreFile = signingSetting("storeFile", "YMEMO_KEYSTORE_FILE")?.let { file(it) }
+val releaseStorePassword = signingSetting("storePassword", "YMEMO_KEYSTORE_PASSWORD")
+val releaseKeyAlias = signingSetting("keyAlias", "YMEMO_KEY_ALIAS")
+// A keystore made by `keytool -genkeypair` usually reuses the store password for the key.
+val releaseKeyPassword = signingSetting("keyPassword", "YMEMO_KEY_PASSWORD") ?: releaseStorePassword
+val hasReleaseKeystore = releaseStoreFile?.exists() == true &&
+    releaseStorePassword != null && releaseKeyAlias != null
 
 android {
     namespace = "dev.ymemo.ymemo_mobile"
@@ -21,7 +49,10 @@ android {
         applicationId = "dev.ymemo.ymemo_mobile"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // Never below 24: the bundled syncthing is compiled against the NDK's API 24 headers
+        // (ANDROID_API in the release workflow), and a binary built for a newer API than the
+        // device it runs on fails to load. Bump both together, never just one.
+        minSdk = maxOf(flutter.minSdkVersion, 24)
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
@@ -31,11 +62,38 @@ android {
         versionName = flutter.versionName
     }
 
+    // ---- Bundled sync daemon -------------------------------------------------------------
+    // syncthing rides along as `jniLibs/<abi>/libsyncthing.so`, because the native library
+    // directory is the only place Android still lets an app execute a binary from.
+    //
+    //  - useLegacyPackaging: without it the .so stays compressed inside the APK and is never
+    //    unpacked, so there is no file to execute. This applies to the Rust library too —
+    //    a slightly larger install, and the price of shipping a daemon.
+    //  - keepDebugSymbols: AGP strips native libraries by default, and stripping a Go binary
+    //    can leave it unrunnable. Same reason the .rpm turns stripping off.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+            keepDebugSymbols += "**/libsyncthing.so"
+        }
+    }
+
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = releaseStoreFile
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // No keystore: the debug key, so `flutter run --release` still works. Such a
+            // build must not be handed to users — see the comment above.
+            signingConfig = signingConfigs.getByName(if (hasReleaseKeystore) "release" else "debug")
         }
     }
 }

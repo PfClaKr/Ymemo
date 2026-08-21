@@ -61,6 +61,48 @@ flutter build apk
 > Dart changes do not need the `.so` rebuilt, but **Rust changes always do** — gradle still
 > knows nothing about Rust (no cargokit; see "Remaining work").
 
+### The sync daemon
+
+Syncthing is bundled the same way the desktop bundles it — one separate process, driven over
+its REST API by `ymemo_core::sync` — with one platform quirk: since Android 10 an app may
+only execute a binary from its **native library directory**, so it ships as
+`jniLibs/<abi>/libsyncthing.so`. It is an executable, not a library; the name is what the
+platform requires. `MainActivity` hands the path to Dart over the `dev.ymemo/native` channel.
+
+`jniLibs/` is gitignored, so build it like the Rust library — once per checkout, and again
+when `SYNCTHING_VERSION` in `release.yml` moves:
+
+```bash
+# From a syncthing source tree at the version release.yml pins:
+NDK=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
+CGO_ENABLED=1 GOOS=android GOARCH=arm64 CC=$NDK/aarch64-linux-android24-clang \
+  go build -buildmode=pie -tags "noupgrade noassets" -ldflags "-s -w -checklinkname=0" \
+  -o <repo>/apps/mobile/android/app/src/main/jniLibs/arm64-v8a/libsyncthing.so ./cmd/syncthing
+# x86_64 for the emulator: GOARCH=amd64, CC=$NDK/x86_64-linux-android24-clang
+```
+
+`file` on the result must say **`pie executable … interpreter /system/bin/linker64`**;
+anything else will not start on a device. The workflow explains what each flag is for — none
+of them is optional. A build without `libsyncthing.so` still runs: the app reports sync as
+unavailable and works local-only.
+
+**The daemon runs only while the app is in the foreground** (`lib/sync.dart`). Android freezes
+background processes anyway, so the alternative is a foreground service and a permanent
+notification; a memo app can sync while it is open. It starts *before* unlocking, exactly as
+on the desktop, because a new device must receive `vault.json` before it has a password to
+check. If the app is killed, the daemon goes with it (`PR_SET_PDEATHSIG` in the core).
+
+Two ways to pair, both on the **Sync devices** screen:
+
+- **Same network (6 digits)** — each device shows a code that rotates every minute; type the
+  other one's into either device. One exchange registers **both** sides, so there is nothing
+  to do on the other device afterwards. The screen holds a wifi multicast lock while it is
+  open, because the wifi stack otherwise drops the other device's broadcast; it is released
+  as soon as the screen closes or the app is backgrounded.
+- **QR / code** — scan the desktop's pairing QR, or copy this device's long code into the
+  desktop's manual-entry field. This half only opens *this* side; the other device has to be
+  given this device's code too, which is what the message after scanning says.
+
 ### Emulator (headless, verified on WSL2)
 
 Running windowless and driving it over `adb` works without WSLg and uses less memory.
@@ -118,11 +160,16 @@ flutter build ios --no-codesign
 
 ## Screens
 
-- **Lock** — open the vault with the master password, creating it if needed.
-- **List** — the memos; swipe to delete, + to add, and the sync button merges whatever logs
-  have arrived (`sync_rebuild`).
+- **Lock** — open the vault with the master password, creating it if needed. Reachable from
+  here, before any password: **Sync devices**, because a new install has to pair and receive
+  `vault.json` before there is anything to unlock.
+- **List** — the memos; swipe to delete, + to add. Logs that have arrived are merged every
+  15s (`sync_rebuild`), and the sync button does it now.
 - **Editor** — title and body, saved on back or the check mark, and skipped when nothing
   changed.
+- **Sync devices** — the 6-digit LAN code and a field for the other device's, this device's
+  long pairing code (copyable), QR scanning, and the paired devices with their connection
+  state.
 
 Strings are not kept in Dart. `mobile_strings()` hands over one set from the repo root's
 `i18n/*.json`, so the screens and the core's error messages are always in the same language.
@@ -136,27 +183,57 @@ builds the APKs and attaches them to the GitHub Release, **split per ABI**:
 
 | File | For | Size |
 |---|---|---|
-| `ymemo-<version>-android-arm64-v8a.apk` | **most current phones** | ~29 MB |
-| `ymemo-<version>-android-armeabi-v7a.apk` | older 32-bit phones | ~24 MB |
-| `ymemo-<version>-android-x86_64.apk` | the emulator | ~32 MB |
+| `ymemo-<version>-android-arm64-v8a.apk` | **most current phones** | ~50 MB |
+| `ymemo-<version>-android-armeabi-v7a.apk` | older 32-bit phones | ~45 MB |
+| `ymemo-<version>-android-x86_64.apk` | the emulator | ~53 MB |
 
-One APK with all three would be 76 MB. Much of the size is the Flutter engine (~12 MB) and
-ML Kit for QR scanning (`libbarhopper_v3.so`, ~5 MB); our Rust library is 3-5 MB per ABI.
+One APK with all three would be far larger still. The bundled syncthing is the biggest single
+piece (~20 MB per ABI, already without its web GUI), then the Flutter engine (~12 MB) and ML
+Kit for QR scanning (`libbarhopper_v3.so`, ~5 MB); our Rust library is 3-5 MB.
 
-> **Signing:** as `flutter create` leaves it, release APKs are **signed with the debug key**.
-> They install (with "unknown sources" enabled) but cannot go to the Play Store, and moving to
-> a real key later means **existing installs cannot be updated in place** — a different
-> signature requires a reinstall. Real signing means taking a keystore from secrets and
-> filling in `signingConfigs`, as the windows-desktop job does with its certificate.
+### Signing
+
+**Android decides whether an update may replace an install by comparing signatures.** The
+debug key `flutter create` leaves behind is generated per machine, so a CI runner makes up a
+new one every build: those APKs cannot be installed over each other, and the user's only way
+forward is uninstall-and-reinstall, which takes their memos with it. The keystore has to exist
+before the first release anyone is expected to update, and it has to be kept — losing it means
+no future build can ever update those installs.
+
+Create one (once, and back it up somewhere safe):
+
+```bash
+keytool -genkeypair -v -keystore ymemo.jks -keyalg RSA -keysize 2048 -validity 10000 \
+  -alias ymemo
+```
+
+Local release builds read it from `apps/mobile/android/key.properties` (gitignored):
+
+```properties
+storeFile=/absolute/path/to/ymemo.jks
+storePassword=…
+keyAlias=ymemo
+keyPassword=…
+```
+
+CI reads the same four values from repository secrets — `ANDROID_KEYSTORE_BASE64`
+(`base64 -w0 ymemo.jks`), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
+`ANDROID_KEY_PASSWORD` — and warns in the log when they are missing. Either way, a build
+without a keystore still succeeds with the debug key, which is fine for testing and never for
+a release.
+
+Uninstalling on Android is clean by construction: the app runs no background service and
+Android deletes its private directory with it, so nothing is left behind.
 
 The Flutter and NDK versions CI uses are pinned in `env` at the top of `release.yml`. The NDK
 must match `ndkVersion` in `android/app/build.gradle.kts`.
 
 ## Remaining work
 
-- [ ] Mobile Syncthing (bundled gomobile `.aar`). **Until then mobile is local-only**: nothing
-      can deliver files into the vault directory, so the sync button has nothing to do.
+- [ ] **Verify sync on real hardware.** The daemon, pairing and the merge timer are written
+      but have never run on a device: the Go/NDK build and the whole Dart side are only
+      proven by CI and `flutter analyze` so far.
+- [ ] Show this device's pairing code as a QR too, so the desktop is not left with typing.
 - [ ] Group (folder) screen — the FFI (`group_*`) exists, only the Dart UI is missing.
-- [ ] Reading pairing codes by QR scan, wired to `pairing_decode`.
 - [ ] cargokit integration, so gradle and Xcode build the Rust automatically.
 - [ ] Auto-lock and session policy, the equivalent of the desktop's `settings.rs`.

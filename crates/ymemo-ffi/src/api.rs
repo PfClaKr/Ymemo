@@ -4,13 +4,20 @@
 //! calls in from several threads, so the vault sits behind a global Mutex (a rusqlite
 //! Connection is not Sync).
 //!
-//! Transport (Syncthing) is missing: on mobile it will arrive as a gomobile `.aar`. Merging
-//! already lives in the core, so once the files land, `sync_rebuild` picks them up.
+//! Transport (Syncthing) runs as the same bundled child process as on the desktop; see the
+//! "Transport" section near the bottom for what mobile does differently.
 
+use std::path::Path;
 use std::sync::Mutex;
 
 use anyhow::{anyhow, Result};
-use ymemo_core::{now_millis, pairing::PairingCode, vault::Vault, Attachment, Group, Memo, Store};
+use ymemo_core::{
+    lan_pair, now_millis,
+    pairing::PairingCode,
+    sync::{Syncthing, VAULT_FOLDER_ID},
+    vault::Vault,
+    Attachment, Group, Memo, Store,
+};
 use ymemo_i18n::t;
 
 /// The open vault; one per app process.
@@ -129,10 +136,24 @@ pub struct FfiStrings {
     pub body_hint: String,
     pub camera_error: String,
     pub close: String,
+    pub connected: String,
+    pub copied: String,
+    pub copy: String,
+    pub disconnected: String,
+    pub lan_connect: String,
+    pub lan_done: String,
+    pub lan_enter_code: String,
+    pub lan_my_code: String,
+    pub lan_not_found: String,
+    pub lan_pairing: String,
+    pub lan_searching: String,
     pub list_title: String,
     pub master_password: String,
+    pub my_code: String,
     pub new_memo: String,
+    pub no_devices: String,
     pub opening: String,
+    pub pair_added: String,
     pub photo_camera: String,
     pub photo_gallery: String,
     pub photo_missing: String,
@@ -140,12 +161,15 @@ pub struct FfiStrings {
     pub photo_size: String,
     pub save: String,
     pub scan_hint: String,
-    pub scan_pairing_unavailable: String,
     pub scan_qr: String,
     pub scan_result: String,
+    pub sync_devices: String,
     pub sync_now: String,
+    pub sync_starting: String,
+    pub sync_unavailable: String,
     pub title_hint: String,
     pub unlock: String,
+    pub unpair: String,
 }
 
 /// Collects the mobile strings for the current language.
@@ -155,10 +179,24 @@ pub fn mobile_strings() -> FfiStrings {
         body_hint: t!("mobile.body_hint"),
         camera_error: t!("mobile.camera_error"),
         close: t!("mobile.close"),
+        connected: t!("mobile.connected"),
+        copied: t!("mobile.copied"),
+        copy: t!("mobile.copy"),
+        disconnected: t!("mobile.disconnected"),
+        lan_connect: t!("mobile.lan_connect"),
+        lan_done: t!("mobile.lan_done"),
+        lan_enter_code: t!("mobile.lan_enter_code"),
+        lan_my_code: t!("mobile.lan_my_code"),
+        lan_not_found: t!("mobile.lan_not_found"),
+        lan_pairing: t!("mobile.lan_pairing"),
+        lan_searching: t!("mobile.lan_searching"),
         list_title: t!("mobile.list_title"),
         master_password: t!("mobile.master_password"),
+        my_code: t!("mobile.my_code"),
         new_memo: t!("mobile.new_memo"),
+        no_devices: t!("mobile.no_devices"),
         opening: t!("mobile.opening"),
+        pair_added: t!("mobile.pair_added"),
         photo_camera: t!("mobile.photo_camera"),
         photo_gallery: t!("mobile.photo_gallery"),
         photo_missing: t!("mobile.photo_missing"),
@@ -166,12 +204,15 @@ pub fn mobile_strings() -> FfiStrings {
         photo_size: t!("mobile.photo_size"),
         save: t!("mobile.save"),
         scan_hint: t!("mobile.scan_hint"),
-        scan_pairing_unavailable: t!("mobile.scan_pairing_unavailable"),
         scan_qr: t!("mobile.scan_qr"),
         scan_result: t!("mobile.scan_result"),
+        sync_devices: t!("mobile.sync_devices"),
         sync_now: t!("mobile.sync_now"),
+        sync_starting: t!("mobile.sync_starting"),
+        sync_unavailable: t!("mobile.sync_unavailable"),
         title_hint: t!("mobile.title_hint"),
         unlock: t!("mobile.unlock"),
+        unpair: t!("mobile.unpair"),
     }
 }
 
@@ -365,10 +406,197 @@ pub fn sync_rebuild() -> Result<()> {
     with_vault(|v| v.rebuild())
 }
 
-/// Validates a scanned pairing code and extracts the device id. Until mobile Syncthing
-/// lands, this is only used to check and display it.
+/// Validates a scanned pairing code and extracts the device id, without pairing.
 pub fn pairing_decode(code: String) -> Result<String> {
     Ok(PairingCode::decode(&code)?.syncthing_device_id)
+}
+
+// ===========================================================================
+// Transport (Syncthing)
+// ===========================================================================
+//
+// Same daemon as the desktop, same core code driving it (`ymemo_core::sync`); only the way
+// it is started differs. Android may execute a binary **only** from the app's native library
+// directory, so the app ships syncthing as `libsyncthing.so` in `jniLibs/` and hands the path
+// down here — there is no `find_binary()` guessing on mobile, and none is wanted.
+//
+// **The daemon runs only while the app is in the foreground.** Dart starts it on resume and
+// stops it on pause. Android freezes background processes anyway, so pretending otherwise
+// would only cost battery and a permanent notification; a memo app can sync while it is
+// open. (If the process is killed outright, `PR_SET_PDEATHSIG` in the core takes the daemon
+// with it, so nothing is left running.)
+
+/// The running daemon, one per app process, like [`VAULT`].
+static SYNC: Mutex<Option<Syncthing>> = Mutex::new(None);
+
+fn sync_lock() -> Result<std::sync::MutexGuard<'static, Option<Syncthing>>> {
+    SYNC.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))
+}
+
+fn with_sync<T>(f: impl FnOnce(&Syncthing) -> Result<T>) -> Result<T> {
+    let guard = sync_lock()?;
+    let st = guard.as_ref().ok_or_else(|| anyhow!(t!("core.sync_not_running")))?;
+    f(st)
+}
+
+/// Another device sharing this vault.
+pub struct FfiSharedDevice {
+    /// Syncthing device id — also what unpairing takes.
+    pub id: String,
+    /// Name the peer announced; empty when it has none.
+    pub name: String,
+    pub connected: bool,
+}
+
+/// Starts the daemon and registers the vault directory, returning this device's pairing code.
+///
+/// Idempotent, which is what makes it safe to call on every resume. The first start generates
+/// the device key and can take a few seconds; flutter_rust_bridge runs this off the UI thread
+/// on its own.
+pub fn sync_start(binary_path: String, home_dir: String, vault_dir: String) -> Result<String> {
+    let mut guard = sync_lock()?;
+
+    // Holding a handle is not the same as having a daemon: Android kills backgrounded child
+    // processes under memory pressure, and nothing tells us when it does. Ask the daemon
+    // something, and if it does not answer, drop it and start a fresh one — otherwise the app
+    // would report sync as running until it was restarted by hand.
+    if let Some(st) = guard.as_ref() {
+        match st.device_id() {
+            Ok(id) => return Ok(PairingCode::new(&id).encode()),
+            Err(_) => *guard = None,
+        }
+    }
+
+    // Sync starts before the vault is unlocked, so this may be a device where the directory
+    // does not exist yet; syncthing is being pointed at it either way.
+    std::fs::create_dir_all(&vault_dir)?;
+    let st = Syncthing::spawn(Path::new(&binary_path), Path::new(&home_dir))?;
+    st.ensure_folder(VAULT_FOLDER_ID, "Ymemo Vault", Path::new(&vault_dir))?;
+    let id = st.device_id()?;
+    *guard = Some(st);
+    Ok(PairingCode::new(&id).encode())
+}
+
+/// Stops the daemon. Safe to call when it is not running.
+pub fn sync_stop() -> Result<()> {
+    // Dropping it shuts the daemon down over REST, then kills it if it will not go.
+    *sync_lock()? = None;
+    Ok(())
+}
+
+/// Whether the daemon is up. Cheap: it does not talk to it.
+pub fn sync_running() -> bool {
+    sync_lock().map(|g| g.is_some()).unwrap_or(false)
+}
+
+/// This device's pairing code (`YMEMO1:<device-id>`), for the other device to scan or type.
+pub fn sync_pairing_code() -> Result<String> {
+    with_sync(|st| Ok(PairingCode::new(&st.device_id()?).encode()))
+}
+
+/// Pairs with a scanned or typed code: registers the peer and shares the vault with it.
+///
+/// This is **one half of pairing**. The other device has to do the same with our code, or
+/// syncthing will never connect the two.
+pub fn sync_pair_with(code: String) -> Result<()> {
+    let peer = PairingCode::decode(&code)?.syncthing_device_id;
+    with_sync(|st| st.share_folder_with(VAULT_FOLDER_ID, &peer))
+}
+
+/// Devices this vault is shared with, ourselves excluded.
+pub fn sync_devices() -> Result<Vec<FfiSharedDevice>> {
+    with_sync(|st| {
+        Ok(st
+            .shared_devices(VAULT_FOLDER_ID)?
+            .into_iter()
+            .map(|d| FfiSharedDevice { id: d.id, name: d.name, connected: d.connected })
+            .collect())
+    })
+}
+
+/// Drops a peer. Only this side stops syncing; the other device keeps its own entry until it
+/// unpairs too.
+pub fn sync_unpair(device_id: String) -> Result<()> {
+    with_sync(|st| st.unshare_folder_with(VAULT_FOLDER_ID, &device_id))
+}
+
+// ===========================================================================
+// LAN pairing (the 6-digit code)
+// ===========================================================================
+//
+// Two devices on one network swap ids over a rotating 6-digit code instead of a scanned or
+// typed 63-character one (`ymemo_core::lan_pair`). Unlike the QR path this finishes **both**
+// halves: whichever side answers registers the other, so nobody has to go and do a second
+// step on the other device.
+//
+// The listener runs only while the pairing screen is open. That is what the core intends by
+// "pairing mode", and on a phone it also keeps a UDP socket and a wifi multicast lock from
+// sitting there all day.
+
+/// The pairing-mode listener, alive only while the screen is open.
+static LAN: Mutex<Option<lan_pair::PairListener>> = Mutex::new(None);
+
+fn lan_lock() -> Result<std::sync::MutexGuard<'static, Option<lan_pair::PairListener>>> {
+    LAN.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))
+}
+
+/// Registers a peer learnt over LAN with the running daemon.
+///
+/// Kept separate so the LAN lock is never held while the sync lock is taken — the two are
+/// touched from a Dart timer and a Dart button at the same time, and one consistent order is
+/// what keeps that from deadlocking.
+fn share_with_peer(peer_id: &str) -> Result<()> {
+    with_sync(|st| st.share_folder_with(VAULT_FOLDER_ID, peer_id))
+}
+
+/// Enters pairing mode and returns the code to show. Needs the daemon, since the code's whole
+/// purpose is to hand over its device id.
+pub fn lan_start() -> Result<String> {
+    let device_id = with_sync(|st| st.device_id())?;
+    let mut guard = lan_lock()?;
+    if guard.is_none() {
+        *guard = Some(lan_pair::PairListener::start(device_id)?);
+    }
+    Ok(guard.as_ref().expect("just started").code())
+}
+
+/// The code currently on offer. It rotates every minute, so the screen re-reads it.
+pub fn lan_code() -> Result<Option<String>> {
+    Ok(lan_lock()?.as_ref().map(|l| l.code()))
+}
+
+/// Leaves pairing mode: the socket closes and the code stops being answered.
+pub fn lan_stop() -> Result<()> {
+    *lan_lock()? = None;
+    Ok(())
+}
+
+/// Picks up devices that paired with **us** (they typed our code) and shares the vault with
+/// each. Returns their ids, for the screen to report. Poll it while pairing mode is on.
+pub fn lan_poll_paired() -> Result<Vec<String>> {
+    let peers: Vec<String> = {
+        let guard = lan_lock()?;
+        let Some(listener) = guard.as_ref() else { return Ok(Vec::new()) };
+        std::iter::from_fn(|| listener.next_paired_peer()).collect()
+    };
+    for peer in &peers {
+        share_with_peer(peer)?;
+    }
+    Ok(peers)
+}
+
+/// Pairs with the device showing `code`: broadcasts for it, and on an answer shares the vault
+/// with it. `None` means nobody answered in time — a wrong or expired code, or a network that
+/// drops broadcasts.
+///
+/// Blocks for up to `timeout_secs`; flutter_rust_bridge keeps that off the UI thread.
+pub fn lan_join(code: String, timeout_secs: u64) -> Result<Option<String>> {
+    let device_id = with_sync(|st| st.device_id())?;
+    let found = lan_pair::join(&code, &device_id, std::time::Duration::from_secs(timeout_secs))?;
+    if let Some(peer) = &found {
+        share_with_peer(peer)?;
+    }
+    Ok(found)
 }
 
 #[cfg(test)]

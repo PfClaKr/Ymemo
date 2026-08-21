@@ -11,7 +11,7 @@ use crate::icon::set_window_icon;
 use crate::list::refresh_list;
 use crate::settings;
 use crate::state::Ctx;
-use crate::sticky::save_memo;
+use crate::sticky::flush_dirty;
 use crate::{apply_strings, ListWindow, LockWindow, SettingsWindow, Strings};
 
 /// Fills the settings window's inputs from the current settings.
@@ -63,27 +63,8 @@ pub(crate) fn lock_now(ctx: &Ctx, lock: &LockWindow, list: &ListWindow, unlocked
         return;
     }
 
-    // Save pending edits first, in two passes to avoid overlapping borrows.
-    let ids: Vec<String> = ctx.stickies.borrow().keys().cloned().collect();
-    for id in &ids {
-        let pending = {
-            let map = ctx.stickies.borrow();
-            match map.get(id) {
-                Some(e) if e.dirty.get() => {
-                    e.save_timer.stop();
-                    Some(e.window.get_memo_text().to_string())
-                }
-                Some(e) => {
-                    e.save_timer.stop();
-                    None
-                }
-                None => None,
-            }
-        };
-        if let Some(text) = pending {
-            save_memo(ctx, id, &text);
-        }
-    }
+    // Save pending edits first; the windows are about to go away.
+    let ids = flush_dirty(ctx);
     for id in &ids {
         if let Some(e) = ctx.stickies.borrow().get(id) {
             let _ = e.window.hide();

@@ -43,6 +43,27 @@ pub(crate) fn request_toggle() {
     });
 }
 
+/// A second launch asked us to come forward (see `instance::serve`). Unlike a tray
+/// click this only ever shows: the user just asked for the app, so hiding it would be absurd.
+pub(crate) fn request_show() {
+    let _ = slint::invoke_from_event_loop(|| {
+        APP.with(|a| {
+            let borrow = a.borrow();
+            let Some(app) = borrow.as_ref() else { return };
+            touch(&app.ctx);
+            if app.unlocked.get() {
+                let _ = app.list.show();
+                set_window_icon(app.list.window());
+                app.list.window().request_redraw();
+            } else {
+                let _ = app.lock.show();
+                set_window_icon(app.lock.window());
+                app.lock.window().request_redraw();
+            }
+        });
+    });
+}
+
 /// Tray "lock": same as the list window's lock button.
 pub(crate) fn request_lock() {
     let _ = slint::invoke_from_event_loop(|| {
@@ -54,9 +75,19 @@ pub(crate) fn request_lock() {
     });
 }
 
-/// Tray "quit": ends the event loop.
+/// Tray "quit": save what is unsaved, then end the event loop.
+///
+/// Ending the loop drops the sticky windows and, with them, the debounced edits still sitting
+/// in the text widgets, so the flush has to happen here. `main` returning then drops the
+/// `Syncthing` handle, which shuts the daemon down.
 pub(crate) fn request_quit() {
     let _ = slint::invoke_from_event_loop(|| {
+        APP.with(|a| {
+            let borrow = a.borrow();
+            if let Some(app) = borrow.as_ref() {
+                crate::sticky::flush_dirty(&app.ctx);
+            }
+        });
         let _ = slint::quit_event_loop();
     });
 }
