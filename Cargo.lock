@@ -7010,6 +7010,7 @@ name = "ymemo-desktop"
 version = "0.9.1"
 dependencies = [
  "anyhow",
+ "chrono",
  "directories",
  "i-slint-backend-winit",
  "image",

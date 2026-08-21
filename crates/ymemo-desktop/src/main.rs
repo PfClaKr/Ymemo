@@ -547,6 +547,15 @@ fn main() -> Result<()> {
         });
     }
 
+    // ---- Recolouring a row (folder or memo) from the list. ----
+    {
+        let ctx = ctx.clone();
+        list.on_set_row_color(move |id, is_group, color| {
+            touch(&ctx);
+            list::set_row_color(&ctx, &id, is_group, &color);
+        });
+    }
+
     // ---- Device linking (pairing, shared devices) is wired up by the pairing module. ----
     let _pairing = pairing::wire(&lock, &list, &syncthing, lan.clone(), my_device_id.clone(), &vault_dir);
 

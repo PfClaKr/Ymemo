@@ -114,7 +114,7 @@ pub(crate) fn push_group_rows(
         out.push(ListRow {
             id: SharedString::from(g.id.clone()),
             title: SharedString::from(g.name.clone()),
-            color: SharedString::new(),
+            color: SharedString::from(g.color.clone()),
             depth,
             is_group: true,
             expanded: !is_collapsed,
@@ -128,6 +128,40 @@ pub(crate) fn push_group_rows(
             out.push(memo_row(m, depth + 1));
         }
     }
+}
+
+/// Recolours a row from the list window. Folders and memos both carry a palette key, and
+/// both are synced, so one entry point covers them.
+pub(crate) fn set_row_color(ctx: &Ctx, id: &str, is_group: bool, color: &str) {
+    let mut guard = ctx.vault.borrow_mut();
+    let Some(v) = guard.as_mut() else { return };
+
+    let result = if is_group {
+        match v.store().get_group(id) {
+            Ok(Some(mut g)) => {
+                g.color = color.to_string();
+                g.updated_at = now_millis();
+                v.upsert_group(&g)
+            }
+            Ok(None) => return,
+            Err(e) => Err(e),
+        }
+    } else {
+        match v.store().get(id) {
+            Ok(Some(mut m)) => {
+                m.color = color.to_string();
+                m.updated_at = now_millis();
+                v.upsert(&m)
+            }
+            Ok(None) => return,
+            Err(e) => Err(e),
+        }
+    };
+    if let Err(e) = result {
+        eprintln!("could not change the colour: {e}");
+        return;
+    }
+    refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
 }
 
 pub(crate) fn memo_row(memo: &Memo, depth: i32) -> ListRow {
@@ -151,6 +185,7 @@ mod tests {
             id: id.into(),
             name: name.into(),
             parent_id: parent.into(),
+            color: ymemo_core::DEFAULT_COLOR.into(),
             created_at: 0,
             updated_at: 0,
         }

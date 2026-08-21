@@ -336,6 +336,7 @@ impl Vault {
         };
         put_str_if_changed(&mut self.doc, &obj, "name", &group.name)?;
         put_str_if_changed(&mut self.doc, &obj, "parent_id", &group.parent_id)?;
+        put_str_if_changed(&mut self.doc, &obj, "color", &group.color)?;
         put_i64_if_changed(&mut self.doc, &obj, "created_at", group.created_at)?;
         put_i64_if_changed(&mut self.doc, &obj, "updated_at", group.updated_at)?;
 
@@ -553,6 +554,8 @@ impl Vault {
                 id: id.clone(),
                 name: get_str_or(&self.doc, &obj, "name", ""),
                 parent_id: get_str_or(&self.doc, &obj, "parent_id", ""),
+                // Folders had no colour before, so old changes carry none.
+                color: get_str_or(&self.doc, &obj, "color", crate::DEFAULT_COLOR),
                 created_at: get_i64_or(&self.doc, &obj, "created_at", 0),
                 updated_at: get_i64_or(&self.doc, &obj, "updated_at", 0),
             };
@@ -1242,6 +1245,58 @@ mod tests {
 
         fs::remove_dir_all(&dir).ok();
         fs::remove_dir_all(&not_a_vault).ok();
+    }
+
+    /// A folder's colour is part of the document, so it reaches the other devices the same
+    /// way its name does.
+    #[test]
+    fn group_colour_syncs_across_devices() {
+        let dir = temp_dir();
+        let db_a = std::env::temp_dir().join(format!("ymemo-a-{}.db", uuid::Uuid::new_v4()));
+        let db_b = std::env::temp_dir().join(format!("ymemo-b-{}.db", uuid::Uuid::new_v4()));
+
+        let mut group = Group::new("shared folder");
+        {
+            let mut a = Vault::create(&dir, b"pw", Store::open(&db_a).unwrap()).unwrap();
+            a.upsert_group(&group).unwrap();
+            group.color = "blue".into();
+            a.upsert_group(&group).unwrap();
+        }
+
+        // A second device merges the same logs and sees the colour, not the default.
+        let b = Vault::open(&dir, b"pw", Store::open(&db_b).unwrap()).unwrap();
+        let seen = b.store().get_group(&group.id).unwrap().unwrap();
+        assert_eq!(seen.color, "blue");
+        assert_eq!(seen.name, "shared folder");
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db_a).ok();
+        fs::remove_file(&db_b).ok();
+    }
+
+    /// Folders written before they had colours must still open, at the default.
+    #[test]
+    fn group_without_colour_falls_back_to_the_default() {
+        let dir = temp_dir();
+        let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
+
+        let id = {
+            let mut v = Vault::create(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+            let group = Group::new("no colour here");
+            v.upsert_group(&group).unwrap();
+            // Imitate the older document shape by dropping the field again.
+            let groups = v.groups_obj().unwrap();
+            let (_, obj) = v.doc.get(&groups, &group.id).unwrap().unwrap();
+            v.doc.delete(&obj, "color").unwrap();
+            v.append_local_change().unwrap();
+            group.id
+        };
+
+        let v = Vault::open(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+        assert_eq!(v.store().get_group(&id).unwrap().unwrap().color, crate::DEFAULT_COLOR);
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db).ok();
     }
 
     #[test]

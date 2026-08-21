@@ -184,6 +184,19 @@ pub(crate) fn photo_rows(v: &Vault, memo_id: &str) -> Vec<PhotoRow> {
         .collect()
 }
 
+/// Epoch millis to a local `YYYY-MM-DD HH:MM` stamp; empty when the value is unusable.
+///
+/// Local time, not UTC: the stamp exists to answer "when did I write this", and an offset
+/// answer is worse than none. The layout is the same in both languages, so it needs no
+/// catalog entry.
+pub(crate) fn format_created_at(millis: i64) -> String {
+    use chrono::{Local, TimeZone};
+    match Local.timestamp_millis_opt(millis) {
+        chrono::offset::LocalResult::Single(t) => t.format("%Y-%m-%d %H:%M").to_string(),
+        _ => String::new(),
+    }
+}
+
 /// Photo bytes to an RGBA8 Slint image; `None` for an unsupported format.
 fn decode_image(bytes: &[u8]) -> Option<slint::Image> {
     let decoded = image::load_from_memory(bytes).ok()?.into_rgba8();
@@ -300,6 +313,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     window.set_memo_text(SharedString::from(sticky_text(memo)));
     window.set_sticky_color(SharedString::from(memo.color.clone()));
     window.set_sticky_opacity(memo.opacity as f32);
+    window.set_created_at(SharedString::from(format_created_at(memo.created_at)));
     {
         let guard = ctx.vault.borrow();
         if let Some(v) = guard.as_ref() {

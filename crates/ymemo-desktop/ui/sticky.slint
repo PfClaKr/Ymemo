@@ -58,6 +58,8 @@ export component StickyWindow inherits Window {
     callback drag-move(float, float);   // current pointer position
     callback drag-end();
 
+    // Creation time, already formatted by Rust; empty until it is set.
+    in property <string> created-at;
     private property <bool> show-palette: false;
     // Whether this press became a drag, and whether we are tracking it ourselves.
     private property <bool> drag-started: false;
@@ -304,6 +306,17 @@ export component StickyWindow inherits Window {
                     }
                 }
             }
+        }
+        // ---- Created-at, along the bottom edge. Declared last so it paints over the body
+        // rather than under it, laid out by hand so it takes no line from the note, and
+        // faint enough to read straight past. ----
+        if !root.collapsed && root.created-at != "": Text {
+            text: root.created-at;
+            font-size: 9px;
+            color: Palette.ink(root.sticky-color);
+            opacity: 0.45;
+            x: parent.width - self.width - 7px;
+            y: parent.height - self.height - 4px;
         }
     }
 }

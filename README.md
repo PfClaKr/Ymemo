@@ -149,7 +149,8 @@ the desktop inside a Fedora container for library compatibility.
 - **Appearance** — per-memo color palette and window opacity.
 - **Photos** — attach one and resize it. The display size syncs in **em (font multiples)**
   rather than pixels, so shrinking it on a phone shrinks it proportionally on the desktop.
-- **Groups** — a nestable folder tree with drag and drop.
+- **Groups** — a nestable folder tree with drag and drop. Folders carry a colour of their
+  own, and it syncs like a memo's.
 - **Locking** — master password, instant lock from the tray, idle auto-lock, and optionally
   staying unlocked for a set period (a device-local session key, never synced).
 - **Password and recovery** — change the master password from the settings window, and keep a
