@@ -14,9 +14,9 @@ pub use imp::{start, TrayHandle};
 
 use slint::ComponentHandle;
 
-use crate::icon::set_window_icon;
 use crate::lock::lock_now;
 use crate::state::{touch, APP};
+use crate::window::present;
 
 /// Tray click or menu: raise the lock window while locked, otherwise toggle the list. The
 /// call is handed to the event loop first, whatever thread it came from.
@@ -27,17 +27,11 @@ pub(crate) fn request_toggle() {
             let Some(app) = borrow.as_ref() else { return };
             touch(&app.ctx);
             if !app.unlocked.get() {
-                let _ = app.lock.show();
-                set_window_icon(app.lock.window());
-                app.lock.window().request_redraw();
+                present(&app.lock);
             } else if app.list.window().is_visible() {
                 let _ = app.list.hide();
             } else {
-                let _ = app.list.show();
-                set_window_icon(app.list.window());
-                // The Windows software renderer leaves a re-shown window blank until
-                // something else repaints it.
-                app.list.window().request_redraw();
+                present(&app.list);
             }
         });
     });
@@ -52,13 +46,9 @@ pub(crate) fn request_show() {
             let Some(app) = borrow.as_ref() else { return };
             touch(&app.ctx);
             if app.unlocked.get() {
-                let _ = app.list.show();
-                set_window_icon(app.list.window());
-                app.list.window().request_redraw();
+                present(&app.list);
             } else {
-                let _ = app.lock.show();
-                set_window_icon(app.lock.window());
-                app.lock.window().request_redraw();
+                present(&app.lock);
             }
         });
     });

@@ -18,7 +18,7 @@ use slint::{ComponentHandle, LogicalSize, SharedString, TimerMode};
 use ymemo_core::{now_millis, Memo};
 use ymemo_i18n::t;
 
-use crate::icon::set_window_icon;
+use crate::window::present;
 use crate::list::refresh_list;
 use crate::state::{touch, Ctx, StickyEntry, Stickies, APP};
 use crate::{apply_strings, PhotoRow, StickyWindow, Strings};
@@ -286,8 +286,7 @@ fn attach_photo(memo_id: &str, pick: PhotoPick) {
 /// Opens a memo's sticky, or raises it when already open.
 pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     if let Some(entry) = ctx.stickies.borrow().get(&memo.id) {
-        entry.window.show()?;
-        set_window_icon(entry.window.window());
+        present(&entry.window);
         return Ok(());
     }
 
@@ -545,8 +544,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
-    window.show()?;
-    set_window_icon(window.window());
+    present(&window);
     if focus {
         window.invoke_focus_body();
     }

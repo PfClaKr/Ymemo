@@ -45,6 +45,7 @@ mod sticky;
 mod sync;
 mod tray;
 mod update;
+mod window;
 
 use icon::set_window_icon;
 use list::{move_row, refresh_list};
@@ -53,6 +54,7 @@ use pairing::qr_image;
 use state::{touch, AppUi, Ctx, APP};
 use sticky::{close_sticky, new_memo, open_sticky, snap_tick, SNAP_INTERVAL};
 use sync::{start_merge_timer, start_syncthing};
+use window::present;
 
 /// How often idleness is checked; fine-grained enough against a setting in minutes.
 const IDLE_CHECK_INTERVAL: Duration = Duration::from_secs(20);
@@ -413,8 +415,7 @@ fn main() -> Result<()> {
             fill_settings_window(&ctx, &w);
             w.set_unlocked(unlocked.get());
             w.set_status(SharedString::new());
-            let _ = w.show();
-            set_window_icon(w.window());
+            present(&w);
         });
     }
     {
@@ -581,7 +582,7 @@ fn main() -> Result<()> {
 
     // Do not raise the lock window when the session already unlocked us.
     if !auto_unlocked {
-        lock.show()?;
+        present(&lock);
     }
     slint::run_event_loop_until_quit()?;
 
