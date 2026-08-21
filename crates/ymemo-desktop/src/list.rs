@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use slint::{SharedString, VecModel};
+use slint::{ComponentHandle, SharedString, VecModel};
 use ymemo_core::{now_millis, vault::Vault, Memo};
 
 use crate::state::Ctx;
@@ -114,7 +114,7 @@ pub(crate) fn push_group_rows(
         out.push(ListRow {
             id: SharedString::from(g.id.clone()),
             title: SharedString::from(g.name.clone()),
-            color: SharedString::new(),
+            color: SharedString::from(g.color.clone()),
             depth,
             is_group: true,
             expanded: !is_collapsed,
@@ -126,6 +126,63 @@ pub(crate) fn push_group_rows(
         push_group_rows(&g.id, depth + 1, children, memos, collapsed, out);
         for m in memos.iter().filter(|m| m.group_id == g.id) {
             out.push(memo_row(m, depth + 1));
+        }
+    }
+}
+
+/// Recolours a row from the list window. Folders and memos both carry a palette key, and
+/// both are synced, so one entry point covers them.
+pub(crate) fn set_row_color(ctx: &Ctx, id: &str, is_group: bool, color: &str) {
+    let mut guard = ctx.vault.borrow_mut();
+    let Some(v) = guard.as_mut() else { return };
+
+    let result = if is_group {
+        match v.store().get_group(id) {
+            Ok(Some(mut g)) => {
+                g.color = color.to_string();
+                g.updated_at = now_millis();
+                v.upsert_group(&g)
+            }
+            Ok(None) => return,
+            Err(e) => Err(e),
+        }
+    } else {
+        match v.store().get(id) {
+            Ok(Some(mut m)) => {
+                m.color = color.to_string();
+                m.updated_at = now_millis();
+                v.upsert(&m)
+            }
+            Ok(None) => return,
+            Err(e) => Err(e),
+        }
+    };
+    if let Err(e) = result {
+        eprintln!("could not change the colour: {e}");
+        return;
+    }
+    refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+}
+
+/// Redraws the list, and an open sticky, after a history restore put old values back.
+///
+/// The borrow is opened here rather than passed in: the caller has just finished writing
+/// through its own, and reaching through `Ctx` while one is still live is what used to kill
+/// the app (see `sync::start_merge_timer`).
+pub(crate) fn refresh_after_restore(ctx: &Ctx, entity: ymemo_core::history::Entity, id: &str) {
+    let guard = ctx.vault.borrow();
+    let Some(v) = guard.as_ref() else { return };
+    refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+
+    if entity == ymemo_core::history::Entity::Memo {
+        if let (Ok(Some(memo)), Some(entry)) = (v.store().get(id), ctx.stickies.borrow().get(id)) {
+            entry.window.set_memo_text(crate::sticky::sticky_text(&memo).into());
+            entry.window.set_memo_title(memo.title.into());
+            entry.window.set_sticky_color(memo.color.into());
+            entry.window.set_sticky_opacity(memo.opacity as f32);
+            // The restore is the current text now, so nothing is waiting to be saved.
+            entry.dirty.set(false);
+            entry.window.window().request_redraw();
         }
     }
 }
@@ -151,6 +208,7 @@ mod tests {
             id: id.into(),
             name: name.into(),
             parent_id: parent.into(),
+            color: ymemo_core::DEFAULT_COLOR.into(),
             created_at: 0,
             updated_at: 0,
         }

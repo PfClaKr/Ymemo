@@ -9,6 +9,7 @@
 pub mod blob;
 pub mod changelog;
 pub mod crypto;
+pub mod history;
 pub mod lan_pair;
 pub mod pairing;
 pub mod recovery;
@@ -140,6 +141,8 @@ pub struct Group {
     pub name: String,
     /// Parent group id; empty means top level.
     pub parent_id: String,
+    /// Palette key, the same set memos use and equally opaque to the core.
+    pub color: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -152,6 +155,7 @@ impl Group {
             id: uuid::Uuid::new_v4().to_string(),
             name: name.into(),
             parent_id: String::new(),
+            color: DEFAULT_COLOR.to_string(),
             created_at: now,
             updated_at: now,
         }
@@ -207,6 +211,7 @@ impl Store {
                 id         TEXT PRIMARY KEY,
                 name       TEXT NOT NULL,
                 parent_id  TEXT NOT NULL DEFAULT '',
+                color      TEXT NOT NULL DEFAULT 'yellow',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
@@ -231,15 +236,16 @@ impl Store {
         )?;
         // Migration: add columns introduced after the initial schema, so an old cache opens
         // without a full rebuild. A new column goes both in the CREATE TABLE above and here.
-        for (name, ddl) in [
-            ("color", "ALTER TABLE memos ADD COLUMN color TEXT NOT NULL DEFAULT 'yellow'"),
-            ("opacity", "ALTER TABLE memos ADD COLUMN opacity INTEGER NOT NULL DEFAULT 100"),
-            ("group_id", "ALTER TABLE memos ADD COLUMN group_id TEXT NOT NULL DEFAULT ''"),
+        for (table, name, ddl) in [
+            ("memos", "color", "ALTER TABLE memos ADD COLUMN color TEXT NOT NULL DEFAULT 'yellow'"),
+            ("memos", "opacity", "ALTER TABLE memos ADD COLUMN opacity INTEGER NOT NULL DEFAULT 100"),
+            ("memos", "group_id", "ALTER TABLE memos ADD COLUMN group_id TEXT NOT NULL DEFAULT ''"),
+            ("groups", "color", "ALTER TABLE groups ADD COLUMN color TEXT NOT NULL DEFAULT 'yellow'"),
         ] {
             let exists = self
                 .conn
-                .prepare("SELECT 1 FROM pragma_table_info('memos') WHERE name = ?1")?
-                .exists([name])?;
+                .prepare("SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2")?
+                .exists(params![table, name])?;
             if !exists {
                 self.conn.execute(ddl, [])?;
             }
@@ -379,10 +385,17 @@ impl Store {
     /// Inserts or updates a group by id.
     pub fn upsert_group(&self, group: &Group) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO groups (id, name, parent_id, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(id) DO UPDATE SET name = ?2, parent_id = ?3, updated_at = ?5",
-            params![group.id, group.name, group.parent_id, group.created_at, group.updated_at],
+            "INSERT INTO groups (id, name, parent_id, color, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(id) DO UPDATE SET name = ?2, parent_id = ?3, color = ?4, updated_at = ?6",
+            params![
+                group.id,
+                group.name,
+                group.parent_id,
+                group.color,
+                group.created_at,
+                group.updated_at
+            ],
         )?;
         Ok(())
     }
@@ -390,7 +403,7 @@ impl Store {
     /// All groups, sorted by name.
     pub fn list_groups(&self) -> Result<Vec<Group>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, parent_id, created_at, updated_at FROM groups ORDER BY name",
+            "SELECT id, name, parent_id, color, created_at, updated_at FROM groups ORDER BY name",
         )?;
         let rows = stmt.query_map([], row_to_group)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -399,7 +412,7 @@ impl Store {
     /// Looks up one group by id.
     pub fn get_group(&self, id: &str) -> Result<Option<Group>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, parent_id, created_at, updated_at FROM groups WHERE id = ?1",
+            "SELECT id, name, parent_id, color, created_at, updated_at FROM groups WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map([id], row_to_group)?;
         Ok(rows.next().transpose()?)
@@ -452,8 +465,9 @@ fn row_to_group(row: &rusqlite::Row) -> rusqlite::Result<Group> {
         id: row.get(0)?,
         name: row.get(1)?,
         parent_id: row.get(2)?,
-        created_at: row.get(3)?,
-        updated_at: row.get(4)?,
+        color: row.get(3)?,
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
     })
 }
 
@@ -584,6 +598,7 @@ mod tests {
             id: id.into(),
             name: name.into(),
             parent_id: parent.into(),
+            color: DEFAULT_COLOR.into(),
             created_at: 0,
             updated_at: 0,
         }

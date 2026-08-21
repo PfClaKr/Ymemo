@@ -42,6 +42,7 @@ export component StickyWindow inherits Window {
     callback edited(string);
     // Attach a photo; Rust opens the file dialog.
     callback add-photo();
+    callback show-history();
     // Resize a photo by a delta in em, which the core syncs to mobile too.
     callback resize-photo(string, float);
     callback close-requested();
@@ -58,6 +59,8 @@ export component StickyWindow inherits Window {
     callback drag-move(float, float);   // current pointer position
     callback drag-end();
 
+    // Creation time, already formatted by Rust; empty until it is set.
+    in property <string> created-at;
     private property <bool> show-palette: false;
     // Whether this press became a drag, and whether we are tracking it ourselves.
     private property <bool> drag-started: false;
@@ -124,22 +127,47 @@ export component StickyWindow inherits Window {
                             height: 100%;
                             text: "📎";
                             font-size: 13px;
+                            // Same reason as the colour chip below: without this the glyph
+                            // falls back to the default text colour and disappears.
+                            color: Palette.ink(root.sticky-color);
                             horizontal-alignment: center;
                             vertical-alignment: center;
-                            opacity: photo-ta.has-hover ? 1 : 0.6;
+                            opacity: photo-ta.has-hover ? 1 : 0.7;
                         }
                         clicked => { root.add-photo(); }
                     }
-                    palette-ta := TouchArea {
+                    history-ta := TouchArea {
                         width: 26px;
                         Text {
                             width: 100%;
                             height: 100%;
-                            text: "🎨";
-                            font-size: 13px;
+                            // A glyph, not an emoji: emoji inherit the default text colour
+                            // and vanish on these pastel bars.
+                            text: "⟲";
+                            font-size: 15px;
+                            font-weight: 700;
+                            color: Palette.ink(root.sticky-color);
                             horizontal-alignment: center;
                             vertical-alignment: center;
-                            opacity: palette-ta.has-hover ? 1 : 0.6;
+                            opacity: history-ta.has-hover ? 1 : 0.6;
+                        }
+                        clicked => { root.show-history(); }
+                    }
+                    palette-ta := TouchArea {
+                        width: 26px;
+                        // A chip of the memo's own colour, not an emoji: an emoji that falls
+                        // back to a monochrome glyph is drawn in the default text colour,
+                        // which on these pastel bars is all but invisible. A filled circle
+                        // with the title bar's ink around it reads at any colour, and says
+                        // what it will change at the same time.
+                        Rectangle {
+                            width: 15px;
+                            height: 15px;
+                            border-radius: 8px;
+                            background: Palette.swatch(root.sticky-color);
+                            border-width: 1.5px;
+                            border-color: Palette.ink(root.sticky-color);
+                            opacity: palette-ta.has-hover ? 1 : 0.85;
                         }
                         clicked => { root.show-palette = !root.show-palette; }
                     }
@@ -296,6 +324,18 @@ export component StickyWindow inherits Window {
                     }
                 }
             }
+        }
+
+        // ---- Created-at, along the bottom edge. Declared last so it paints over the body
+        // rather than under it, laid out by hand so it takes no line from the note, and
+        // faint enough to read straight past. ----
+        if !root.collapsed && root.created-at != "": Text {
+            text: root.created-at;
+            font-size: 9px;
+            color: Palette.ink(root.sticky-color);
+            opacity: 0.45;
+            x: parent.width - self.width - 7px;
+            y: parent.height - self.height - 4px;
         }
     }
 }

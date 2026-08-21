@@ -75,5 +75,9 @@ windows-sys = { version = "0.61", features = [
 # the exact same version, hence the pin (see apps/mobile/pubspec.yaml).
 flutter_rust_bridge = "=2.11.1"
 
+# Local-time formatting for the created-at stamp on a sticky. Already in the tree — slint
+# pulls chrono for its own date support — so this only turns on the `clock` feature.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
 # Common utilities
 anyhow = "1"

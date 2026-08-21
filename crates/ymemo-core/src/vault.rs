@@ -43,6 +43,7 @@ use std::path::{Path, PathBuf};
 
 use crate::blob::BlobStore;
 use crate::changelog::ChangeLog;
+use crate::history::{Entity, Revision, RevisionKind};
 use crate::crypto::{generate_salt, MasterKey, Salt, SALT_LEN};
 use crate::{clamp_width_em_milli, Attachment, Group, Memo, Store};
 
@@ -336,6 +337,7 @@ impl Vault {
         };
         put_str_if_changed(&mut self.doc, &obj, "name", &group.name)?;
         put_str_if_changed(&mut self.doc, &obj, "parent_id", &group.parent_id)?;
+        put_str_if_changed(&mut self.doc, &obj, "color", &group.color)?;
         put_i64_if_changed(&mut self.doc, &obj, "created_at", group.created_at)?;
         put_i64_if_changed(&mut self.doc, &obj, "updated_at", group.updated_at)?;
 
@@ -406,6 +408,64 @@ impl Vault {
         self.materialize()
     }
 
+    /// Every past version of one memo or folder, oldest first.
+    ///
+    /// Read from the logs rather than the live document, so it neither disturbs nor is
+    /// disturbed by the merge timer. See [`crate::history`] for what a revision is and why
+    /// this is not built on Syncthing's file versioning.
+    pub fn history(&self, entity: Entity, id: &str) -> Result<Vec<Revision>> {
+        // A throwaway document is the cheapest way to get the changes in causal order:
+        // the logs are only ordered within a file, and merging is what interleaves them.
+        let mut ordered = AutoCommit::new();
+        ordered.apply_changes(self.read_all_changes()?)?;
+        crate::history::replay(ordered.get_changes(&[]), entity, id)
+    }
+
+    /// Writes the values from `revision` back, as a new edit.
+    ///
+    /// **Nothing is rewritten.** A restore appends a change like any other, so the versions
+    /// it stepped over stay readable and the restore itself becomes the newest revision.
+    /// That is also what makes it safe on several devices at once: two restores merge like
+    /// two edits instead of fighting over the log.
+    ///
+    /// An entity deleted in the meantime comes back, since the revision carries every field.
+    pub fn restore(&mut self, entity: Entity, id: &str, revision: &Revision) -> Result<()> {
+        if revision.kind == RevisionKind::Deleted {
+            bail!(t!("core.cannot_restore_deletion"));
+        }
+        let now = crate::now_millis();
+        match entity {
+            Entity::Memo => {
+                let mut memo = self.store.get(id)?.unwrap_or_else(|| {
+                    let mut m = Memo::new("", "");
+                    m.id = id.to_string();
+                    m
+                });
+                memo.title = revision.field("title").to_string();
+                memo.body = revision.field("body").to_string();
+                memo.color = non_empty(revision.field("color"), crate::DEFAULT_COLOR);
+                memo.opacity = revision.field("opacity").parse().unwrap_or(crate::DEFAULT_OPACITY);
+                memo.group_id = revision.field("group_id").to_string();
+                memo.created_at = revision.field("created_at").parse().unwrap_or(memo.created_at);
+                memo.updated_at = now;
+                self.upsert(&memo)
+            }
+            Entity::Group => {
+                let mut group = self.store.get_group(id)?.unwrap_or_else(|| {
+                    let mut g = Group::new("");
+                    g.id = id.to_string();
+                    g
+                });
+                group.name = revision.field("name").to_string();
+                group.parent_id = revision.field("parent_id").to_string();
+                group.color = non_empty(revision.field("color"), crate::DEFAULT_COLOR);
+                group.created_at = revision.field("created_at").parse().unwrap_or(group.created_at);
+                group.updated_at = now;
+                self.upsert_group(&group)
+            }
+        }
+    }
+
     /// Read-only access to the local cache.
     pub fn store(&self) -> &Store {
         &self.store
@@ -457,8 +517,14 @@ impl Vault {
 
     /// Commits the pending local edit and appends it, encrypted, to our own log. Writes
     /// nothing when there was no actual change.
+    ///
+    /// The commit carries **the time it was made**, in seconds, which is what
+    /// [`crate::history`] reads back as a revision's date. Automerge's plain `commit()`
+    /// leaves it at zero, and a history where every version happened in 1970 is no history.
     fn append_local_change(&mut self) -> Result<()> {
-        if self.doc.commit().is_some() {
+        let options = automerge::transaction::CommitOptions::default()
+            .with_time(crate::now_millis() / 1000);
+        if self.doc.commit_with(options).is_some() {
             let change = self
                 .doc
                 .get_last_local_change()
@@ -553,6 +619,8 @@ impl Vault {
                 id: id.clone(),
                 name: get_str_or(&self.doc, &obj, "name", ""),
                 parent_id: get_str_or(&self.doc, &obj, "parent_id", ""),
+                // Folders had no colour before, so old changes carry none.
+                color: get_str_or(&self.doc, &obj, "color", crate::DEFAULT_COLOR),
                 created_at: get_i64_or(&self.doc, &obj, "created_at", 0),
                 updated_at: get_i64_or(&self.doc, &obj, "updated_at", 0),
             };
@@ -824,6 +892,11 @@ fn get_i64(doc: &AutoCommit, obj: &ObjId, key: &str) -> Result<i64> {
         },
         _ => bail!(t!("core.field_missing", key = key)),
     }
+}
+
+/// `value`, or `fallback` when it is empty — a revision from before a field existed.
+fn non_empty(value: &str, fallback: &str) -> String {
+    if value.is_empty() { fallback.to_string() } else { value.to_string() }
 }
 
 fn to_hex(bytes: &[u8]) -> String {
@@ -1242,6 +1315,218 @@ mod tests {
 
         fs::remove_dir_all(&dir).ok();
         fs::remove_dir_all(&not_a_vault).ok();
+    }
+
+    /// A folder's colour is part of the document, so it reaches the other devices the same
+    /// way its name does.
+    #[test]
+    fn group_colour_syncs_across_devices() {
+        let dir = temp_dir();
+        let db_a = std::env::temp_dir().join(format!("ymemo-a-{}.db", uuid::Uuid::new_v4()));
+        let db_b = std::env::temp_dir().join(format!("ymemo-b-{}.db", uuid::Uuid::new_v4()));
+
+        let mut group = Group::new("shared folder");
+        {
+            let mut a = Vault::create(&dir, b"pw", Store::open(&db_a).unwrap()).unwrap();
+            a.upsert_group(&group).unwrap();
+            group.color = "blue".into();
+            a.upsert_group(&group).unwrap();
+        }
+
+        // A second device merges the same logs and sees the colour, not the default.
+        let b = Vault::open(&dir, b"pw", Store::open(&db_b).unwrap()).unwrap();
+        let seen = b.store().get_group(&group.id).unwrap().unwrap();
+        assert_eq!(seen.color, "blue");
+        assert_eq!(seen.name, "shared folder");
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db_a).ok();
+        fs::remove_file(&db_b).ok();
+    }
+
+    /// Folders written before they had colours must still open, at the default.
+    #[test]
+    fn group_without_colour_falls_back_to_the_default() {
+        let dir = temp_dir();
+        let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
+
+        let id = {
+            let mut v = Vault::create(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+            let group = Group::new("no colour here");
+            v.upsert_group(&group).unwrap();
+            // Imitate the older document shape by dropping the field again.
+            let groups = v.groups_obj().unwrap();
+            let (_, obj) = v.doc.get(&groups, &group.id).unwrap().unwrap();
+            v.doc.delete(&obj, "color").unwrap();
+            v.append_local_change().unwrap();
+            group.id
+        };
+
+        let v = Vault::open(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+        assert_eq!(v.store().get_group(&id).unwrap().unwrap().color, crate::DEFAULT_COLOR);
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db).ok();
+    }
+
+    /// Every edit leaves a revision, in order, with the values it had at the time.
+    #[test]
+    fn memo_history_records_each_edit() {
+        let dir = temp_dir();
+        let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
+
+        let mut memo = Memo::new("first", "one");
+        {
+            let mut v = Vault::create(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+            v.upsert(&memo).unwrap();
+            memo.body = "one two".into();
+            v.upsert(&memo).unwrap();
+            memo.title = "second".into();
+            memo.color = "blue".into();
+            v.upsert(&memo).unwrap();
+        }
+
+        let v = Vault::open(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+        let hist = v.history(Entity::Memo, &memo.id).unwrap();
+        assert_eq!(hist.len(), 3, "creation plus two edits");
+        assert_eq!(hist[0].kind, RevisionKind::Created);
+        assert_eq!(hist[0].field("title"), "first");
+        assert_eq!(hist[0].field("body"), "one");
+
+        assert_eq!(hist[1].kind, RevisionKind::Edited);
+        assert_eq!(hist[1].field("body"), "one two");
+        assert_eq!(hist[1].changed, vec!["body".to_string()]);
+
+        // The last revision reports both fields it moved, in the order fields() lists them.
+        assert_eq!(hist[2].changed, vec!["title".to_string(), "color".to_string()]);
+        // Every revision names the device that wrote it.
+        let device = Store::open(&db).unwrap().device_id().unwrap();
+        assert!(hist.iter().all(|r| r.device == device));
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db).ok();
+    }
+
+    /// Revisions must be dated. Automerge's default commit leaves the time at zero, which
+    /// showed every version as 1970 until the vault started stamping its own.
+    #[test]
+    fn revisions_carry_the_time_they_were_written() {
+        let dir = temp_dir();
+        let before = crate::now_millis();
+
+        let memo = Memo::new("dated", "body");
+        let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        v.upsert(&memo).unwrap();
+
+        let rev = &v.history(Entity::Memo, &memo.id).unwrap()[0];
+        // Automerge keeps seconds, so the millis it comes back as are rounded down.
+        assert!(rev.at >= before - 1000, "revision dated before the write: {}", rev.at);
+        assert!(rev.at <= crate::now_millis() + 1000, "revision dated in the future: {}", rev.at);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Restoring is a new edit, not a rewrite: the versions it stepped over stay readable.
+    #[test]
+    fn restoring_appends_rather_than_rewrites() {
+        let dir = temp_dir();
+        let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
+
+        let mut memo = Memo::new("keep", "original");
+        let mut v = Vault::create(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+        v.upsert(&memo).unwrap();
+        memo.body = "ruined".into();
+        v.upsert(&memo).unwrap();
+        assert_eq!(v.store().get(&memo.id).unwrap().unwrap().body, "ruined");
+
+        let first = v.history(Entity::Memo, &memo.id).unwrap()[0].clone();
+        v.restore(Entity::Memo, &memo.id, &first).unwrap();
+        assert_eq!(v.store().get(&memo.id).unwrap().unwrap().body, "original");
+
+        // Three revisions now: the two edits and the restore. Nothing was removed.
+        let hist = v.history(Entity::Memo, &memo.id).unwrap();
+        assert_eq!(hist.len(), 3);
+        assert_eq!(hist[1].field("body"), "ruined", "the bad version is still there");
+        assert_eq!(hist[2].field("body"), "original");
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db).ok();
+    }
+
+    /// A deleted memo keeps its history, and can be brought back from it.
+    #[test]
+    fn deletion_is_a_revision_and_can_be_undone() {
+        let dir = temp_dir();
+        let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
+
+        let memo = Memo::new("gone", "body");
+        let mut v = Vault::create(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+        v.upsert(&memo).unwrap();
+        v.delete(&memo.id).unwrap();
+        assert!(v.store().get(&memo.id).unwrap().is_none());
+
+        let hist = v.history(Entity::Memo, &memo.id).unwrap();
+        assert_eq!(hist.last().unwrap().kind, RevisionKind::Deleted);
+        // The deletion itself is not a thing to restore; the version before it is.
+        assert!(v.restore(Entity::Memo, &memo.id, hist.last().unwrap()).is_err());
+
+        v.restore(Entity::Memo, &memo.id, &hist[0]).unwrap();
+        let back = v.store().get(&memo.id).unwrap().unwrap();
+        assert_eq!(back.title, "gone");
+        assert_eq!(back.created_at, memo.created_at, "the original creation time comes back");
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db).ok();
+    }
+
+    /// Folders have a history too, colour included.
+    #[test]
+    fn group_history_follows_renames_and_colours() {
+        let dir = temp_dir();
+        let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
+
+        let mut group = Group::new("Inbox");
+        let mut v = Vault::create(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+        v.upsert_group(&group).unwrap();
+        group.name = "Archive".into();
+        group.color = "green".into();
+        v.upsert_group(&group).unwrap();
+
+        let hist = v.history(Entity::Group, &group.id).unwrap();
+        assert_eq!(hist.len(), 2);
+        assert_eq!(hist[0].field("name"), "Inbox");
+        assert_eq!(hist[1].changed, vec!["name".to_string(), "color".to_string()]);
+
+        v.restore(Entity::Group, &group.id, &hist[0]).unwrap();
+        let back = v.store().get_group(&group.id).unwrap().unwrap();
+        assert_eq!(back.name, "Inbox");
+        assert_eq!(back.color, crate::DEFAULT_COLOR);
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db).ok();
+    }
+
+    /// A memo's history must not pick up edits that belong to other memos.
+    #[test]
+    fn history_ignores_other_memos() {
+        let dir = temp_dir();
+        let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
+
+        let mine = Memo::new("mine", "");
+        let mut other = Memo::new("other", "");
+        let mut v = Vault::create(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+        v.upsert(&mine).unwrap();
+        for i in 0..5 {
+            other.body = format!("edit {i}");
+            v.upsert(&other).unwrap();
+        }
+
+        assert_eq!(v.history(Entity::Memo, &mine.id).unwrap().len(), 1);
+        // The first pass through the loop creates it, the other four edit it.
+        assert_eq!(v.history(Entity::Memo, &other.id).unwrap().len(), 5);
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db).ok();
     }
 
     #[test]

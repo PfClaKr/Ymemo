@@ -1,0 +1,208 @@
+import { Button, ListView, ScrollView } from "std-widgets.slint";
+import { Strings } from "@i18n";
+
+// ---------------------------------------------------------------------------
+// History window: every past version of one memo or folder, newest first, with the values
+// it held at the time and a way to put them back.
+//
+// The versions come from the change logs, which are the vault's real history — see
+// crates/ymemo-core/src/history.rs. Restoring writes a new edit rather than rewriting
+// anything, so the list only ever grows.
+// ---------------------------------------------------------------------------
+export struct RevisionRow {
+    // Index into the core's list, which is oldest first; the display reverses it.
+    index: int,
+    when: string,
+    device: string,
+    // "Created" / "Edited" / "Deleted", already translated.
+    kind: string,
+    // The fields this revision moved, joined for display.
+    changed: string,
+    // Title (or folder name) as of this revision.
+    heading: string,
+    // Body as of this revision; empty for a folder.
+    body: string,
+    // Palette key, drawn as a chip.
+    color: string,
+    // A deletion has nothing to put back.
+    restorable: bool,
+}
+
+export component HistoryWindow inherits Window {
+    title: Strings.ui_history_title;
+    preferred-width: 560px;
+    preferred-height: 480px;
+    min-width: 420px;
+    min-height: 320px;
+    background: #2e2b27;
+
+    // What the history belongs to, for the heading.
+    in property <string> subject;
+    in property <[RevisionRow]> revisions;
+    in property <string> status;
+    // Selected row, as an index into `revisions`; -1 while nothing is chosen.
+    in-out property <int> selected: -1;
+
+    callback restore(int); // the core-side index carried by the row
+    callback close-requested();
+
+    private property <RevisionRow> current: root.selected >= 0 && root.selected < root.revisions.length
+        ? root.revisions[root.selected]
+        : { index: -1, when: "", device: "", kind: "", changed: "", heading: "", body: "", color: "", restorable: false };
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+
+        Text {
+            text: Strings.ui_history_heading + " — " + root.subject;
+            font-size: 15px;
+            font-weight: 700;
+            color: #f0ead6;
+            overflow: elide;
+        }
+
+        if root.revisions.length == 0: Text {
+            text: Strings.ui_history_empty;
+            font-size: 12px;
+            color: #b0a99a;
+            wrap: word-wrap;
+        }
+
+        if root.revisions.length > 0: HorizontalLayout {
+            vertical-stretch: 1;
+            spacing: 10px;
+
+            // ---- The revisions themselves ----
+            ListView {
+                width: 235px;
+                for row[idx] in root.revisions: Rectangle {
+                    height: 52px;
+                    border-radius: 6px;
+                    background: root.selected == idx ? #ffffff26
+                              : row-ta.has-hover ? #ffffff12
+                              : transparent;
+                    row-ta := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.selected = idx; }
+                    }
+                    HorizontalLayout {
+                        padding: 7px;
+                        spacing: 7px;
+                        Rectangle {
+                            width: 4px;
+                            border-radius: 2px;
+                            background: row.kind == Strings.ui_history_deleted ? #e79a9a : #9ec5e8;
+                        }
+                        VerticalLayout {
+                            spacing: 2px;
+                            HorizontalLayout {
+                                spacing: 5px;
+                                Text {
+                                    text: row.when;
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    color: #ece7db;
+                                }
+                                Text {
+                                    text: row.kind;
+                                    font-size: 10px;
+                                    color: #a8a294;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            Text {
+                                text: row.changed == "" ? row.device : row.changed;
+                                font-size: 10px;
+                                color: #8a8375;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---- What that version looked like ----
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 6px;
+
+                if root.selected < 0: Text {
+                    text: Strings.ui_history_pick;
+                    font-size: 11px;
+                    color: #8a8375;
+                    wrap: word-wrap;
+                }
+
+                if root.selected >= 0: HorizontalLayout {
+                    spacing: 6px;
+                    Rectangle {
+                        width: 12px;
+                        height: 12px;
+                        y: 3px;
+                        border-radius: 6px;
+                        background: root.current.color == "pink" ? #ff9fc0
+                                  : root.current.color == "green" ? #8fd678
+                                  : root.current.color == "blue" ? #7db8ec
+                                  : root.current.color == "purple" ? #b98fe0
+                                  : #ffe15c;
+                    }
+                    Text {
+                        text: root.current.heading == "" ? Strings.ui_list_memo_untitled : root.current.heading;
+                        font-size: 13px;
+                        font-weight: 700;
+                        color: #f0ead6;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                }
+
+                if root.selected >= 0: Text {
+                    text: root.current.device;
+                    font-size: 10px;
+                    color: #8a8375;
+                    overflow: elide;
+                }
+
+                if root.selected >= 0: Rectangle {
+                    vertical-stretch: 1;
+                    background: #262320;
+                    border-radius: 6px;
+                    ScrollView {
+                        VerticalLayout {
+                            padding: 8px;
+                            Text {
+                                text: root.current.body;
+                                font-size: 12px;
+                                color: #d8d2c2;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.status != "": Text {
+            text: root.status;
+            font-size: 11px;
+            color: #a8d0a8;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+            Button {
+                text: Strings.ui_history_restore;
+                primary: true;
+                enabled: root.selected >= 0 && root.current.restorable;
+                clicked => { root.restore(root.current.index); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Button {
+                text: Strings.ui_history_close;
+                clicked => { root.close-requested(); }
+            }
+        }
+    }
+}

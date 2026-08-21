@@ -64,6 +64,9 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
                             entry.window.set_memo_title(m.title.into());
                             entry.window.set_sticky_color(m.color.into());
                             entry.window.set_sticky_opacity(m.opacity as f32);
+                            entry.window.set_created_at(
+                                crate::sticky::format_created_at(m.created_at).into(),
+                            );
                             // Another device may have added or resized a photo. The vault
                             // is passed straight in: it is already borrowed here, and going
                             // back through `ctx` for a second borrow is what used to kill
@@ -94,6 +97,10 @@ pub(crate) fn start_syncthing(data_dir: &std::path::Path, vault_dir: &std::path:
         Ok(st) => {
             if let Err(e) = st.ensure_folder(SYNC_FOLDER_ID, "Ymemo Vault", vault_dir) {
                 eprintln!("could not register the shared folder: {e}");
+            }
+            // A safety net under the logs, not the memo history — see the core's docs.
+            if let Err(e) = st.ensure_versioning(SYNC_FOLDER_ID) {
+                eprintln!("could not enable vault file versioning: {e}");
             }
             Some(st)
         }

@@ -13,7 +13,7 @@ use slint::VecModel;
 use ymemo_core::vault::Vault;
 
 use crate::settings::Settings;
-use crate::{ListRow, ListWindow, LockWindow, SettingsWindow, StickyWindow};
+use crate::{HistoryWindow, ListRow, ListWindow, LockWindow, SettingsWindow, StickyWindow};
 
 pub(crate) type SharedVault = Rc<RefCell<Option<Vault>>>;
 
@@ -68,6 +68,9 @@ thread_local! {
 pub(crate) struct AppUi {
     pub(crate) lock: LockWindow,
     pub(crate) list: ListWindow,
+    /// So a sticky can open its own past without owning the window.
+    pub(crate) history: HistoryWindow,
+    pub(crate) history_subject: crate::history::Subject,
     /// Built once at startup and only shown or hidden, so a strong handle is fine.
     pub(crate) settings: SettingsWindow,
     pub(crate) unlocked: Rc<Cell<bool>>,

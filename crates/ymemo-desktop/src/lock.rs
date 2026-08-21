@@ -17,7 +17,9 @@ use crate::state::Ctx;
 use crate::sticky::flush_dirty;
 use crate::sync::SYNC_FOLDER_ID;
 use crate::window::present;
-use crate::{apply_strings, ListWindow, LockWindow, SecurityWindow, SettingsWindow, Strings};
+use crate::{
+    apply_strings, HistoryWindow, ListWindow, LockWindow, SecurityWindow, SettingsWindow, Strings,
+};
 
 /// Fills the settings window's inputs from the current settings.
 pub(crate) fn fill_settings_window(ctx: &Ctx, win: &SettingsWindow) {
@@ -44,6 +46,7 @@ pub(crate) fn apply_lang(
     list: &ListWindow,
     settings_win: &SettingsWindow,
     security_win: &SecurityWindow,
+    history_win: &HistoryWindow,
 ) {
     // Switch the catalog first; every later t!/apply_strings reads it, core and tray
     // included, so nothing else needs notifying.
@@ -52,6 +55,7 @@ pub(crate) fn apply_lang(
     apply_strings(&list.global::<Strings>());
     apply_strings(&settings_win.global::<Strings>());
     apply_strings(&security_win.global::<Strings>());
+    apply_strings(&history_win.global::<Strings>());
     for entry in ctx.stickies.borrow().values() {
         apply_strings(&entry.window.global::<Strings>());
     }
