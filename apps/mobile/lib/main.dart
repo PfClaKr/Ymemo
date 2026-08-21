@@ -27,6 +27,12 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await RustLib.init();
 
+  // Android 15 draws every app edge to edge whether it asks to or not, so the system bars
+  // sit *on top of* the UI. Asking for it explicitly makes older versions behave the same
+  // way instead of leaving two layouts to reason about; `_bottomInset` below is what keeps
+  // content out from under the gesture bar.
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
   // Every path the app uses is derived here, once. The vault directory in particular is
   // shared between the two: it is what the daemon syncs and what the vault is opened from,
   // and two spellings of it would mean syncing one directory while reading another.
@@ -268,7 +274,7 @@ class _LockScreenState extends State<LockScreen> {
       ),
       body: Center(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + _bottomInset(context)),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -566,6 +572,9 @@ class _MemoListScreenState extends State<MemoListScreen> {
         else
         Expanded(
           child: ListView.builder(
+        // Room for the gesture bar and for the button floating above it, or the last memo
+        // in the list is unreachable behind one or the other.
+        padding: EdgeInsets.only(bottom: _bottomInset(context) + 88),
         // Folders first, then memos — the same order the desktop's tree draws them in.
         itemCount: _folders.length + _memos.length,
         itemBuilder: (context, i) {
@@ -605,13 +614,25 @@ class _MemoListScreenState extends State<MemoListScreen> {
           ),
         ),
       ]),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _add,
-        child: const Icon(Icons.add),
+      floatingActionButton: Padding(
+        // Scaffold lifts the button off the bottom of the *window*, which edge to edge puts
+        // behind the gesture bar.
+        padding: EdgeInsets.only(bottom: _bottomInset(context)),
+        child: FloatingActionButton(
+          onPressed: _add,
+          child: const Icon(Icons.add),
+        ),
       ),
     );
   }
 }
+
+/// Height of the system navigation bar (or gesture pill) at the bottom of the screen.
+///
+/// Scrollables add it to their padding rather than being wrapped in a `SafeArea`: the
+/// content still scrolls *under* the translucent bar, which is the point of edge to edge,
+/// but the last row can be scrolled clear of it instead of ending up underneath.
+double _bottomInset(BuildContext context) => MediaQuery.paddingOf(context).bottom;
 
 /// Memo editor: title and body, saved on the way out.
 class MemoEditScreen extends StatefulWidget {
@@ -757,7 +778,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
           ],
         ),
         body: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + _bottomInset(context)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -1007,7 +1028,7 @@ class _SyncScreenState extends State<SyncScreen> {
       body: ListenableBuilder(
         listenable: widget.sync,
         builder: (context, _) => ListView(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + _bottomInset(context)),
           children: [
             _status(context),
             if (_lanCode != null || _lanMessage != null) ...[
@@ -1551,7 +1572,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(s.settings)),
       body: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: EdgeInsets.fromLTRB(0, 8, 0, 8 + _bottomInset(context)),
         children: [
           _header(s.language),
           // Language names stay untranslated: written in their own language they are findable
