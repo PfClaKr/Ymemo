@@ -15,12 +15,13 @@ use anyhow::Result;
 use i_slint_backend_winit::winit::dpi::PhysicalPosition;
 use i_slint_backend_winit::WinitWindowAccessor;
 use slint::{ComponentHandle, LogicalSize, SharedString, TimerMode};
+use ymemo_core::vault::Vault;
 use ymemo_core::{now_millis, Memo};
 use ymemo_i18n::t;
 
-use crate::icon::set_window_icon;
 use crate::list::refresh_list;
 use crate::state::{touch, Ctx, StickyEntry, Stickies, APP};
+use crate::window::present;
 use crate::{apply_strings, PhotoRow, StickyWindow, Strings};
 
 /// Body font size (logical px) that photo sizes in em are measured against.
@@ -155,9 +156,7 @@ pub(crate) fn close_sticky(stickies: &Stickies, id: &str) {
 /// Photos are ciphertext inside the vault, so they are decrypted and decoded **in memory** —
 /// no plaintext ever reaches a temp file. A photo that has not synced yet, or that cannot be
 /// decoded, is marked `missing` so the UI can say so; an empty gap would read as data loss.
-pub(crate) fn photo_rows(ctx: &Ctx, memo_id: &str) -> Vec<PhotoRow> {
-    let guard = ctx.vault.borrow();
-    let Some(v) = guard.as_ref() else { return Vec::new() };
+pub(crate) fn photo_rows(v: &Vault, memo_id: &str) -> Vec<PhotoRow> {
     let list = match v.store().attachments_of(memo_id) {
         Ok(l) => l,
         Err(e) => {
@@ -196,7 +195,11 @@ fn decode_image(bytes: &[u8]) -> Option<slint::Image> {
 
 /// Refills an open sticky's photo list after an add, a resize or a remote merge.
 pub(crate) fn refresh_photos(ctx: &Ctx, memo_id: &str) {
-    let rows = photo_rows(ctx, memo_id);
+    let rows = {
+        let guard = ctx.vault.borrow();
+        let Some(v) = guard.as_ref() else { return };
+        photo_rows(v, memo_id)
+    };
     if let Some(entry) = ctx.stickies.borrow().get(memo_id) {
         entry
             .window
@@ -286,8 +289,7 @@ fn attach_photo(memo_id: &str, pick: PhotoPick) {
 /// Opens a memo's sticky, or raises it when already open.
 pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     if let Some(entry) = ctx.stickies.borrow().get(&memo.id) {
-        entry.window.show()?;
-        set_window_icon(entry.window.window());
+        present(&entry.window);
         return Ok(());
     }
 
@@ -298,7 +300,12 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     window.set_memo_text(SharedString::from(sticky_text(memo)));
     window.set_sticky_color(SharedString::from(memo.color.clone()));
     window.set_sticky_opacity(memo.opacity as f32);
-    window.set_photos(slint::ModelRc::new(slint::VecModel::from(photo_rows(ctx, &memo.id))));
+    {
+        let guard = ctx.vault.borrow();
+        if let Some(v) = guard.as_ref() {
+            window.set_photos(slint::ModelRc::new(slint::VecModel::from(photo_rows(v, &memo.id))));
+        }
+    }
 
     // Attach: pick a photo from the file dialog, which runs on a worker thread.
     {
@@ -545,8 +552,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
-    window.show()?;
-    set_window_icon(window.window());
+    present(&window);
     if focus {
         window.invoke_focus_body();
     }

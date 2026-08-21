@@ -23,11 +23,23 @@ export component LockWindow inherits Window {
     // (choice screen). Rust flips it once pairing delivers vault.json.
     in property <bool> vault-exists: false;
     in property <[SharedDeviceRow]> shared-devices;
+    // Whether this vault has a recovery code, read straight from vault.json: the lock
+    // screen has to know before anything is unlocked.
+    in property <bool> has-recovery: false;
+    // A code just issued for a vault created on this device. Shown once, and only here —
+    // nothing stores it, so the user has to write it down before moving on.
+    in property <string> new-recovery-code;
     callback unlock(string);
     callback create-vault(string);
     callback add-peer(string);
     callback lan-join(string);
     callback unshare(string);
+    // Recovery code + the password to set with it.
+    callback recover(string, string);
+    // Deletes this device's vault outright. The last way out of a forgotten password.
+    callback reset-vault();
+    // The user says the recovery code is written down; Rust opens the vault.
+    callback recovery-ack();
     // Fires as the pairing panel opens and closes; Rust grows the window to fit it and
     // shrinks it back.
     callback sync-toggled(bool);
@@ -37,6 +49,14 @@ export component LockWindow inherits Window {
     changed show-sync => { root.sync-toggled(self.show-sync); }
     // Whether a new device chose "create" and moved on to setting a password.
     private property <bool> creating: false;
+    // Whether the "forgot the password" panel is open, and whether the wipe inside it has
+    // been armed. Deleting every memo on the device takes two deliberate clicks.
+    private property <bool> recovering: false;
+    private property <bool> reset-armed: false;
+    public function leave-recovery() {
+        root.recovering = false;
+        root.reset-armed = false;
+    }
     // Contents of the password field. The LineEdit sits inside a conditional block and
     // cannot be reached by id, so it is two-way bound here and cleared by Rust on lock.
     private property <string> password-text;
@@ -91,22 +111,101 @@ export component LockWindow inherits Window {
             }
 
             // Existing vault: unlock with the master password.
-            if root.vault-exists: HorizontalLayout {
+            if root.vault-exists && !root.recovering: VerticalLayout {
                 spacing: 6px;
-                LineEdit {
-                    placeholder-text: Strings.ui_lock_password_placeholder;
-                    input-type: InputType.password;
-                    text <=> root.password-text;
-                    accepted => { root.unlock(self.text); }
+                HorizontalLayout {
+                    spacing: 6px;
+                    LineEdit {
+                        placeholder-text: Strings.ui_lock_password_placeholder;
+                        input-type: InputType.password;
+                        text <=> root.password-text;
+                        accepted => { root.unlock(self.text); }
+                    }
+                    Button {
+                        text: Strings.ui_lock_open;
+                        clicked => { root.unlock(root.password-text); }
+                    }
                 }
-                Button {
-                    text: Strings.ui_lock_open;
-                    clicked => { root.unlock(root.password-text); }
+                HorizontalLayout {
+                    alignment: start;
+                    Text {
+                        text: Strings.ui_lock_forgot;
+                        font-size: 11px;
+                        color: #a8a294;
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.recovering = true; }
+                        }
+                    }
+                }
+            }
+
+            // Forgotten password: the recovery code, or starting over.
+            if root.vault-exists && root.recovering: VerticalLayout {
+                spacing: 8px;
+
+                if root.has-recovery: VerticalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: Strings.ui_lock_recovery_prompt;
+                        font-size: 11px;
+                        color: #d8d2c2;
+                        wrap: word-wrap;
+                    }
+                    code := LineEdit {
+                        placeholder-text: Strings.ui_lock_recovery_placeholder;
+                    }
+                    newpw := LineEdit {
+                        placeholder-text: Strings.ui_lock_recovery_new_password;
+                        input-type: InputType.password;
+                        accepted => { root.recover(code.text, self.text); }
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        Button {
+                            text: Strings.ui_lock_recover;
+                            primary: true;
+                            enabled: code.text != "" && newpw.text != "";
+                            clicked => { root.recover(code.text, newpw.text); }
+                        }
+                    }
+                }
+                if !root.has-recovery: Text {
+                    text: Strings.ui_lock_no_recovery;
+                    font-size: 11px;
+                    color: #e8d98a;
+                    wrap: word-wrap;
+                }
+
+                // Last resort. Nothing here can decrypt the memos, so the only other move
+                // is to throw them away and start again.
+                Rectangle { height: 1px; background: #4a453c; }
+                Text {
+                    text: Strings.ui_lock_reset_hint;
+                    font-size: 10px;
+                    color: #a8a294;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    if !root.reset-armed: Button {
+                        text: Strings.ui_lock_reset;
+                        clicked => { root.reset-armed = true; }
+                    }
+                    if root.reset-armed: Button {
+                        text: Strings.ui_lock_reset_confirm;
+                        primary: true;
+                        clicked => { root.reset-vault(); }
+                    }
+                    Button {
+                        text: Strings.ui_lock_back;
+                        clicked => { root.leave-recovery(); }
+                    }
                 }
             }
 
             // First run on a new device: pick how to start.
-            if !root.vault-exists && !root.creating: VerticalLayout {
+            if !root.vault-exists && !root.creating && root.new-recovery-code == "": VerticalLayout {
                 spacing: 8px;
                 Text {
                     text: Strings.ui_lock_start_question;
@@ -132,7 +231,7 @@ export component LockWindow inherits Window {
             }
 
             // New device that chose "create": set a master password.
-            if !root.vault-exists && root.creating: VerticalLayout {
+            if !root.vault-exists && root.creating && root.new-recovery-code == "": VerticalLayout {
                 spacing: 6px;
                 HorizontalLayout {
                     spacing: 6px;
@@ -149,6 +248,50 @@ export component LockWindow inherits Window {
                 Button {
                     text: Strings.ui_lock_back;
                     clicked => { root.creating = false; }
+                }
+            }
+            // A vault was just created: its recovery code, before anything else happens.
+            if root.new-recovery-code != "": VerticalLayout {
+                spacing: 8px;
+                Text {
+                    text: Strings.ui_lock_code_title;
+                    font-size: 13px;
+                    font-weight: 700;
+                    color: #f0ead6;
+                    wrap: word-wrap;
+                }
+                Rectangle {
+                    background: #3a362f;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: #e8d98a;
+                    VerticalLayout {
+                        padding: 10px;
+                        // Selectable rather than a label, so it can be copied out.
+                        TextInput {
+                            text: root.new-recovery-code;
+                            read-only: true;
+                            font-size: 14px;
+                            font-family: "monospace";
+                            color: #f7e98c;
+                            wrap: word-wrap;
+                            single-line: false;
+                        }
+                    }
+                }
+                Text {
+                    text: Strings.ui_lock_code_warning;
+                    font-size: 10px;
+                    color: #e8d98a;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    Button {
+                        text: Strings.ui_lock_code_saved;
+                        primary: true;
+                        clicked => { root.recovery-ack(); }
+                    }
                 }
             }
         }

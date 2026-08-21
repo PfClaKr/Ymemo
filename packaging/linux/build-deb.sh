@@ -9,7 +9,8 @@
 #   /usr/share/icons/hicolor/...  icons
 #
 # syncthing belongs to the package, so `apt remove ymemo` takes it too. User data in
-# ~/.local/share/ymemo stays, as usual: even purge leaves the home directory alone.
+# ~/.local/share/ymemo stays, as usual: even purge leaves the home directory alone. prerm
+# prints where it is and that `ymemo --purge` removes it.
 #
 # Usage:
 #   build-deb.sh --app <ymemo-desktop> --sync <syncthing> --version <x.y.z> \
@@ -106,6 +107,15 @@ set -e
 
 # Only on removal; an upgrade must not close a window the user is typing in.
 case "$1" in remove|purge) ;; *) exit 0;; esac
+
+# Memos live in each user's home directory, which a package may not touch (Debian Policy
+# 6.6 and the Fedora guidelines both forbid it), and prerm runs as root with no safe way to
+# tell which home belongs to whom. So say where the data is instead of guessing.
+# `ymemo --purge` is the one-command equivalent of the Windows installer's "delete my data
+# too" prompt; it still works here, since the binary is removed only after this script.
+echo "Ymemo: memos and settings stay in ~/.local/share/ymemo for each user." >&2
+echo "       To delete them as well, run 'ymemo --purge' now, or remove that" >&2
+echo "       directory afterwards. Copies on your other devices are unaffected." >&2
 
 # The stop sequence, in order of politeness. It only ever touches processes running the
 # packaged binaries, found through /proc/PID/exe rather than the command line: /usr/bin/ymemo

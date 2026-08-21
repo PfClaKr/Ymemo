@@ -57,6 +57,9 @@ export component SettingsWindow inherits Window {
     callback apply();
     callback lock-now();
     callback close-requested();
+    // Opens the security window; the master password and recovery code live there, since
+    // they are the only things on this screen that are not device-local settings.
+    callback open-security();
     callback check-update();
     callback open-update();
 
@@ -236,6 +239,11 @@ export component SettingsWindow inherits Window {
                 text: Strings.ui_settings_lock_now;
                 enabled: root.unlocked;
                 clicked => { root.lock-now(); }
+            }
+            Button {
+                text: Strings.ui_settings_security;
+                enabled: root.unlocked;
+                clicked => { root.open-security(); }
             }
             Rectangle { horizontal-stretch: 1; }
             Button {

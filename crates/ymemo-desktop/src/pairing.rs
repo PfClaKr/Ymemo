@@ -204,6 +204,11 @@ pub(crate) fn wire(
             }
             if let Some(lock) = lock_weak.upgrade() {
                 lock.set_vault_exists(true);
+                // The header just arrived from the other device, so whether this vault has
+                // a recovery code is only knowable now.
+                lock.set_has_recovery(ymemo_core::vault::recovery_code_exists(
+                    vault_json.parent().unwrap_or(&vault_json),
+                ));
                 lock.set_show_sync(false);
                 lock.set_lock_message(t!("msg.paired_enter_password").into());
             }

@@ -1,0 +1,179 @@
+import { LineEdit, Button } from "std-widgets.slint";
+import { Strings } from "@i18n";
+
+// ---------------------------------------------------------------------------
+// Security window: change the master password, and issue the recovery code that is the
+// only way back into a vault whose password is gone. Reached from the settings window.
+//
+// Both actions rewrite `vault.json` only. Nothing here re-encrypts memos, so neither is
+// slow and neither disturbs the other devices; see crates/ymemo-core/src/vault.rs.
+// ---------------------------------------------------------------------------
+component Section inherits VerticalLayout {
+    in property <string> label;
+    in property <string> hint;
+    spacing: 4px;
+    Text {
+        text: root.label;
+        font-size: 13px;
+        font-weight: 700;
+        color: #f0ead6;
+    }
+    if root.hint != "": Text {
+        text: root.hint;
+        font-size: 10px;
+        color: #a8a294;
+        wrap: word-wrap;
+    }
+    @children
+}
+
+export component SecurityWindow inherits Window {
+    title: Strings.ui_security_title;
+    preferred-width: 400px;
+    preferred-height: 480px;
+    min-width: 340px;
+    background: #2e2b27;
+
+    // Whether a recovery code was ever issued for this vault.
+    in property <bool> has-recovery: false;
+    // A freshly issued code. Non-empty only until the window closes: this is the one moment
+    // it is readable, since only its Argon2id wrapper is stored.
+    in property <string> recovery-code;
+    in property <string> status;
+    in property <bool> status-is-error: false;
+
+    callback change-password(string, string); // current, new
+    callback issue-recovery();
+    callback close-requested();
+
+    // Cleared by Rust after a successful change, so the passwords do not linger on screen.
+    in-out property <string> current-pw;
+    in-out property <string> new-pw;
+    in-out property <string> confirm-pw;
+    public function clear-passwords() {
+        root.current-pw = "";
+        root.new-pw = "";
+        root.confirm-pw = "";
+    }
+    // The button stays out of reach until the two new entries agree, which catches the
+    // typo that would otherwise lock the user out of their own vault.
+    private property <bool> can-change:
+        root.current-pw != "" && root.new-pw != "" && root.new-pw == root.confirm-pw;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 14px;
+
+        Text {
+            text: Strings.ui_security_heading;
+            font-size: 16px;
+            font-weight: 700;
+            color: #f0ead6;
+        }
+
+        // ---- Master password ----
+        Section {
+            label: Strings.ui_security_change_password;
+            hint: Strings.ui_security_password_hint;
+            LineEdit {
+                placeholder-text: Strings.ui_security_current_password;
+                input-type: InputType.password;
+                text <=> root.current-pw;
+            }
+            LineEdit {
+                placeholder-text: Strings.ui_security_new_password;
+                input-type: InputType.password;
+                text <=> root.new-pw;
+            }
+            LineEdit {
+                placeholder-text: Strings.ui_security_confirm_password;
+                input-type: InputType.password;
+                text <=> root.confirm-pw;
+                accepted => {
+                    if (root.can-change) { root.change-password(root.current-pw, root.new-pw); }
+                }
+            }
+            if root.confirm-pw != "" && root.new-pw != root.confirm-pw: Text {
+                text: Strings.ui_security_mismatch;
+                font-size: 10px;
+                color: #e79a9a;
+            }
+            HorizontalLayout {
+                alignment: start;
+                Button {
+                    text: Strings.ui_security_change_button;
+                    primary: true;
+                    enabled: root.can-change;
+                    clicked => { root.change-password(root.current-pw, root.new-pw); }
+                }
+            }
+        }
+
+        // ---- Recovery code ----
+        Section {
+            label: Strings.ui_security_recovery;
+            hint: Strings.ui_security_recovery_hint;
+            Text {
+                text: root.has-recovery
+                    ? Strings.ui_security_recovery_present
+                    : Strings.ui_security_recovery_absent;
+                font-size: 11px;
+                color: root.has-recovery ? #a8d0a8 : #e8d98a;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                alignment: start;
+                Button {
+                    text: root.has-recovery
+                        ? Strings.ui_security_reissue_button
+                        : Strings.ui_security_issue_button;
+                    clicked => { root.issue-recovery(); }
+                }
+            }
+        }
+
+        // The code itself, shown once. Selectable so it can be copied rather than retyped.
+        if root.recovery-code != "": Rectangle {
+            background: #3a362f;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: #e8d98a;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 6px;
+                TextInput {
+                    text: root.recovery-code;
+                    read-only: true;
+                    font-size: 15px;
+                    font-family: "monospace";
+                    color: #f7e98c;
+                    wrap: word-wrap;
+                    single-line: false;
+                }
+                Text {
+                    text: Strings.ui_security_code_warning;
+                    font-size: 10px;
+                    color: #e8d98a;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        if root.status != "": Text {
+            text: root.status;
+            font-size: 11px;
+            color: root.status-is-error ? #e79a9a : #a8d0a8;
+            wrap: word-wrap;
+        }
+
+        Rectangle { vertical-stretch: 1; }
+
+        HorizontalLayout {
+            Rectangle { horizontal-stretch: 1; }
+            Button {
+                text: Strings.ui_security_close;
+                clicked => { root.close-requested(); }
+            }
+        }
+    }
+}

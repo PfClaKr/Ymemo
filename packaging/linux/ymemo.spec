@@ -57,6 +57,15 @@ install -Dm644 %{license_file} %{buildroot}/usr/share/licenses/ymemo/LICENSE
 %preun
 [ "$1" = 0 ] || exit 0
 
+# Memos live in each user's home directory, which a package may not touch (Debian Policy
+# 6.6 and the Fedora guidelines both forbid it), and prerm runs as root with no safe way to
+# tell which home belongs to whom. So say where the data is instead of guessing.
+# `ymemo --purge` is the one-command equivalent of the Windows installer's "delete my data
+# too" prompt; it still works here, since the binary is removed only after this script.
+echo "Ymemo: memos and settings stay in ~/.local/share/ymemo for each user." >&2
+echo "       To delete them as well, run 'ymemo --purge' now, or remove that" >&2
+echo "       directory afterwards. Copies on your other devices are unaffected." >&2
+
 # The stop sequence, in order of politeness. It only ever touches processes running the
 # packaged binaries, found through /proc/PID/exe rather than the command line: /usr/bin/ymemo
 # is a symlink and argv[0] is whatever the .desktop file or the shell used. An unlinked binary

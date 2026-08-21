@@ -39,10 +39,15 @@ Vault layout:
 
 ```
 vault/
-├── vault.json              # Argon2id salt + key-check canary. Written once, then immutable.
+├── vault.json              # Argon2id salts + the wrapped data key + a key-check canary
 ├── logs/<device-id>.ymlog  # per-device append-only encrypted log; a record is an automerge change
 └── blobs/<sha256>.ymblob   # attached photos, encrypted. The name is the content hash, so nothing conflicts.
 ```
+
+Logs and blobs are encrypted with a random **data key**, and the master password only wraps
+that key inside `vault.json`. So changing the password rewrites one small field instead of
+re-encrypting every memo, and the other devices carry on undisturbed — they just ask for the
+new password the next time they unlock.
 
 A device only ever appends to **its own** log file, so two devices never touch the same file:
 zero file-level conflicts, with the CRDT merging the contents. Photos work the same way —
@@ -97,6 +102,12 @@ cargo test --workspace
 cargo run -p ymemo-desktop
 ```
 
+```bash
+# Deletes this device's memos, settings and vault, and nothing on your other devices.
+# The Windows uninstaller offers the same thing; on Linux a package may not touch $HOME.
+ymemo --purge
+```
+
 Choosing a master password on first run creates the vault. App data lives in the platform
 data directory (`~/.local/share/Ymemo` on Linux), and only the encrypted `vault/` is synced.
 
@@ -141,6 +152,10 @@ the desktop inside a Fedora container for library compatibility.
 - **Groups** — a nestable folder tree with drag and drop.
 - **Locking** — master password, instant lock from the tray, idle auto-lock, and optionally
   staying unlocked for a set period (a device-local session key, never synced).
+- **Password and recovery** — change the master password from the settings window, and keep a
+  recovery code for the day it is forgotten. There is no other way back: nothing but the
+  password and that code can decrypt a vault, on any device. Failing both, the lock screen
+  can wipe this device and start over.
 - **Device linking** — by QR/pairing code, or by a **6-digit code** on the same LAN. Linked
   devices can be listed and revoked.
 - **Korean and English** — detected from the system locale, changeable in settings.

@@ -39,20 +39,26 @@ mod instance;
 mod list;
 mod lock;
 mod pairing;
+mod security;
 mod settings;
 mod state;
 mod sticky;
 mod sync;
 mod tray;
 mod update;
+mod window;
 
 use icon::set_window_icon;
 use list::{move_row, refresh_list};
-use lock::{apply_lang, apply_opened_vault, fill_settings_window, lock_now, start_unlock_session};
+use lock::{
+    apply_lang, apply_opened_vault, fill_settings_window, lock_now, reset_vault,
+    start_unlock_session,
+};
 use pairing::qr_image;
 use state::{touch, AppUi, Ctx, APP};
 use sticky::{close_sticky, new_memo, open_sticky, snap_tick, SNAP_INTERVAL};
-use sync::{start_merge_timer, start_syncthing};
+use sync::{start_merge_timer, start_syncthing, SYNC_FOLDER_ID};
+use window::present;
 
 /// How often idleness is checked; fine-grained enough against a setting in minutes.
 const IDLE_CHECK_INTERVAL: Duration = Duration::from_secs(20);
@@ -85,14 +91,44 @@ fn select_renderer() {
 
 /// Platform data directory, e.g. ~/.local/share/ymemo on Linux, %APPDATA%\ymemo\Ymemo\data
 /// on Windows.
+///
+/// Only the path; nothing is created. `--quit` and `--purge` run before the directory should
+/// exist, and creating it on the way to deleting it is how `--purge` used to report success
+/// on a machine that had nothing left to delete.
 fn data_dir() -> std::path::PathBuf {
-    if let Some(dirs) = directories::ProjectDirs::from("dev", "ymemo", "Ymemo") {
-        let dir = dirs.data_dir().to_path_buf();
-        let _ = std::fs::create_dir_all(&dir);
-        dir
-    } else {
-        std::path::PathBuf::from(".")
+    match directories::ProjectDirs::from("dev", "ymemo", "Ymemo") {
+        Some(dirs) => dirs.data_dir().to_path_buf(),
+        // Last resort for a machine with no home directory at all.
+        None => std::path::PathBuf::from("."),
     }
+}
+
+/// Deletes this device's data directory: vault, cache, session, settings and the sync
+/// daemon's own configuration.
+///
+/// The running instance is stopped first, and not only because it holds the cache open:
+/// Syncthing propagates deletions, so removing the vault while the daemon still carries it
+/// would empty the memos on every paired device too. If the app will not quit, nothing is
+/// deleted. Copies on other devices are never touched.
+fn purge(dir: &std::path::Path) -> Result<()> {
+    // Never act on data_dir()'s fallback: deleting the working directory is not something to
+    // do on one's own initiative.
+    if dir == std::path::Path::new(".") {
+        anyhow::bail!("no data directory to delete on this platform");
+    }
+    // Before asking anything to quit: the lock file the check needs lives in this very
+    // directory, so an absent one can hold neither data nor a running instance.
+    if !dir.exists() {
+        println!("nothing to delete: {}", dir.display());
+        return Ok(());
+    }
+    // Returns true when the lock is free, so a machine with nothing running passes too.
+    if !instance::quit_running(dir) {
+        anyhow::bail!("Ymemo is still running; close it and try again");
+    }
+    std::fs::remove_dir_all(dir)?;
+    println!("deleted {}", dir.display());
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -116,9 +152,19 @@ fn main() -> Result<()> {
         };
     }
 
+    // `ymemo --purge` deletes everything this device stores and exits. It is what the
+    // Windows uninstaller offers on the way out, and the only way to do the same on Linux,
+    // where a package may not touch a user's home directory.
+    if std::env::args().skip(1).any(|a| a == "--purge") {
+        return purge(&dir);
+    }
+
     // Only one instance per user: a second one would run a second sync daemon over the same
     // syncthing home and write the same cache. It happens easily enough — the Windows
     // installer's startup task plus a click on the icon of an app that lives in the tray.
+    // From here on this is a real session, so the directory has to exist.
+    let _ = std::fs::create_dir_all(&dir);
+
     let Some(_instance) = instance::acquire(&dir) else {
         instance::send_show(&dir); // hand the running one the foreground instead
         eprintln!("Ymemo is already running; asked it to show itself");
@@ -185,10 +231,12 @@ fn main() -> Result<()> {
     list.set_rows(ModelRc::from(ctx.model.clone()));
     let unlocked = Rc::new(Cell::new(false));
 
-    // The settings window is built once and only shown or hidden; rebuilding it would reset
-    // its position every time.
+    // The settings and security windows are built once and only shown or hidden; rebuilding
+    // them would reset their position every time.
     let settings_win = SettingsWindow::new()?;
-    apply_lang(&ctx, &lock, &list, &settings_win);
+    let security_win = SecurityWindow::new()?;
+    apply_lang(&ctx, &lock, &list, &settings_win, &security_win);
+    security::wire(&ctx, &settings_win, &security_win);
 
     // First run? A vault.json means an existing vault (unlock); without one this is a new
     // device (create, or link to an existing one). Without the distinction a new device
@@ -196,6 +244,11 @@ fn main() -> Result<()> {
     // keys would diverge.
     let vault_exists = vault_dir.join("vault.json").exists();
     lock.set_vault_exists(vault_exists);
+    lock.set_has_recovery(ymemo_core::vault::recovery_code_exists(&vault_dir));
+
+    // A vault created on this device waits here while its recovery code is on screen: it is
+    // opened only once the user confirms they wrote the code down.
+    let pending_vault: Rc<RefCell<Option<Vault>>> = Rc::new(RefCell::new(None));
 
     // ---- Stay unlocked: a valid session key skips the password prompt. ----
     // On any failure (wrong key, damaged cache, diverged key) the session is dropped and the
@@ -258,6 +311,8 @@ fn main() -> Result<()> {
         let list_weak = list.as_weak();
         let unlocked = unlocked.clone();
         let dir = dir.clone();
+        let syncthing = syncthing.clone();
+        let pending_vault = pending_vault.clone();
         // Create: only on a device starting fresh. The salt is generated exactly here.
         lock.on_create_vault(move |password| {
             let lock = lock_weak.unwrap();
@@ -274,10 +329,112 @@ fn main() -> Result<()> {
             };
             match Vault::open_or_create(dir.join("vault"), password.as_bytes(), store) {
                 Ok(v) => {
+                    // Register the folder here as well as at startup: a reset removes it
+                    // deliberately, and this is the first vault that follows one.
+                    if let Some(st) = syncthing.borrow().as_ref() {
+                        if let Err(e) =
+                            st.ensure_folder(SYNC_FOLDER_ID, "Ymemo Vault", &dir.join("vault"))
+                        {
+                            eprintln!("could not register the shared folder: {e}");
+                        }
+                    }
                     start_unlock_session(&ctx, &v);
+                    // Show the recovery code before anything else; the vault waits in
+                    // `pending_vault` until the user confirms they have written it down.
+                    match v.issue_recovery_code() {
+                        Ok(code) => {
+                            lock.set_lock_message(SharedString::new());
+                            lock.set_new_recovery_code(SharedString::from(code));
+                            *pending_vault.borrow_mut() = Some(v);
+                        }
+                        // A vault without a recovery code still works, so this never blocks
+                        // the user out of the app they just set up.
+                        Err(e) => {
+                            eprintln!("could not issue a recovery code: {e}");
+                            lock.set_vault_exists(true);
+                            apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked);
+                        }
+                    }
+                }
+                Err(e) => lock.set_lock_message(SharedString::from(format!("{e}"))),
+            }
+        });
+    }
+
+    // ---- Recovery code written down: open the vault that was waiting for it. ----
+    {
+        let ctx = ctx.clone();
+        let lock_weak = lock.as_weak();
+        let list_weak = list.as_weak();
+        let unlocked = unlocked.clone();
+        let pending_vault = pending_vault.clone();
+        lock.on_recovery_ack(move || {
+            let Some(v) = pending_vault.borrow_mut().take() else { return };
+            let lock = lock_weak.unwrap();
+            lock.set_new_recovery_code(SharedString::new());
+            lock.set_vault_exists(true);
+            lock.set_has_recovery(true);
+            apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked);
+        });
+    }
+
+    // ---- Forgotten password: the recovery code sets a new one. ----
+    {
+        let ctx = ctx.clone();
+        let lock_weak = lock.as_weak();
+        let list_weak = list.as_weak();
+        let unlocked = unlocked.clone();
+        let dir = dir.clone();
+        lock.on_recover(move |code, new_password| {
+            let lock = lock_weak.unwrap();
+            let vault_dir = dir.join("vault");
+            // Only the header is rewritten, so a wrong code costs one Argon2id run and
+            // leaves the vault exactly as it was.
+            if let Err(e) = ymemo_core::vault::reset_password_with_recovery(
+                &vault_dir,
+                &code,
+                new_password.as_bytes(),
+            ) {
+                lock.set_lock_message(SharedString::from(format!("{e}")));
+                return;
+            }
+            let store = match Store::open(dir.join("ymemo.db")) {
+                Ok(s) => s,
+                Err(e) => {
+                    lock.set_lock_message(SharedString::from(t!("msg.cache_open_failed", error = e)));
+                    return;
+                }
+            };
+            match Vault::open(&vault_dir, new_password.as_bytes(), store) {
+                Ok(v) => {
+                    start_unlock_session(&ctx, &v);
+                    lock.invoke_leave_recovery();
+                    lock.set_lock_message(SharedString::new());
                     apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked);
                 }
                 Err(e) => lock.set_lock_message(SharedString::from(format!("{e}"))),
+            }
+        });
+    }
+
+    // ---- Forgotten password, no recovery code: wipe and start over. ----
+    {
+        let ctx = ctx.clone();
+        let lock_weak = lock.as_weak();
+        let syncthing = syncthing.clone();
+        lock.on_reset_vault(move || {
+            let lock = lock_weak.unwrap();
+            match reset_vault(&ctx, &syncthing) {
+                Ok(()) => {
+                    lock.invoke_leave_recovery();
+                    lock.invoke_clear_password();
+                    lock.set_vault_exists(false);
+                    lock.set_has_recovery(false);
+                    lock.set_lock_message(SharedString::from(t!("msg.reset_done")));
+                }
+                Err(e) => {
+                    lock.set_lock_message(SharedString::from(t!("msg.reset_failed", error = e)))
+                }
             }
         });
     }
@@ -413,8 +570,7 @@ fn main() -> Result<()> {
             fill_settings_window(&ctx, &w);
             w.set_unlocked(unlocked.get());
             w.set_status(SharedString::new());
-            let _ = w.show();
-            set_window_icon(w.window());
+            present(&w);
         });
     }
     {
@@ -432,6 +588,7 @@ fn main() -> Result<()> {
         let list_weak = list.as_weak();
         let merge_timer = merge_timer.clone();
         let tray_handle = tray_handle.clone();
+        let security_weak = security_win.as_weak();
         settings_win.on_apply(move || {
             let Some(w) = win.upgrade() else { return };
             let (Some(lock), Some(list)) = (lock_weak.upgrade(), list_weak.upgrade()) else {
@@ -458,7 +615,7 @@ fn main() -> Result<()> {
 
             // Write the sanitized values back, so out-of-range input never changes silently.
             fill_settings_window(&ctx, &w);
-            apply_lang(&ctx, &lock, &list, &w);
+            apply_lang(&ctx, &lock, &list, &w, &security_weak.unwrap());
             if let Some(t) = tray_handle.borrow().as_ref() {
                 t.refresh();
             }
@@ -581,7 +738,7 @@ fn main() -> Result<()> {
 
     // Do not raise the lock window when the session already unlocked us.
     if !auto_unlocked {
-        lock.show()?;
+        present(&lock);
     }
     slint::run_event_loop_until_quit()?;
 
