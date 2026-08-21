@@ -22,6 +22,10 @@ dependencies:
   mobile_scanner: ^7.4.0
   # Per-platform app data directory (vault and cache paths).
   path_provider: ^2.1.0
+  # Where the "stay unlocked" key is kept: Android's EncryptedSharedPreferences behind a
+  # Keystore-held master key. Hand-rolling that in Kotlin would mean shipping crypto nobody
+  # has run; this is the same reasoning that bundles syncthing whole.
+  flutter_secure_storage: ^9.2.4
 
 dev_dependencies:
   flutter_lints: ^4.0.0

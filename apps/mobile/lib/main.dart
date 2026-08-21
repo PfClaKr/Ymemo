@@ -18,19 +18,26 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'src/rust/api.dart';
+import 'settings.dart';
 import 'src/rust/frb_generated.dart';
 import 'sync.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await RustLib.init();
-  // Keep core errors and UI text in one language; an unknown locale falls back to the system one.
-  await setLanguage(code: Platform.localeName);
 
   // Every path the app uses is derived here, once. The vault directory in particular is
   // shared between the two: it is what the daemon syncs and what the vault is opened from,
   // and two spellings of it would mean syncing one directory while reading another.
   final docs = await getApplicationDocumentsDirectory();
+  final settings = await SettingsStore.load('${docs.path}/settings.json');
+
+  // Language before anything is drawn, so the core's error messages and the screens speak
+  // the same one. "auto" is the system locale; an unknown value falls back to it anyway.
+  await setLanguage(
+    code: settings.value.lang == 'auto' ? Platform.localeName : settings.value.lang,
+  );
+
   final sync = SyncController(SyncPaths(
     homeDir: '${docs.path}/syncthing',
     vaultDir: '${docs.path}/vault',
@@ -39,6 +46,7 @@ Future<void> main() async {
   runApp(YmemoApp(
     strings: await mobileStrings(),
     sync: sync,
+    settings: settings,
     cacheDbPath: '${docs.path}/ymemo.db',
   ));
 
@@ -49,29 +57,150 @@ Future<void> main() async {
   unawaited(sync.init());
 }
 
-class YmemoApp extends StatelessWidget {
+/// The app, and the two things that outlive any single screen: whether the vault is open, and
+/// the lifecycle watch that closes it when the app is left.
+///
+/// Lock state is held here rather than expressed by navigation, because locking has to be
+/// able to happen while any screen is on top — including an editor pushed over the list.
+class YmemoApp extends StatefulWidget {
   const YmemoApp({
     super.key,
     required this.strings,
     required this.sync,
+    required this.settings,
     required this.cacheDbPath,
   });
 
   final FfiStrings strings;
   final SyncController sync;
+  final SettingsStore settings;
 
   /// Device-local SQLite cache; rebuilt from the logs, never synced.
   final String cacheDbPath;
 
   @override
+  State<YmemoApp> createState() => _YmemoAppState();
+}
+
+class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
+  final _navigator = GlobalKey<NavigatorState>();
+  final _session = const SessionStore();
+
+  late FfiStrings _strings = widget.strings;
+  bool _unlocked = false;
+  bool _restoring = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _restoreSession();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final leaving = state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden;
+    if (leaving && _unlocked && widget.settings.value.lockOnBackground) {
+      // The session is deliberately **kept**: this closes the vault so the memos are not
+      // sitting open behind the app switcher, but it is not the user saying "ask me again".
+      // Manual lock is what clears the session, exactly as on the desktop.
+      _closeVault();
+    }
+  }
+
+  /// Opens the vault straight away when a stored key is still valid, so "stay unlocked for N
+  /// days" means what it says. Any failure — a diverged key, a keystore that will not decrypt
+  /// — drops the session and falls back to the password.
+  Future<void> _restoreSession() async {
+    final session = await _session.read();
+    if (session != null) {
+      try {
+        await vaultOpenWithKey(
+          vaultDir: widget.sync.paths.vaultDir,
+          cacheDbPath: widget.cacheDbPath,
+          key: Uint8List.fromList(session.key),
+        );
+        if (mounted) setState(() => _unlocked = true);
+      } catch (e) {
+        debugPrint('stored key did not open the vault, asking for the password: $e');
+        await _session.clear();
+      }
+    }
+    if (mounted) setState(() => _restoring = false);
+  }
+
+  /// Switches the language everywhere at once: the core's messages and the screens come from
+  /// the same catalog, so one re-read is the whole job.
+  Future<void> _applyLanguage(String lang) async {
+    await setLanguage(code: lang == 'auto' ? Platform.localeName : lang);
+    final strings = await mobileStrings();
+    if (mounted) setState(() => _strings = strings);
+  }
+
+  /// A password unlock succeeded: keep the key for as long as the settings allow.
+  Future<void> _onUnlocked() async {
+    try {
+      await _session.write(await vaultKey(), widget.settings.value.unlockDays);
+    } catch (e) {
+      debugPrint('could not store the session key: $e');
+    }
+    setState(() => _unlocked = true);
+  }
+
+  /// The user asked to lock: close the vault **and** forget the key, or the lock button would
+  /// mean nothing on the next start.
+  Future<void> _lockNow() async {
+    await _session.clear();
+    await _closeVault();
+  }
+
+  Future<void> _closeVault() async {
+    try {
+      await vaultClose();
+    } catch (e) {
+      debugPrint('could not close the vault: $e');
+    }
+    // Whatever was pushed over the list goes with it; an editor left on top would be showing
+    // a memo from a vault that is no longer open.
+    _navigator.currentState?.popUntil((route) => route.isFirst);
+    if (mounted) setState(() => _unlocked = false);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Ymemo',
+      navigatorKey: _navigator,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFE6D24A)),
         useMaterial3: true,
       ),
-      home: LockScreen(strings: strings, sync: sync, cacheDbPath: cacheDbPath),
+      home: _restoring
+          // Brief: reading one key out of the keystore. Showing the lock screen first would
+          // make an auto-unlock look like a password prompt that flashed past.
+          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+          : _unlocked
+              ? MemoListScreen(
+                  strings: _strings,
+                  sync: widget.sync,
+                  settings: widget.settings,
+                  onLock: _lockNow,
+                  onLanguageChanged: _applyLanguage,
+                )
+              : LockScreen(
+                  strings: _strings,
+                  sync: widget.sync,
+                  cacheDbPath: widget.cacheDbPath,
+                  onUnlocked: _onUnlocked,
+                ),
     );
   }
 }
@@ -86,11 +215,15 @@ class LockScreen extends StatefulWidget {
     required this.strings,
     required this.sync,
     required this.cacheDbPath,
+    required this.onUnlocked,
   });
 
   final FfiStrings strings;
   final SyncController sync;
   final String cacheDbPath;
+
+  /// Called once the vault is open; the app decides what to show next.
+  final Future<void> Function() onUnlocked;
 
   @override
   State<LockScreen> createState() => _LockScreenState();
@@ -111,12 +244,7 @@ class _LockScreenState extends State<LockScreen> {
         cacheDbPath: widget.cacheDbPath,
         password: _password.text,
       );
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => MemoListScreen(strings: widget.strings, sync: widget.sync),
-        ),
-      );
+      await widget.onUnlocked();
     } catch (e) {
       // Core errors already arrive in the current language.
       setState(() => _error = '$e');
@@ -168,10 +296,24 @@ class _LockScreenState extends State<LockScreen> {
 
 /// Memo list, with add, open and delete.
 class MemoListScreen extends StatefulWidget {
-  const MemoListScreen({super.key, required this.strings, required this.sync});
+  const MemoListScreen({
+    super.key,
+    required this.strings,
+    required this.sync,
+    required this.settings,
+    required this.onLock,
+    required this.onLanguageChanged,
+  });
 
   final FfiStrings strings;
   final SyncController sync;
+  final SettingsStore settings;
+
+  /// Manual lock: closes the vault and forgets the stored key.
+  final Future<void> Function() onLock;
+
+  /// Applying a language is app-wide, so the screen only asks for it.
+  final Future<void> Function(String) onLanguageChanged;
 
   @override
   State<MemoListScreen> createState() => _MemoListScreenState();
@@ -184,12 +326,27 @@ class _MemoListScreenState extends State<MemoListScreen> {
 
   List<FfiMemo> _memos = [];
   Timer? _merge;
+  FfiRelease? _update;
 
   @override
   void initState() {
     super.initState();
     _reload();
     _merge = Timer.periodic(_mergeInterval, (_) => _mergeNow());
+    _checkForUpdate();
+  }
+
+  /// Asks about a newer release at most once a day, and says nothing unless there is one —
+  /// telling someone offline that they are offline is not worth a line of UI.
+  Future<void> _checkForUpdate() async {
+    if (!widget.settings.updateCheckDue) return;
+    await widget.settings.markUpdateChecked();
+    try {
+      final release = await updateCheck();
+      if (mounted) setState(() => _update = release);
+    } catch (e) {
+      debugPrint('update check failed: $e');
+    }
   }
 
   @override
@@ -251,9 +408,28 @@ class _MemoListScreenState extends State<MemoListScreen> {
             // memo you just wrote on the other device.
             onPressed: _mergeNow,
           ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: widget.strings.settings,
+            onPressed: () async {
+              await Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => SettingsScreen(
+                  strings: widget.strings,
+                  settings: widget.settings,
+                  onLock: widget.onLock,
+                  onLanguageChanged: widget.onLanguageChanged,
+                ),
+              ));
+              if (mounted) setState(() {}); // the language may have changed
+            },
+          ),
         ],
       ),
-      body: ListView.builder(
+      body: Column(children: [
+        if (_update != null)
+          UpdateBanner(strings: widget.strings, release: _update!),
+        Expanded(
+          child: ListView.builder(
         itemCount: _memos.length,
         itemBuilder: (context, i) {
           final memo = _memos[i];
@@ -279,7 +455,9 @@ class _MemoListScreenState extends State<MemoListScreen> {
             ),
           );
         },
-      ),
+          ),
+        ),
+      ]),
       floatingActionButton: FloatingActionButton(
         onPressed: _add,
         child: const Icon(Icons.add),
@@ -1034,4 +1212,260 @@ class _AttachmentViewState extends State<AttachmentView> {
       ),
     );
   }
+}
+
+/// One line saying a newer release exists, above the memo list.
+///
+/// Never a dialog and never dismissible-by-accident: it is information, and the app it sits
+/// on top of is for writing memos, not for updating itself.
+class UpdateBanner extends StatelessWidget {
+  const UpdateBanner({super.key, required this.strings, required this.release});
+
+  final FfiStrings strings;
+  final FfiRelease release;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.secondaryContainer,
+      child: InkWell(
+        onTap: () => openReleasePage(release.url),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              const Icon(Icons.system_update, size: 18),
+              const SizedBox(width: 8),
+              Expanded(child: Text('${strings.updateAvailable} ${release.version}')),
+              Text(
+                strings.updateOpen,
+                style: TextStyle(color: scheme.primary, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Hands the release page to the browser through the host, since Dart cannot start an intent.
+Future<void> openReleasePage(String url) async {
+  try {
+    await const MethodChannel('dev.ymemo/native').invokeMethod<void>('openUrl', url);
+  } on PlatformException catch (e) {
+    debugPrint('could not open $url: ${e.message}');
+  } on MissingPluginException {
+    debugPrint('no host to open $url with');
+  }
+}
+
+/// What the last update check concluded; the text for it is built at draw time.
+enum _UpdateState { idle, checking, latest, found, failed }
+
+/// Device-local preferences: language, locking, updates.
+///
+/// Everything applies as it is changed — a phone settings screen with a save button is a
+/// phone settings screen someone will leave without pressing it. Rust sanitizes on write, and
+/// what comes back is what is shown, so an impossible value cannot sit here looking accepted.
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({
+    super.key,
+    required this.strings,
+    required this.settings,
+    required this.onLock,
+    required this.onLanguageChanged,
+  });
+
+  final FfiStrings strings;
+  final SettingsStore settings;
+  final Future<void> Function() onLock;
+  final Future<void> Function(String) onLanguageChanged;
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  /// Offered stay-unlocked periods. A free-text number field would be worse in every way:
+  /// harder to tap and able to produce values Rust would only clamp away again.
+  static const _dayChoices = [0, 1, 7, 30, 90, 365];
+
+  /// What the last check concluded. Kept as state rather than as a finished sentence: a
+  /// rendered string would still be in the old language after the language is changed.
+  _UpdateState _updateState = _UpdateState.idle;
+  String? _updateError;
+  FfiRelease? _update;
+  bool _checking = false;
+
+  FfiSettings get _s => widget.settings.value;
+
+  /// Writes one changed field and redraws with whatever Rust kept.
+  Future<void> _save({
+    String? lang,
+    int? unlockDays,
+    bool? lockOnBackground,
+    bool? updateCheck,
+  }) async {
+    await widget.settings.save(FfiSettings(
+      lang: lang ?? _s.lang,
+      unlockDays: unlockDays ?? _s.unlockDays,
+      lockOnBackground: lockOnBackground ?? _s.lockOnBackground,
+      updateCheck: updateCheck ?? _s.updateCheck,
+      lastUpdateCheck: _s.lastUpdateCheck,
+    ));
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(widget.strings.saved), duration: const Duration(seconds: 1)),
+    );
+  }
+
+  Future<void> _setLanguage(String lang) async {
+    await _save(lang: lang);
+    await widget.onLanguageChanged(lang);
+  }
+
+  /// Shortening the stay-unlocked window has to invalidate the key already stored under the
+  /// old one, or the setting would be a suggestion rather than a rule.
+  Future<void> _setUnlockDays(int days) async {
+    await _save(unlockDays: days);
+    await const SessionStore().clear();
+  }
+
+  Future<void> _checkNow() async {
+    setState(() {
+      _checking = true;
+      _updateState = _UpdateState.checking;
+    });
+    await widget.settings.markUpdateChecked();
+    try {
+      final release = await updateCheck();
+      if (!mounted) return;
+      setState(() {
+        _update = release;
+        _updateState = release == null ? _UpdateState.latest : _UpdateState.found;
+      });
+    } catch (e) {
+      // The core's message, already in the language it was raised in.
+      if (mounted) {
+        setState(() {
+          _updateError = '$e';
+          _updateState = _UpdateState.failed;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
+  }
+
+  /// The status line, built from the state so it follows the language.
+  String? get _updateStatus => switch (_updateState) {
+        _UpdateState.idle => null,
+        _UpdateState.checking => widget.strings.updateChecking,
+        _UpdateState.latest => widget.strings.updateLatest,
+        _UpdateState.found => '${widget.strings.updateAvailable} ${_update?.version ?? ''}',
+        _UpdateState.failed => _updateError,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.strings;
+    return Scaffold(
+      appBar: AppBar(title: Text(s.settings)),
+      body: ListView(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        children: [
+          _header(s.language),
+          // Language names stay untranslated: written in their own language they are findable
+          // even by someone stuck in one they cannot read.
+          RadioGroup<String>(
+            groupValue: _s.lang,
+            onChanged: (v) => v == null ? null : _setLanguage(v),
+            child: Column(children: [
+              RadioListTile<String>(value: 'auto', title: Text(s.languageAuto)),
+              const RadioListTile<String>(value: 'ko', title: Text('한국어')),
+              const RadioListTile<String>(value: 'en', title: Text('English')),
+            ]),
+          ),
+
+          const Divider(),
+          _header(s.lockSection),
+          SwitchListTile(
+            value: _s.lockOnBackground,
+            onChanged: (v) => _save(lockOnBackground: v),
+            title: Text(s.lockOnBackground),
+            subtitle: Text(s.lockOnBackgroundHint),
+          ),
+          ListTile(
+            title: Text(s.unlockDays),
+            subtitle: Text(s.unlockDaysHint),
+            trailing: DropdownButton<int>(
+              value: _dayChoices.contains(_s.unlockDays) ? _s.unlockDays : 0,
+              onChanged: (v) => v == null ? null : _setUnlockDays(v),
+              items: [
+                for (final days in _dayChoices)
+                  DropdownMenuItem(
+                    value: days,
+                    child: Text(days == 0 ? '0' : '$days ${s.daysUnit}'),
+                  ),
+              ],
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.lock_outline),
+            title: Text(s.lockNow),
+            // No pop here. Locking already pops back to the root and swaps in the lock
+            // screen; popping again would take the root with it and leave a black screen.
+            onTap: widget.onLock,
+          ),
+
+          const Divider(),
+          _header(s.updateSection),
+          SwitchListTile(
+            value: _s.updateCheck,
+            onChanged: (v) => _save(updateCheck: v),
+            title: Text(s.updateCheck),
+            subtitle: Text(s.updateCheckHint),
+          ),
+          ListTile(
+            title: Text(s.updateNow),
+            subtitle: _updateStatus == null ? null : Text(_updateStatus!),
+            trailing: _checking
+                ? const SizedBox(
+                    width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh),
+            onTap: _checking ? null : _checkNow,
+          ),
+          if (_update != null)
+            ListTile(
+              leading: const Icon(Icons.open_in_new),
+              title: Text(s.updateOpen),
+              onTap: () => openReleasePage(_update!.url),
+            ),
+
+          const Divider(),
+          FutureBuilder<String>(
+            future: appVersion(),
+            builder: (context, snapshot) => ListTile(
+              dense: true,
+              title: Text('${s.version} ${snapshot.data ?? ''}'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _header(String text) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: Text(
+          text,
+          style: Theme.of(context)
+              .textTheme
+              .titleSmall
+              ?.copyWith(color: Theme.of(context).colorScheme.primary),
+        ),
+      );
 }

@@ -103,9 +103,18 @@ Two ways to pair, both on the **Sync devices** screen:
   desktop's manual-entry field. This half only opens *this* side; the other device has to be
   given this device's code too, which is what the message after scanning says.
 
-### Emulator (headless, verified on WSL2)
+### Emulator (headless)
 
-Running windowless and driving it over `adb` works without WSLg and uses less memory.
+What an emulator does and does not prove: the app, its settings, locking, the keystore session
+and the update check all run there faithfully. **Sync does not** — the emulator is behind NAT,
+so LAN pairing broadcasts never reach the host and a peer cannot connect back.
+
+A run without `libsyncthing.so` is worth doing on purpose: the app must report sync as
+unavailable and stay usable, which is what a debug build or an unbundled ABI looks like.
+
+Running windowless and driving it over `adb` needs no display and less memory. Do not build
+while it runs: gradle's JVM and the emulator together will get one of them killed on a 16GB
+machine.
 
 ```bash
 # 1. One-time setup. KVM acceleration needs access to /dev/kvm:
@@ -170,6 +179,8 @@ flutter build ios --no-codesign
 - **Sync devices** — the 6-digit LAN code and a field for the other device's, this device's
   long pairing code (copyable), QR scanning, and the paired devices with their connection
   state.
+- **Settings** — language, locking, updates, and the running version. Everything applies as it
+  is changed; Rust sanitizes on write and the screen shows what was actually kept.
 
 Strings are not kept in Dart. `mobile_strings()` hands over one set from the repo root's
 `i18n/*.json`, so the screens and the core's error messages are always in the same language.
@@ -228,12 +239,37 @@ Android deletes its private directory with it, so nothing is left behind.
 The Flutter and NDK versions CI uses are pinned in `env` at the top of `release.yml`. The NDK
 must match `ndkVersion` in `android/app/build.gradle.kts`.
 
+## Locking and the stored key
+
+Two settings, deliberately separate:
+
+- **Lock when the app is left** (default on) closes the vault the moment the app goes to the
+  background, so the memos are not sitting open behind the app switcher. It **keeps** the
+  stored key: this is not the user saying "ask me again".
+- **Stay unlocked for N days** (default 0 — ask every time) is what decides when the password
+  is really needed. The key derived from it goes to `flutter_secure_storage`
+  (EncryptedSharedPreferences behind a keystore-held key), never to a plain file. The expiry is
+  fixed at the moment the password was typed and never extended by use. Locking from the
+  settings screen, shortening the period, or the expiry passing all delete it.
+
+**While a stored key exists the master password buys nothing** — anyone who can unlock the
+phone can read the memos. That is the inherent cost of not typing it every time, the same one
+the desktop pays, and it is why 0 days stays the default and the setting says so on screen.
+
+Cloud backup and device transfer are **off** (`allowBackup="false"` plus
+`res/xml/data_extraction_rules.xml`). Android's default would have copied the app's private
+directory — including the *plaintext* SQLite cache of every memo — into the user's cloud
+backup. A restored backup would also plant a stale vault beside a live one; pairing is how a
+new device is supposed to get the memos.
+
 ## Remaining work
 
-- [ ] **Verify sync on real hardware.** The daemon, pairing and the merge timer are written
-      but have never run on a device: the Go/NDK build and the whole Dart side are only
-      proven by CI and `flutter analyze` so far.
+- [ ] **Verify sync on real hardware.** The lock, settings and update paths have been run on
+      an emulator (see below), but the daemon and pairing have not: an emulator sits behind
+      NAT, so it cannot exchange LAN broadcasts with anything, and this build did not bundle
+      `libsyncthing.so`. Two real devices, or a device and the desktop, are what is left.
 - [ ] Show this device's pairing code as a QR too, so the desktop is not left with typing.
 - [ ] Group (folder) screen — the FFI (`group_*`) exists, only the Dart UI is missing.
 - [ ] cargokit integration, so gradle and Xcode build the Rust automatically.
-- [ ] Auto-lock and session policy, the equivalent of the desktop's `settings.rs`.
+- [ ] `FLAG_SECURE` while unlocked, so the app switcher thumbnail does not show memo text.
+- [ ] Idle auto-lock (a timeout while the app is open), the desktop's `idle_lock_minutes`.
