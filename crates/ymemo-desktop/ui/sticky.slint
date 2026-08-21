@@ -261,7 +261,19 @@ export component StickyWindow inherits Window {
             // ---- Body; invisible while folded, as the window is only the title bar tall ----
             body := TextEdit {
                 visible: !root.collapsed;
-                min-height: 0;
+                // Five or so lines the photos below cannot take. A photo asks for its
+                // display height outright, and on a default-sized sticky that used to leave
+                // the note zero pixels tall: the text was still there, and still saved, but
+                // there was nowhere to read or type it. Now the photo area gives way first
+                // and scrolls inside whatever is left.
+                //
+                // A fraction of the window would read better than a fixed height, but
+                // `root.height` is a size the layout is still deciding — Slint calls that a
+                // binding loop and warns it may panic.
+                //
+                // Zero while folded, or this minimum would stop the window from shrinking to
+                // the title bar.
+                min-height: root.collapsed ? 0px : 96px;
                 vertical-stretch: 1;
                 font-size: 13px;
                 wrap: word-wrap;
@@ -272,6 +284,9 @@ export component StickyWindow inherits Window {
             // ---- Photos. Stickies are small, so this takes space only when there are any;
             // the size chosen here is in em and reaches mobile through the core. ----
             if !root.collapsed && root.photos.length > 0: Flickable {
+                // A ceiling, not a share of the window: deriving this from `root.height`
+                // reads a size the layout is still deciding, and Slint calls that a binding
+                // loop. The note's own min-height is what actually holds the space open.
                 max-height: 240px;
                 viewport-height: photo-box.preferred-height;
                 photo-box := VerticalLayout {
