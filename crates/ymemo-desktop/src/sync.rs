@@ -64,9 +64,12 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
                             entry.window.set_memo_title(m.title.into());
                             entry.window.set_sticky_color(m.color.into());
                             entry.window.set_sticky_opacity(m.opacity as f32);
-                            // Another device may have added or resized a photo.
+                            // Another device may have added or resized a photo. The vault
+                            // is passed straight in: it is already borrowed here, and going
+                            // back through `ctx` for a second borrow is what used to kill
+                            // the app on the first merge after a sticky was opened.
                             entry.window.set_photos(slint::ModelRc::new(slint::VecModel::from(
-                                crate::sticky::photo_rows(&ctx, id),
+                                crate::sticky::photo_rows(v, id),
                             )));
                             entry.window.window().request_redraw();
                         }
