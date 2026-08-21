@@ -167,6 +167,16 @@ pub struct FfiStrings {
     pub update_open: String,
     pub update_section: String,
     pub version: String,
+    pub cancel: String,
+    pub delete: String,
+    pub delete_group_hint: String,
+    pub empty_folder: String,
+    pub folder_name: String,
+    pub move_to: String,
+    pub new_group: String,
+    pub ok: String,
+    pub rename: String,
+    pub root_folder: String,
     pub list_title: String,
     pub master_password: String,
     pub my_code: String,
@@ -230,6 +240,16 @@ pub fn mobile_strings() -> FfiStrings {
         update_open: t!("mobile.update_open"),
         update_section: t!("mobile.update_section"),
         version: t!("mobile.version"),
+        cancel: t!("mobile.cancel"),
+        delete: t!("mobile.delete"),
+        delete_group_hint: t!("mobile.delete_group_hint"),
+        empty_folder: t!("mobile.empty_folder"),
+        folder_name: t!("mobile.folder_name"),
+        move_to: t!("mobile.move_to"),
+        new_group: t!("mobile.new_group"),
+        ok: t!("mobile.ok"),
+        rename: t!("mobile.rename"),
+        root_folder: t!("mobile.root_folder"),
         list_title: t!("mobile.list_title"),
         master_password: t!("mobile.master_password"),
         my_code: t!("mobile.my_code"),
@@ -393,6 +413,48 @@ pub fn attachment_remove(id: String) -> Result<()> {
 /// All groups, sorted by name.
 pub fn group_list() -> Result<Vec<FfiGroup>> {
     with_vault(|v| Ok(v.store().list_groups()?.into_iter().map(FfiGroup::from).collect()))
+}
+
+/// The folders directly inside `parent_id` (`""` for the top level), name-sorted.
+///
+/// The resolution is the core's, not Dart's, so the same defence applies on both platforms:
+/// a group whose ancestry loops — which CRDTs allow, since a concurrent move on two devices
+/// keeps both parents — or whose parent is gone surfaces at the top level instead of being
+/// unreachable. Dart walking `parent_id` itself could loop forever on exactly that case.
+pub fn group_children(parent_id: String) -> Result<Vec<FfiGroup>> {
+    with_vault(|v| {
+        let groups = v.store().list_groups()?;
+        Ok(ymemo_core::group_children(&groups)
+            .remove(&parent_id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(FfiGroup::from)
+            .collect())
+    })
+}
+
+/// The memos in one folder, newest first.
+///
+/// A memo whose group has been deleted elsewhere is shown at the **top level** rather than
+/// nowhere, which is what the desktop list does too. Anything else would read as data loss.
+pub fn memos_in_group(group_id: String) -> Result<Vec<FfiMemo>> {
+    with_vault(|v| {
+        let known: std::collections::HashSet<String> =
+            v.store().list_groups()?.into_iter().map(|g| g.id).collect();
+        let at_root = group_id.is_empty();
+        Ok(v.store()
+            .list()?
+            .into_iter()
+            .filter(|m| {
+                if known.contains(&m.group_id) {
+                    m.group_id == group_id
+                } else {
+                    at_root // no group, or one that is gone
+                }
+            })
+            .map(FfiMemo::from)
+            .collect())
+    })
 }
 
 /// Creates a group and returns its id.

@@ -172,8 +172,15 @@ flutter build ios --no-codesign
 - **Lock** — open the vault with the master password, creating it if needed. Reachable from
   here, before any password: **Sync devices**, because a new install has to pair and receive
   `vault.json` before there is anything to unlock.
-- **List** — the memos; swipe to delete, + to add. Logs that have arrived are merged every
-  15s (`sync_rebuild`), and the sync button does it now.
+- **List** — one folder at a time: subfolders first, then its memos. Tapping a folder goes
+  into it, long-pressing one offers rename and delete (delete keeps the contents and lifts
+  them up a level), and long-pressing a memo moves it to another folder. Swipe to delete, +
+  adds a memo **to the folder on screen**. Logs that have arrived are merged every 15s
+  (`sync_rebuild`), and the sync button does it now.
+
+  Folders are navigated rather than drawn as a tree: a phone has no room for indentation, and
+  drilling down means the screen only ever asks the core for one level, which no cycle in the
+  group graph can turn into an endless walk.
 - **Editor** — title and body, saved on back or the check mark, and skipped when nothing
   changed.
 - **Sync devices** — the 6-digit LAN code and a field for the other device's, this device's
