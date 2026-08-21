@@ -77,8 +77,8 @@ english.LaunchApp=Launch Ymemo
 korean.LaunchApp=Ymemo 실행
 english.StoppingApp=Closing Ymemo...
 korean.StoppingApp=Ymemo 종료 중...
-english.RemoveData=Also delete your memos and settings?%n%nThey stay on this computer if you answer No, and a reinstall picks them up again. Answering Yes deletes them from this device; copies on your other devices are untouched.
-korean.RemoveData=메모와 설정도 함께 삭제할까요?%n%n아니오를 선택하면 이 컴퓨터에 그대로 남아 다시 설치할 때 이어서 사용할 수 있습니다. 예를 선택하면 이 기기에서 삭제되며, 다른 기기의 사본은 그대로 유지됩니다.
+english.RemoveData=Also delete your memos and settings?%n%nYes (recommended) removes them from this computer, leaving nothing behind; copies on your other devices are untouched. No keeps them here, and a reinstall will ask for the same master password as before.
+korean.RemoveData=메모와 설정도 함께 삭제할까요?%n%n예(권장)를 선택하면 이 컴퓨터에서 완전히 지워지며, 다른 기기의 사본은 그대로 유지됩니다. 아니오를 선택하면 이 컴퓨터에 남아, 다시 설치할 때 예전과 같은 마스터 비밀번호를 물어봅니다.
 
 [Tasks]
 Name: "startup"; Description: "{cm:StartupTask}"; GroupDescription: "{cm:AdditionalTasks}"
@@ -163,11 +163,16 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
-  { Memos and settings are the user's, so they survive an uninstall unless asked otherwise —
-    the default answer is No. Only the uninstalling account's data is reachable here; another
-    user's copy under their own profile stays. }
+  { Someone removing the app usually means all of it, so **Yes is the default** and an
+    uninstall that is simply confirmed leaves nothing behind. It still asks, because the
+    memos are the user's and no other copy of them may exist: the vault is E2E encrypted
+    with no server behind it, so a device without a paired partner is the only copy.
+
+    Only the uninstalling account's data is reachable here; another user's copy under their
+    own profile stays. A silent uninstall keeps the data — a script cannot answer, and
+    guessing "delete" on the user's behalf is the one mistake with no way back. }
   if CurUninstallStep = usPostUninstall then
     if not UninstallSilent then
-      if MsgBox(ExpandConstant('{cm:RemoveData}'), mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+      if MsgBox(ExpandConstant('{cm:RemoveData}'), mbConfirmation, MB_YESNO or MB_DEFBUTTON1) = IDYES then
         DelTree(ExpandConstant('{userappdata}\ymemo\Ymemo'), True, True, True);
 end;

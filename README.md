@@ -97,6 +97,12 @@ cargo test --workspace
 cargo run -p ymemo-desktop
 ```
 
+```bash
+# Deletes this device's memos, settings and vault, and nothing on your other devices.
+# The Windows uninstaller offers the same thing; on Linux a package may not touch $HOME.
+ymemo --purge
+```
+
 Choosing a master password on first run creates the vault. App data lives in the platform
 data directory (`~/.local/share/Ymemo` on Linux), and only the encrypted `vault/` is synced.
 

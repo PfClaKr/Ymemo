@@ -87,14 +87,44 @@ fn select_renderer() {
 
 /// Platform data directory, e.g. ~/.local/share/ymemo on Linux, %APPDATA%\ymemo\Ymemo\data
 /// on Windows.
+///
+/// Only the path; nothing is created. `--quit` and `--purge` run before the directory should
+/// exist, and creating it on the way to deleting it is how `--purge` used to report success
+/// on a machine that had nothing left to delete.
 fn data_dir() -> std::path::PathBuf {
-    if let Some(dirs) = directories::ProjectDirs::from("dev", "ymemo", "Ymemo") {
-        let dir = dirs.data_dir().to_path_buf();
-        let _ = std::fs::create_dir_all(&dir);
-        dir
-    } else {
-        std::path::PathBuf::from(".")
+    match directories::ProjectDirs::from("dev", "ymemo", "Ymemo") {
+        Some(dirs) => dirs.data_dir().to_path_buf(),
+        // Last resort for a machine with no home directory at all.
+        None => std::path::PathBuf::from("."),
     }
+}
+
+/// Deletes this device's data directory: vault, cache, session, settings and the sync
+/// daemon's own configuration.
+///
+/// The running instance is stopped first, and not only because it holds the cache open:
+/// Syncthing propagates deletions, so removing the vault while the daemon still carries it
+/// would empty the memos on every paired device too. If the app will not quit, nothing is
+/// deleted. Copies on other devices are never touched.
+fn purge(dir: &std::path::Path) -> Result<()> {
+    // Never act on data_dir()'s fallback: deleting the working directory is not something to
+    // do on one's own initiative.
+    if dir == std::path::Path::new(".") {
+        anyhow::bail!("no data directory to delete on this platform");
+    }
+    // Before asking anything to quit: the lock file the check needs lives in this very
+    // directory, so an absent one can hold neither data nor a running instance.
+    if !dir.exists() {
+        println!("nothing to delete: {}", dir.display());
+        return Ok(());
+    }
+    // Returns true when the lock is free, so a machine with nothing running passes too.
+    if !instance::quit_running(dir) {
+        anyhow::bail!("Ymemo is still running; close it and try again");
+    }
+    std::fs::remove_dir_all(dir)?;
+    println!("deleted {}", dir.display());
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -118,9 +148,19 @@ fn main() -> Result<()> {
         };
     }
 
+    // `ymemo --purge` deletes everything this device stores and exits. It is what the
+    // Windows uninstaller offers on the way out, and the only way to do the same on Linux,
+    // where a package may not touch a user's home directory.
+    if std::env::args().skip(1).any(|a| a == "--purge") {
+        return purge(&dir);
+    }
+
     // Only one instance per user: a second one would run a second sync daemon over the same
     // syncthing home and write the same cache. It happens easily enough — the Windows
     // installer's startup task plus a click on the icon of an app that lives in the tray.
+    // From here on this is a real session, so the directory has to exist.
+    let _ = std::fs::create_dir_all(&dir);
+
     let Some(_instance) = instance::acquire(&dir) else {
         instance::send_show(&dir); // hand the running one the foreground instead
         eprintln!("Ymemo is already running; asked it to show itself");
