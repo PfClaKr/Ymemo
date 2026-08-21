@@ -301,6 +301,39 @@ impl Syncthing {
         Ok(())
     }
 
+    /// Stops sharing the folder and forgets every peer attached to it.
+    ///
+    /// The step that has to come before a local wipe: Syncthing propagates deletions, so
+    /// emptying a folder it still carries empties it on every paired device too. Removing
+    /// the folder first turns the wipe into a purely local act.
+    ///
+    /// The peers are dropped as well, since a vault that is about to disappear should not
+    /// leave this device configured to receive it back the moment a new one is created.
+    pub fn remove_folder(&self, folder_id: &str) -> Result<()> {
+        let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
+        let peers: Vec<String> = match ureq::get(&url).header("X-API-Key", &self.api_key).call() {
+            Ok(mut res) => {
+                let folder: serde_json::Value = res.body_mut().read_json()?;
+                folder["devices"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|d| d["deviceID"].as_str().map(String::from)).collect())
+                    .unwrap_or_default()
+            }
+            Err(_) => return Ok(()), // never registered, nothing to remove
+        };
+
+        ureq::delete(&url).header("X-API-Key", &self.api_key).call()?;
+
+        // Best effort: an undeletable peer must not stop the folder from going away.
+        let my_id = self.device_id().unwrap_or_default();
+        for id in peers.iter().filter(|id| **id != my_id) {
+            let _ = ureq::delete(format!("{}/rest/config/devices/{id}", self.base_url))
+                .header("X-API-Key", &self.api_key)
+                .call();
+        }
+        Ok(())
+    }
+
     /// Shuts the daemon down. `Drop` does this too, but calling it surfaces errors.
     pub fn shutdown(mut self) -> Result<()> {
         self.shutdown_inner()

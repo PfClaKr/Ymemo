@@ -11,6 +11,7 @@ pub mod changelog;
 pub mod crypto;
 pub mod lan_pair;
 pub mod pairing;
+pub mod recovery;
 pub mod sync;
 pub mod update;
 pub mod vault;

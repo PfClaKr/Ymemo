@@ -19,13 +19,29 @@ device is not.**
 |---|---|
 | Key derivation | Argon2id (`argon2` crate defaults), 16-byte salt |
 | Cipher | XChaCha20-Poly1305 (AEAD), 24-byte nonce drawn from `OsRng` per record |
-| Key | a **single 32-byte symmetric key** from the master password; one user with many devices means no per-device keys |
-| Randomness | `OsRng` (salt, nonces, LAN pairing codes) |
+| Data key | a **single random 32-byte key**, stored wrapped; one user with many devices means no per-device keys |
+| Randomness | `OsRng` (data key, salts, nonces, recovery and LAN pairing codes) |
 
-`vault.json` holds the salt (not secret) and `key_check`, a fixed canary encrypted with the
-key. The canary makes a wrong password fail immediately — and equally means **anyone holding
-the vault can try passwords offline without limit**. The only defenses are Argon2id's cost
-and the strength of the chosen password: a short password holds for a short time.
+Logs and blobs are encrypted with a random **data key**. The master password never encrypts
+memos itself — it derives an Argon2id key that only *wraps* the data key inside `vault.json`.
+Two consequences follow:
+
+- Changing the password rewrites one wrapper. No log, blob or other device is touched, and
+  the change is instant regardless of vault size.
+- **There are two credentials that open the vault**, once a recovery code is issued: the
+  master password and that code. Each wraps the same data key, so a leak of either is a
+  full compromise. The recovery code carries 160 bits of entropy and cannot be guessed; it
+  is displayed exactly once and only its wrapper is stored, so a lost code is gone.
+
+`vault.json` holds both salts (not secret), the wrapped key or keys, and `key_check`, a fixed
+canary encrypted with the data key. The canary makes a wrong password fail immediately — and
+equally means **anyone holding the vault can try passwords offline without limit**. The only
+defenses are Argon2id's cost and the strength of the chosen password: a short password holds
+for a short time.
+
+Vaults from before wrapping (`version: 1`, no `wrapped_key`) used the password key as the
+data key directly. They still open, and the first password change upgrades them in place —
+after which a version of the app that predates wrapping can no longer open that vault.
 
 ## What lands on disk
 
@@ -33,7 +49,7 @@ Relative to the app data directory (`~/.local/share/Ymemo` on Linux):
 
 | File | Synced | Contents |
 |---|---|---|
-| `vault/vault.json` | yes | salt + key_check (plain JSON, no secrets) |
+| `vault/vault.json` | yes | salts, wrapped data key(s) and key_check (plain JSON; every key in it is encrypted). The one synced file that is **rewritten** — by a password change or a new recovery code |
 | `vault/logs/*.ymlog` | yes | per-device append-only log; every record is **encrypted** |
 | `vault/blobs/*.ymblob` | yes | attached photos, **encrypted** (file name = sha256 of the plaintext) |
 | `ymemo.db` | no | **plaintext SQLite cache** — memo bodies are in it as-is |
@@ -87,8 +103,13 @@ Two paths, both requiring knowledge of a code.
   records in place (automerge merely marks them deleted). There is no "erase completely".
 - **No device revocation.** A device that paired once has already derived the key. Unsharing
   stops further syncing but does not recall what it already has.
-- **No password change.** Changing it would mean re-encrypting every log, which is not
-  implemented. A leaked password leaves no option but a fresh vault.
+- **A password change does not re-key the vault.** It replaces the wrapper, not the data
+  key, so a leaked *password* is closed off but a leaked *data key* — anything read out of
+  `session.json` or process memory — still opens everything. Only a fresh vault sheds that.
+- **A recovery code is a second full credential.** Issuing one widens the attack surface by
+  design; not issuing one means a forgotten password destroys the memos on that device.
+- **Wiping is local.** "Delete everything and start over" removes this device's vault after
+  unsharing the folder, so paired devices keep their copies. It is not a remote wipe.
 - **No forward secrecy.** One key opens the vault's past and present alike.
 - **No author authentication.** Any device with the key can write any record. That is intended
   for a single-user, multi-device model, but a compromised device's forged changes are

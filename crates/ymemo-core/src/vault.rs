@@ -16,6 +16,20 @@
 //! Automerge merges changes order-independently: edits to different fields of one memo
 //! both survive, and a conflict on the same field converges deterministically. The actor
 //! id is the device id, so only our own log carries our actor.
+//!
+//! ## Keys
+//!
+//! Logs and blobs are encrypted with a random **data key**, and `vault.json` stores that
+//! key wrapped — once under `Argon2id(master password)`, and once more under
+//! `Argon2id(recovery code)` after the user asks for one. Nothing but the wrapper changes
+//! when the password does, so a password change re-encrypts no logs, no blobs and nothing
+//! on the other devices; they simply ask for the new password the next time they unlock.
+//!
+//! The first vault format had no wrapping and used the password key as the data key
+//! directly. Those headers still open — an empty `wrapped_key` *means* "the data key is the
+//! password key" — and are rewritten into the wrapped form the first time the password
+//! changes, never spontaneously: `vault.json` is a synced file, and a write nobody asked
+//! for is a sync conflict nobody asked for.
 
 use anyhow::{anyhow, bail, Context, Result};
 use ymemo_i18n::t;
@@ -37,15 +51,30 @@ const LOGS_DIR: &str = "logs";
 const LOG_EXT: &str = "ymlog";
 /// Canary plaintext, stored encrypted in the header to detect a wrong password early.
 const KEY_CHECK: &[u8] = b"ymemo-key-check-v1";
+/// Header version written today: a wrapped data key. 1 was the unwrapped format.
+const HEADER_VERSION: u32 = 2;
 
-/// Contents of `vault.json`. The salt is not secret.
-#[derive(Serialize, Deserialize)]
+/// Contents of `vault.json`. Neither salt is secret, and every key in it is wrapped.
+///
+/// The optional fields are absent in the original format; `#[serde(default)]` reads those
+/// headers, and `skip_serializing_if` keeps us from writing empty ones back.
+#[derive(Serialize, Deserialize, Clone)]
 struct VaultHeader {
     version: u32,
-    /// Argon2id salt, hex encoded.
+    /// Argon2id salt for the master password, hex encoded.
     salt: String,
-    /// `encrypt(KEY_CHECK)`, hex encoded; decrypting it proves the password.
+    /// `encrypt(data key, KEY_CHECK)`, hex encoded; decrypting it proves the data key.
     key_check: String,
+    /// `encrypt(password key, data key)`, hex encoded. Empty means the original format,
+    /// where the password key *is* the data key.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    wrapped_key: String,
+    /// Argon2id salt for the recovery code; empty when no code was ever issued.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    recovery_salt: String,
+    /// `encrypt(recovery key, data key)`, hex encoded; empty when no code was issued.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    recovery_key: String,
 }
 
 pub struct Vault {
@@ -71,11 +100,16 @@ impl Vault {
         fs::create_dir_all(dir)?;
 
         let salt = generate_salt();
-        let key = MasterKey::derive(password, &salt)?;
+        let password_key = MasterKey::derive(password, &salt)?;
+        // The data key is random, not derived: the password only ever wraps it.
+        let data_key = MasterKey::from_bytes(&crate::crypto::generate_key())?;
         let header = VaultHeader {
-            version: 1,
+            version: HEADER_VERSION,
             salt: to_hex(&salt),
-            key_check: to_hex(&key.encrypt(KEY_CHECK)?),
+            key_check: to_hex(&data_key.encrypt(KEY_CHECK)?),
+            wrapped_key: to_hex(&password_key.encrypt(&data_key.to_bytes())?),
+            recovery_salt: String::new(),
+            recovery_key: String::new(),
         };
         fs::write(&header_path, serde_json::to_vec_pretty(&header)?)?;
 
@@ -87,13 +121,7 @@ impl Vault {
     pub fn open(dir: impl AsRef<Path>, password: &[u8], store: Store) -> Result<Self> {
         let dir = dir.as_ref().to_path_buf();
         let header = read_header(&dir)?;
-
-        let salt_vec = from_hex(&header.salt)?;
-        let salt: Salt = salt_vec
-            .try_into()
-            .map_err(|_| anyhow!(t!("core.salt_length_bad", expected = SALT_LEN)))?;
-        let key = MasterKey::derive(password, &salt)?;
-        verify_key(&header, &key)?;
+        let key = unlock_header(&header, password)?;
 
         let device_id = store.device_id()?;
         fs::create_dir_all(dir.join(LOGS_DIR))?;
@@ -156,6 +184,51 @@ impl Vault {
         } else {
             Self::create(dir, password, store)
         }
+    }
+
+    /// Replaces the master password, after checking the current one.
+    ///
+    /// Only the wrapper is rewritten, so this is instant however large the vault is, and
+    /// the other devices keep syncing without interruption — they ask for the new password
+    /// the next time they unlock. A version older than the wrapped format cannot open the
+    /// vault afterwards, since the canary is no longer under the password key.
+    ///
+    /// The recovery code, if one was issued, keeps working: it wraps the same data key.
+    pub fn change_password(&self, current: &[u8], new: &[u8]) -> Result<()> {
+        if new.is_empty() {
+            bail!(t!("core.empty_password"));
+        }
+        let header = read_header(&self.dir)?;
+        let current_key = unlock_header(&header, current)?;
+        // The header on disk must still be the one this vault was opened with; another
+        // device may have changed the password while this one sat unlocked.
+        if current_key.to_bytes() != self.key.to_bytes() {
+            bail!(t!("core.vault_key_changed"));
+        }
+        rewrap_password(&self.dir, &self.key, new)
+    }
+
+    /// Issues a fresh recovery code, replacing any earlier one, and returns it.
+    ///
+    /// **The only time the code is ever readable.** Only its Argon2id wrapper is stored, so
+    /// a lost code cannot be recovered — it can only be reissued from an unlocked vault.
+    pub fn issue_recovery_code(&self) -> Result<String> {
+        let code = crate::recovery::generate();
+        let salt = generate_salt();
+        let recovery_key = MasterKey::derive(crate::recovery::normalize(&code)?.as_bytes(), &salt)?;
+
+        let mut header = read_header(&self.dir)?;
+        header.recovery_salt = to_hex(&salt);
+        header.recovery_key = to_hex(&recovery_key.encrypt(&self.key.to_bytes())?);
+        // `version` is left alone: adding a recovery wrapper does not move an unwrapped
+        // header to the new format, and both shapes unlock the same way.
+        write_header(&self.dir, &header)?;
+        Ok(code)
+    }
+
+    /// Whether a recovery code was issued for this vault.
+    pub fn has_recovery_code(&self) -> bool {
+        recovery_code_exists(&self.dir)
     }
 
     /// Inserts or updates a memo, writing only changed fields so merges stay field-level.
@@ -541,9 +614,10 @@ fn heal_divergent_log(
     if ChangeLog::open(&own_path, canonical_key.clone()).read_all().is_ok() {
         return Ok(());
     }
-    // Look for the old key among the conflict headers' salts.
-    for salt in conflict_salts(dir) {
-        let old_key = MasterKey::derive(password, &salt)?;
+    // Look for the old key among the conflict headers. Each is unlocked the same way the
+    // canonical one is, so a wrapped and an unwrapped header are both candidates.
+    for header in conflict_headers(dir) {
+        let Ok(old_key) = unlock_header(&header, password) else { continue };
         if ChangeLog::open(&own_path, old_key.clone()).read_all().is_ok() {
             reencrypt_log(&own_path, &old_key, canonical_key)?;
             eprintln!("diverged vault key: re-encrypted our log under the canonical key");
@@ -566,6 +640,82 @@ fn read_header(dir: &Path) -> Result<VaultHeader> {
     Ok(serde_json::from_slice(&bytes)?)
 }
 
+/// Writes the header through a temporary file, so a crash mid-write cannot leave a
+/// truncated `vault.json` — the one file without which no device can open the vault.
+fn write_header(dir: &Path, header: &VaultHeader) -> Result<()> {
+    let path = dir.join(HEADER_FILE);
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, serde_json::to_vec_pretty(header)?)?;
+    fs::rename(&tmp, &path)?;
+    Ok(())
+}
+
+/// Derives a wrapping key from a password (or a recovery code) and a hex-encoded salt.
+fn derive_wrapping_key(secret: &[u8], salt_hex: &str) -> Result<MasterKey> {
+    let salt: Salt = from_hex(salt_hex)?
+        .try_into()
+        .map_err(|_| anyhow!(t!("core.salt_length_bad", expected = SALT_LEN)))?;
+    MasterKey::derive(secret, &salt)
+}
+
+/// Unwraps a data key that was wrapped under `wrapper`.
+fn unwrap_key(wrapper: &MasterKey, wrapped_hex: &str, wrong: &str) -> Result<MasterKey> {
+    let raw = wrapper
+        .decrypt(&from_hex(wrapped_hex)?)
+        .map_err(|_| anyhow!(wrong.to_string()))?;
+    let raw: [u8; crate::crypto::KEY_LEN] = raw
+        .try_into()
+        .map_err(|_| anyhow!(t!("core.wrapped_key_length_bad")))?;
+    MasterKey::from_bytes(&raw)
+}
+
+/// The vault's data key, from a header plus the master password.
+///
+/// An empty `wrapped_key` is the original format, where the password key was used to
+/// encrypt the logs directly; there the data key simply *is* the password key.
+fn unlock_header(header: &VaultHeader, password: &[u8]) -> Result<MasterKey> {
+    let password_key = derive_wrapping_key(password, &header.salt)?;
+    let data_key = if header.wrapped_key.is_empty() {
+        password_key
+    } else {
+        unwrap_key(&password_key, &header.wrapped_key, &t!("core.wrong_password"))?
+    };
+    verify_key(header, &data_key)?;
+    Ok(data_key)
+}
+
+/// The vault's data key, from a header plus a recovery code.
+fn unlock_header_with_recovery(header: &VaultHeader, code: &str) -> Result<MasterKey> {
+    if header.recovery_key.is_empty() || header.recovery_salt.is_empty() {
+        bail!(t!("core.no_recovery_code"));
+    }
+    let normalized = crate::recovery::normalize(code)?;
+    let recovery_key = derive_wrapping_key(normalized.as_bytes(), &header.recovery_salt)?;
+    let data_key = unwrap_key(
+        &recovery_key,
+        &header.recovery_key,
+        &t!("core.wrong_recovery_code"),
+    )?;
+    verify_key(header, &data_key)?;
+    Ok(data_key)
+}
+
+/// Rewrites the header so `new_password` wraps `data_key`, keeping any recovery wrapper.
+///
+/// The data key itself never changes, which is the whole point: not one log record or blob
+/// is re-encrypted, and the other devices carry on appending to their logs untouched. They
+/// only need the new password the next time they ask for one.
+fn rewrap_password(dir: &Path, data_key: &MasterKey, new_password: &[u8]) -> Result<()> {
+    let mut header = read_header(dir)?;
+    let salt = generate_salt();
+    let password_key = MasterKey::derive(new_password, &salt)?;
+    header.version = HEADER_VERSION;
+    header.salt = to_hex(&salt);
+    header.key_check = to_hex(&data_key.encrypt(KEY_CHECK)?);
+    header.wrapped_key = to_hex(&password_key.encrypt(&data_key.to_bytes())?);
+    write_header(dir, &header)
+}
+
 /// Checks the key by decrypting the header canary.
 fn verify_key(header: &VaultHeader, key: &MasterKey) -> Result<()> {
     let check = key
@@ -577,11 +727,13 @@ fn verify_key(header: &VaultHeader, key: &MasterKey) -> Result<()> {
     Ok(())
 }
 
-/// Salts parsed out of the `vault.sync-conflict-*.json` files; unreadable ones are skipped.
-fn conflict_salts(dir: &Path) -> Vec<Salt> {
-    let mut salts = Vec::new();
+/// Headers parsed out of the `vault.sync-conflict-*.json` files; unreadable ones are
+/// skipped. Each one is a key the vault may have been encrypted under before Syncthing
+/// picked a winner, so healing tries them all.
+fn conflict_headers(dir: &Path) -> Vec<VaultHeader> {
+    let mut headers = Vec::new();
     let Ok(entries) = fs::read_dir(dir) else {
-        return salts;
+        return headers;
     };
     for entry in entries.flatten() {
         let path = entry.path();
@@ -590,13 +742,11 @@ fn conflict_salts(dir: &Path) -> Vec<Salt> {
             continue;
         }
         let Ok(bytes) = fs::read(&path) else { continue };
-        let Ok(header) = serde_json::from_slice::<VaultHeader>(&bytes) else { continue };
-        let Ok(salt_vec) = from_hex(&header.salt) else { continue };
-        if let Ok(salt) = <Salt>::try_from(salt_vec) {
-            salts.push(salt);
+        if let Ok(header) = serde_json::from_slice::<VaultHeader>(&bytes) {
+            headers.push(header);
         }
     }
-    salts
+    headers
 }
 
 /// Rewrites a log from `old_key` to `new_key` and swaps it in atomically.
@@ -688,6 +838,58 @@ fn from_hex(s: &str) -> Result<Vec<u8>> {
         .step_by(2)
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| anyhow!(t!("core.hex_parse_failed", error = e))))
         .collect()
+}
+
+/// Whether `dir` holds a vault with a recovery code, without opening it.
+///
+/// The lock screen asks before anything is unlocked, so it cannot go through [`Vault`].
+pub fn recovery_code_exists(dir: impl AsRef<Path>) -> bool {
+    read_header(dir.as_ref()).is_ok_and(|h| !h.recovery_key.is_empty() && !h.recovery_salt.is_empty())
+}
+
+/// Sets a new master password using the recovery code, for a vault nobody can unlock.
+///
+/// Nothing is decrypted beyond the header, so this is as fast as two Argon2id runs. The
+/// recovery code stays valid afterwards — it wraps the same data key — and can be replaced
+/// from an unlocked vault with [`Vault::issue_recovery_code`].
+pub fn reset_password_with_recovery(
+    dir: impl AsRef<Path>,
+    code: &str,
+    new_password: &[u8],
+) -> Result<()> {
+    if new_password.is_empty() {
+        bail!(t!("core.empty_password"));
+    }
+    let dir = dir.as_ref();
+    let header = read_header(dir)?;
+    let data_key = unlock_header_with_recovery(&header, code)?;
+    rewrap_password(dir, &data_key, new_password)
+}
+
+/// Deletes a vault directory outright: header, logs and blobs.
+///
+/// For "I forgot the password and want to start over", which is the only way out when
+/// neither the password nor a recovery code is left — the data is unreadable by design.
+///
+/// **Stop sharing the directory before calling this.** Syncthing propagates deletions, so
+/// wiping a folder it still carries wipes the other devices too
+/// ([`crate::sync::Syncthing::remove_folder`]).
+pub fn wipe(dir: impl AsRef<Path>) -> Result<()> {
+    let dir = dir.as_ref();
+    if !dir.exists() {
+        return Ok(());
+    }
+    // Refuse to empty a directory that is not a vault; the caller passes a path from
+    // settings, and a wrong one would take the user's files with it.
+    let looks_like_vault = dir.join(HEADER_FILE).exists()
+        || dir.join(LOGS_DIR).exists()
+        || dir.join("blobs").exists();
+    if !looks_like_vault {
+        bail!(t!("core.not_a_vault", path = dir.display()));
+    }
+    fs::remove_dir_all(dir)?;
+    fs::create_dir_all(dir)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -835,16 +1037,31 @@ mod tests {
         fs::remove_file(&db).ok();
     }
 
-    /// Writes a header, used to imitate Syncthing's conflict resolution: the canonical salt
-    /// lands in vault.json while the loser stays as `vault.sync-conflict-*.json`.
-    fn write_header(dir: &Path, name: &str, password: &[u8], salt: &Salt) {
-        let key = MasterKey::derive(password, salt).unwrap();
+    /// Writes a header wrapping `data_key` under `password`, to imitate Syncthing's conflict
+    /// resolution: the winner lands in vault.json while the loser stays as
+    /// `vault.sync-conflict-*.json`.
+    fn write_test_header(dir: &Path, name: &str, password: &[u8], salt: &Salt, data_key: &MasterKey) {
+        let password_key = MasterKey::derive(password, salt).unwrap();
         let header = VaultHeader {
-            version: 1,
+            version: HEADER_VERSION,
             salt: to_hex(salt),
-            key_check: to_hex(&key.encrypt(KEY_CHECK).unwrap()),
+            key_check: to_hex(&data_key.encrypt(KEY_CHECK).unwrap()),
+            wrapped_key: to_hex(&password_key.encrypt(&data_key.to_bytes()).unwrap()),
+            recovery_salt: String::new(),
+            recovery_key: String::new(),
         };
         fs::write(dir.join(name), serde_json::to_vec_pretty(&header).unwrap()).unwrap();
+    }
+
+    /// A header in the original unwrapped format, where the password key is the data key.
+    fn write_legacy_header(dir: &Path, password: &[u8], salt: &Salt) {
+        let key = MasterKey::derive(password, salt).unwrap();
+        let header = serde_json::json!({
+            "version": 1,
+            "salt": to_hex(salt),
+            "key_check": to_hex(&key.encrypt(KEY_CHECK).unwrap()),
+        });
+        fs::write(dir.join(HEADER_FILE), serde_json::to_vec_pretty(&header).unwrap()).unwrap();
     }
 
     /// With our log under the old salt and vault.json converged on the canonical one, open
@@ -878,7 +1095,10 @@ mod tests {
         .unwrap();
         let canonical_salt = generate_salt();
         assert_ne!(canonical_salt, old_salt);
-        write_header(&dir, HEADER_FILE, b"pw", &canonical_salt);
+        // The winning device made its own data key, so healing has to re-encrypt the log
+        // rather than merely re-derive from another salt.
+        let canonical_key = MasterKey::from_bytes(&crate::crypto::generate_key()).unwrap();
+        write_test_header(&dir, HEADER_FILE, b"pw", &canonical_salt, &canonical_key);
 
         // Reopening with the same password heals the log and the memo is back.
         let v = Vault::open(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
@@ -886,7 +1106,6 @@ mod tests {
 
         // Our log now opens under the canonical key directly.
         let device_id = Store::open(&db).unwrap().device_id().unwrap();
-        let canonical_key = MasterKey::derive(b"pw", &canonical_salt).unwrap();
         let own_log = ChangeLog::open(
             dir.join(LOGS_DIR).join(format!("{device_id}.{LOG_EXT}")),
             canonical_key,
@@ -895,6 +1114,134 @@ mod tests {
 
         fs::remove_dir_all(&dir).ok();
         fs::remove_file(&db).ok();
+    }
+
+    /// A password change must rewrap the same data key: instant, and invisible to the logs.
+    #[test]
+    fn change_password_keeps_the_data_key_and_the_memos() {
+        let dir = temp_dir();
+        let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
+
+        let memo = Memo::new("survives the change", "body");
+        let key_before = {
+            let mut v = Vault::create(&dir, b"old-pw", Store::open(&db).unwrap()).unwrap();
+            v.upsert(&memo).unwrap();
+            v.change_password(b"old-pw", b"new-pw").unwrap();
+            v.key_bytes()
+        };
+
+        // The old password is gone, the new one opens, and the memo never moved.
+        assert!(Vault::open(&dir, b"old-pw", Store::open_in_memory().unwrap()).is_err());
+        let v = Vault::open(&dir, b"new-pw", Store::open(&db).unwrap()).unwrap();
+        assert_eq!(v.store().get(&memo.id).unwrap().unwrap().title, "survives the change");
+        // Same data key, so no log or blob had to be rewritten.
+        assert_eq!(v.key_bytes(), key_before);
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db).ok();
+    }
+
+    #[test]
+    fn change_password_rejects_a_wrong_current_password() {
+        let dir = temp_dir();
+        let v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        assert!(v.change_password(b"not-the-password", b"new-pw").is_err());
+        assert!(v.change_password(b"pw", b"").is_err(), "an empty new password is rejected");
+        // Still the original password.
+        assert!(Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).is_ok());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The recovery code opens a vault whose password is lost, without touching the data.
+    #[test]
+    fn recovery_code_sets_a_new_password() {
+        let dir = temp_dir();
+        let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
+
+        let memo = Memo::new("behind a forgotten password", "body");
+        let code = {
+            let mut v = Vault::create(&dir, b"forgotten", Store::open(&db).unwrap()).unwrap();
+            v.upsert(&memo).unwrap();
+            assert!(!v.has_recovery_code());
+            let code = v.issue_recovery_code().unwrap();
+            assert!(v.has_recovery_code());
+            code
+        };
+        assert!(recovery_code_exists(&dir));
+
+        assert!(reset_password_with_recovery(&dir, "WRONG-C0DE-0000-0000-0000-0000-0000-0000", b"x").is_err());
+        // Formatting is not part of the secret: lower case and no dashes still works.
+        let typed = code.to_lowercase().replace('-', " ");
+        reset_password_with_recovery(&dir, &typed, b"brand-new").unwrap();
+
+        assert!(Vault::open(&dir, b"forgotten", Store::open_in_memory().unwrap()).is_err());
+        let v = Vault::open(&dir, b"brand-new", Store::open(&db).unwrap()).unwrap();
+        assert_eq!(v.store().get(&memo.id).unwrap().unwrap().title, "behind a forgotten password");
+        // The code is not spent by using it.
+        assert!(v.has_recovery_code());
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db).ok();
+    }
+
+    #[test]
+    fn recovery_is_refused_when_no_code_was_issued() {
+        let dir = temp_dir();
+        Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        assert!(!recovery_code_exists(&dir));
+        assert!(reset_password_with_recovery(&dir, &crate::recovery::generate(), b"new").is_err());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Vaults written before key wrapping must keep opening, and be upgraded in place by a
+    /// password change without losing a single record.
+    #[test]
+    fn legacy_unwrapped_header_opens_and_upgrades() {
+        let dir = temp_dir();
+        let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
+
+        // Build a vault the old way: the password key encrypts the log directly.
+        let salt = generate_salt();
+        write_legacy_header(&dir, b"pw", &salt);
+        let memo = Memo::new("written before wrapping", "body");
+        {
+            let mut v = Vault::open(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+            // The data key is the password key while the header stays unwrapped.
+            assert_eq!(v.key_bytes(), MasterKey::derive(b"pw", &salt).unwrap().to_bytes());
+            v.upsert(&memo).unwrap();
+            v.change_password(b"pw", b"pw2").unwrap();
+        }
+
+        let v = Vault::open(&dir, b"pw2", Store::open(&db).unwrap()).unwrap();
+        assert_eq!(v.store().get(&memo.id).unwrap().unwrap().title, "written before wrapping");
+        // Upgraded in place, and the data key still is the original one, so the log written
+        // under it is readable without re-encryption.
+        assert_eq!(v.key_bytes(), MasterKey::derive(b"pw", &salt).unwrap().to_bytes());
+        assert_eq!(read_header(&dir).unwrap().version, HEADER_VERSION);
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db).ok();
+    }
+
+    #[test]
+    fn wipe_empties_a_vault_but_refuses_anything_else() {
+        let dir = temp_dir();
+        Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        assert!(dir.join(HEADER_FILE).exists());
+
+        let not_a_vault = temp_dir();
+        fs::write(not_a_vault.join("holiday-photo.jpg"), b"not ours").unwrap();
+        assert!(wipe(&not_a_vault).is_err());
+        assert!(not_a_vault.join("holiday-photo.jpg").exists());
+
+        wipe(&dir).unwrap();
+        assert!(!dir.join(HEADER_FILE).exists());
+        assert!(!dir.join(LOGS_DIR).exists());
+        // A wiped directory is a first run again.
+        Vault::create(&dir, b"fresh", Store::open_in_memory().unwrap()).unwrap();
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&not_a_vault).ok();
     }
 
     #[test]

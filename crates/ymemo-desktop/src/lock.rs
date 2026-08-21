@@ -1,18 +1,23 @@
 //! Lock and unlock flow, plus applying language and settings across every window.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::fs;
 use std::rc::Rc;
 use std::time::Duration;
 
+use anyhow::{Context, Result};
 use slint::{ComponentHandle, SharedString};
+use ymemo_core::sync::Syncthing;
 use ymemo_core::vault::Vault;
+use ymemo_i18n::t;
 
-use crate::icon::set_window_icon;
 use crate::list::refresh_list;
 use crate::settings;
 use crate::state::Ctx;
 use crate::sticky::flush_dirty;
-use crate::{apply_strings, ListWindow, LockWindow, SettingsWindow, Strings};
+use crate::sync::SYNC_FOLDER_ID;
+use crate::window::present;
+use crate::{apply_strings, ListWindow, LockWindow, SecurityWindow, SettingsWindow, Strings};
 
 /// Fills the settings window's inputs from the current settings.
 pub(crate) fn fill_settings_window(ctx: &Ctx, win: &SettingsWindow) {
@@ -33,13 +38,20 @@ pub(crate) fn fill_settings_window(ctx: &Ctx, win: &SettingsWindow) {
 /// The Slint `Strings` global is per component instance, so changing one window leaves the
 /// rest in the old language. Open stickies are walked here; later ones are filled by
 /// `open_sticky` on creation.
-pub(crate) fn apply_lang(ctx: &Ctx, lock: &LockWindow, list: &ListWindow, settings_win: &SettingsWindow) {
+pub(crate) fn apply_lang(
+    ctx: &Ctx,
+    lock: &LockWindow,
+    list: &ListWindow,
+    settings_win: &SettingsWindow,
+    security_win: &SecurityWindow,
+) {
     // Switch the catalog first; every later t!/apply_strings reads it, core and tray
     // included, so nothing else needs notifying.
     ymemo_i18n::set_lang(ctx.settings.borrow().effective_lang());
     apply_strings(&lock.global::<Strings>());
     apply_strings(&list.global::<Strings>());
     apply_strings(&settings_win.global::<Strings>());
+    apply_strings(&security_win.global::<Strings>());
     for entry in ctx.stickies.borrow().values() {
         apply_strings(&entry.window.global::<Strings>());
     }
@@ -84,11 +96,38 @@ pub(crate) fn lock_now(ctx: &Ctx, lock: &LockWindow, list: &ListWindow, unlocked
 
     let _ = list.hide();
     lock.invoke_clear_password();
+    lock.invoke_leave_recovery();
     lock.set_lock_message(SharedString::new());
     lock.set_show_sync(false);
-    let _ = lock.show();
-    set_window_icon(lock.window());
-    lock.window().request_redraw();
+    // A code may have been issued during the session that just ended.
+    lock.set_has_recovery(ymemo_core::vault::recovery_code_exists(ctx.dir.join("vault")));
+    present(lock);
+}
+
+/// Wipes this device's vault, cache and session: the way out of a forgotten password when
+/// there is no recovery code either.
+///
+/// **Unsharing comes first and is not optional.** Syncthing propagates deletions, so
+/// emptying a folder it still carries would delete the memos on every paired device too.
+/// If the folder cannot be released, nothing is deleted at all.
+pub(crate) fn reset_vault(ctx: &Ctx, syncthing: &Rc<RefCell<Option<Syncthing>>>) -> Result<()> {
+    if let Some(st) = syncthing.borrow().as_ref() {
+        st.remove_folder(SYNC_FOLDER_ID)
+            .context(t!("msg.unshare_before_reset"))?;
+    }
+
+    ymemo_core::vault::wipe(ctx.dir.join("vault"))?;
+    // The cache is a plaintext copy of everything in the vault, so it goes with it.
+    let db = ctx.dir.join("ymemo.db");
+    if db.exists() {
+        fs::remove_file(&db)?;
+    }
+    settings::clear_session(&ctx.dir);
+
+    *ctx.vault.borrow_mut() = None;
+    ctx.model.set_vec(Vec::new());
+    ctx.collapsed.borrow_mut().clear();
+    Ok(())
 }
 
 /// Shared tail of unlock and create-vault: fill the list, store the vault, hide the lock
@@ -105,7 +144,6 @@ pub(crate) fn apply_opened_vault(
     unlocked.set(true);
     let _ = lock.hide();
     if let Some(list) = list_weak.upgrade() {
-        let _ = list.show();
-        set_window_icon(list.window());
+        present(&list);
     }
 }

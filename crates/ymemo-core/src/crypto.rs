@@ -27,6 +27,17 @@ pub fn generate_salt() -> Salt {
     salt
 }
 
+/// A fresh random 32-byte key, for the vault's data key (see [`crate::vault`]).
+///
+/// Unlike [`MasterKey::derive`] this has no password behind it: the data key is what
+/// actually encrypts logs and blobs, and it is stored wrapped under a derived key. That
+/// indirection is what lets the master password change without re-encrypting anything.
+pub fn generate_key() -> [u8; KEY_LEN] {
+    let mut key = [0u8; KEY_LEN];
+    OsRng.fill_bytes(&mut key);
+    key
+}
+
 /// Symmetric key derived from the master password.
 ///
 /// `Clone` so one key can back every per-device log in a vault.
