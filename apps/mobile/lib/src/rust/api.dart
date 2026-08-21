@@ -104,6 +104,22 @@ Future<void> attachmentRemove({required String id}) =>
 /// All groups, sorted by name.
 Future<List<FfiGroup>> groupList() => RustLib.instance.api.crateApiGroupList();
 
+/// The folders directly inside `parent_id` (`""` for the top level), name-sorted.
+///
+/// The resolution is the core's, not Dart's, so the same defence applies on both platforms:
+/// a group whose ancestry loops — which CRDTs allow, since a concurrent move on two devices
+/// keeps both parents — or whose parent is gone surfaces at the top level instead of being
+/// unreachable. Dart walking `parent_id` itself could loop forever on exactly that case.
+Future<List<FfiGroup>> groupChildren({required String parentId}) =>
+    RustLib.instance.api.crateApiGroupChildren(parentId: parentId);
+
+/// The memos in one folder, newest first.
+///
+/// A memo whose group has been deleted elsewhere is shown at the **top level** rather than
+/// nowhere, which is what the desktop list does too. Anything else would read as data loss.
+Future<List<FfiMemo>> memosInGroup({required String groupId}) =>
+    RustLib.instance.api.crateApiMemosInGroup(groupId: groupId);
+
 /// Creates a group and returns its id.
 Future<String> groupCreate({required String name, required String parentId}) =>
     RustLib.instance.api.crateApiGroupCreate(name: name, parentId: parentId);
@@ -512,6 +528,16 @@ class FfiStrings {
   final String updateOpen;
   final String updateSection;
   final String version;
+  final String cancel;
+  final String delete;
+  final String deleteGroupHint;
+  final String emptyFolder;
+  final String folderName;
+  final String moveTo;
+  final String newGroup;
+  final String ok;
+  final String rename;
+  final String rootFolder;
   final String listTitle;
   final String masterPassword;
   final String myCode;
@@ -572,6 +598,16 @@ class FfiStrings {
     required this.updateOpen,
     required this.updateSection,
     required this.version,
+    required this.cancel,
+    required this.delete,
+    required this.deleteGroupHint,
+    required this.emptyFolder,
+    required this.folderName,
+    required this.moveTo,
+    required this.newGroup,
+    required this.ok,
+    required this.rename,
+    required this.rootFolder,
     required this.listTitle,
     required this.masterPassword,
     required this.myCode,
@@ -634,6 +670,16 @@ class FfiStrings {
       updateOpen.hashCode ^
       updateSection.hashCode ^
       version.hashCode ^
+      cancel.hashCode ^
+      delete.hashCode ^
+      deleteGroupHint.hashCode ^
+      emptyFolder.hashCode ^
+      folderName.hashCode ^
+      moveTo.hashCode ^
+      newGroup.hashCode ^
+      ok.hashCode ^
+      rename.hashCode ^
+      rootFolder.hashCode ^
       listTitle.hashCode ^
       masterPassword.hashCode ^
       myCode.hashCode ^
@@ -698,6 +744,16 @@ class FfiStrings {
           updateOpen == other.updateOpen &&
           updateSection == other.updateSection &&
           version == other.version &&
+          cancel == other.cancel &&
+          delete == other.delete &&
+          deleteGroupHint == other.deleteGroupHint &&
+          emptyFolder == other.emptyFolder &&
+          folderName == other.folderName &&
+          moveTo == other.moveTo &&
+          newGroup == other.newGroup &&
+          ok == other.ok &&
+          rename == other.rename &&
+          rootFolder == other.rootFolder &&
           listTitle == other.listTitle &&
           masterPassword == other.masterPassword &&
           myCode == other.myCode &&

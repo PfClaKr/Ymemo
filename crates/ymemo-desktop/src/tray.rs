@@ -116,7 +116,11 @@ mod imp {
             // ksni wants ARGB32 in network byte order, so convert from RGBA.
             let (rgba, w, h) = tray_icon_rgba();
             let mut data = vec![0u8; rgba.len()];
-            for (px, out) in rgba.chunks_exact(4).zip(data.chunks_exact_mut(4)) {
+            // as_chunks over chunks_exact: the pixel width is a constant, so the compiler is
+            // told so once instead of on every iteration (and clippy asks for it).
+            let (pixels, _) = rgba.as_chunks::<4>();
+            let (out_pixels, _) = data.as_chunks_mut::<4>();
+            for (px, out) in pixels.iter().zip(out_pixels.iter_mut()) {
                 out[0] = px[3]; // A
                 out[1] = px[0]; // R
                 out[2] = px[1]; // G

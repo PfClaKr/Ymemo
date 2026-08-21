@@ -397,32 +397,36 @@ impl Vault {
 
     /// Materializes the document into the SQLite cache.
     fn materialize(&mut self) -> Result<()> {
+        // Clears memos, groups **and** attachments, so every one of them has to be written
+        // back below — returning early on any of them would leave the cache short.
         self.store.clear_memos()?;
-        let Some((Value::Object(ObjType::Map), memos)) = self.doc.get(ROOT, "memos")? else {
-            return Ok(()); // no memos yet
-        };
-        let ids: Vec<String> = self.doc.keys(&memos).collect();
-        for id in ids {
-            let Some((Value::Object(ObjType::Map), obj)) = self.doc.get(&memos, &id)? else {
-                continue;
-            };
-            let memo = Memo {
-                id: id.clone(),
-                title: get_str(&self.doc, &obj, "title")?,
-                body: get_str(&self.doc, &obj, "body")?,
-                // color/opacity came later, so old changes may not carry them.
-                color: get_str_or(&self.doc, &obj, "color", crate::DEFAULT_COLOR),
-                opacity: crate::clamp_opacity(get_i64_or(
-                    &self.doc,
-                    &obj,
-                    "opacity",
-                    crate::DEFAULT_OPACITY,
-                )),
-                group_id: get_str_or(&self.doc, &obj, "group_id", ""),
-                created_at: get_i64(&self.doc, &obj, "created_at")?,
-                updated_at: get_i64(&self.doc, &obj, "updated_at")?,
-            };
-            self.store.upsert(&memo)?;
+        // A vault can hold groups and no memos at all: a folder made before the first note.
+        // Skipping the loop is right; skipping the rest of the rebuild is what used to delete
+        // those folders on every merge.
+        if let Some((Value::Object(ObjType::Map), memos)) = self.doc.get(ROOT, "memos")? {
+            let ids: Vec<String> = self.doc.keys(&memos).collect();
+            for id in ids {
+                let Some((Value::Object(ObjType::Map), obj)) = self.doc.get(&memos, &id)? else {
+                    continue;
+                };
+                let memo = Memo {
+                    id: id.clone(),
+                    title: get_str(&self.doc, &obj, "title")?,
+                    body: get_str(&self.doc, &obj, "body")?,
+                    // color/opacity came later, so old changes may not carry them.
+                    color: get_str_or(&self.doc, &obj, "color", crate::DEFAULT_COLOR),
+                    opacity: crate::clamp_opacity(get_i64_or(
+                        &self.doc,
+                        &obj,
+                        "opacity",
+                        crate::DEFAULT_OPACITY,
+                    )),
+                    group_id: get_str_or(&self.doc, &obj, "group_id", ""),
+                    created_at: get_i64(&self.doc, &obj, "created_at")?,
+                    updated_at: get_i64(&self.doc, &obj, "updated_at")?,
+                };
+                self.store.upsert(&memo)?;
+            }
         }
         self.materialize_groups()?;
         self.materialize_attachments()
@@ -1050,5 +1054,25 @@ mod tests {
         assert!(ta == "from A" || ta == "from B");
 
         fs::remove_dir_all(&dir).ok();
+    }
+    /// A group must survive the cache being rebuilt from the logs — the merge timer does that
+    /// every few seconds, so anything it drops disappears while the user is looking at it.
+    #[test]
+    fn rebuild_keeps_groups() {
+        let dir = std::env::temp_dir().join(format!("ymemo-rebuild-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::open(dir.join("cache.db")).unwrap();
+        let mut v = Vault::open_or_create(dir.join("vault"), b"pw", store).unwrap();
+
+        let group = crate::Group::new("work");
+        v.upsert_group(&group).unwrap();
+        assert_eq!(v.store().list_groups().unwrap().len(), 1, "just created");
+
+        v.rebuild().unwrap();
+        let after = v.store().list_groups().unwrap();
+        assert_eq!(after.len(), 1, "the group vanished when the cache was rebuilt");
+        assert_eq!(after[0].name, "work");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

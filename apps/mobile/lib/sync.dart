@@ -17,9 +17,9 @@
 
 import 'dart:io' show Platform;
 
-import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import 'host.dart' as host;
 import 'src/rust/api.dart' as ffi;
 
 /// Where the app keeps the daemon's own state and the synced vault.
@@ -39,8 +39,6 @@ class SyncPaths {
 /// the app has state worth a framework.
 class SyncController extends ChangeNotifier with WidgetsBindingObserver {
   SyncController(this.paths);
-
-  static const MethodChannel _native = MethodChannel('dev.ymemo/native');
 
   /// How long a join broadcasts before giving up. Each attempt costs both sides an Argon2
   /// derivation, so this is a handful of retries, not a busy loop.
@@ -151,13 +149,13 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
     if (!running) return null;
     // Without the multicast lock the wifi stack quietly drops the other device's broadcast.
     // Failing to take it is not fatal: on many devices the packet arrives anyway.
-    await _invoke<bool>('acquireMulticastLock');
+    await host.acquireMulticastLock();
     return ffi.lanStart();
   }
 
   /// Leaves pairing mode and drops the lock. Safe to call when it was never entered.
   Future<void> lanStop() async {
-    await _invoke<void>('releaseMulticastLock');
+    await host.releaseMulticastLock();
     try {
       await ffi.lanStop();
     } catch (_) {
@@ -183,22 +181,9 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> unpair(String deviceId) => ffi.syncUnpair(deviceId: deviceId);
 
-  /// Calls the host, treating an absent implementation as "not available" — every one of
-  /// these is an optimisation the app can live without.
-  Future<T?> _invoke<T>(String method) async {
-    try {
-      return await _native.invokeMethod<T>(method);
-    } on PlatformException catch (e) {
-      debugPrint('$method failed: ${e.message}');
-      return null;
-    } on MissingPluginException {
-      return null;
-    }
-  }
-
   /// The daemon's path, or null where there is none to run.
   Future<String?> _findBinary() async {
     if (!Platform.isAndroid) return null; // iOS cannot exec a bundled binary at all
-    return _invoke<String>('syncBinaryPath');
+    return host.syncBinaryPath();
   }
 }

@@ -18,6 +18,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'src/rust/api.dart';
+import 'host.dart' as host;
 import 'settings.dart';
 import 'src/rust/frb_generated.dart';
 import 'sync.dart';
@@ -94,6 +95,9 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // The app-switcher thumbnail is taken as the app leaves, so the flag has to be on well
+    // before that — not at the moment of leaving.
+    host.setScreenshotBlock(widget.settings.value.lockOnBackground);
     _restoreSession();
   }
 
@@ -295,6 +299,11 @@ class _LockScreenState extends State<LockScreen> {
 }
 
 /// Memo list, with add, open and delete.
+/// Memo list for one folder.
+///
+/// Folders are navigated into rather than drawn as a tree: a phone has no room for indentation
+/// and no hover to expand with, and drilling down also means the screen only ever asks the core
+/// for one level, which no cycle can turn into an infinite walk.
 class MemoListScreen extends StatefulWidget {
   const MemoListScreen({
     super.key,
@@ -303,7 +312,13 @@ class MemoListScreen extends StatefulWidget {
     required this.settings,
     required this.onLock,
     required this.onLanguageChanged,
+    this.groupId = '',
+    this.groupName = '',
   });
+
+  /// The folder being shown; empty is the top level.
+  final String groupId;
+  final String groupName;
 
   final FfiStrings strings;
   final SyncController sync;
@@ -325,15 +340,18 @@ class _MemoListScreenState extends State<MemoListScreen> {
   static const _mergeInterval = Duration(seconds: 15);
 
   List<FfiMemo> _memos = [];
+  List<FfiGroup> _folders = [];
   Timer? _merge;
   FfiRelease? _update;
+
+  bool get _atRoot => widget.groupId.isEmpty;
 
   @override
   void initState() {
     super.initState();
     _reload();
     _merge = Timer.periodic(_mergeInterval, (_) => _mergeNow());
-    _checkForUpdate();
+    if (_atRoot) _checkForUpdate(); // one banner, on the screen you always start from
   }
 
   /// Asks about a newer release at most once a day, and says nothing unless there is one —
@@ -356,8 +374,107 @@ class _MemoListScreenState extends State<MemoListScreen> {
   }
 
   Future<void> _reload() async {
-    final memos = await memoList();
-    if (mounted) setState(() => _memos = memos);
+    // Both come from the core, which lifts a cyclic or orphaned folder — and any memo whose
+    // folder was deleted elsewhere — to the top level rather than leaving it unreachable.
+    final folders = await groupChildren(parentId: widget.groupId);
+    final memos = await memosInGroup(groupId: widget.groupId);
+    if (mounted) {
+      setState(() {
+        _folders = folders;
+        _memos = memos;
+      });
+    }
+  }
+
+  /// Asks for a name and creates a folder inside the one on screen.
+  Future<void> _newFolder() async {
+    final name = await _askForName(context, widget.strings, widget.strings.newGroup, '');
+    if (name == null || name.isEmpty) return;
+    await groupCreate(name: name, parentId: widget.groupId);
+    await _reload();
+  }
+
+  Future<void> _openFolder(FfiGroup folder) async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => MemoListScreen(
+        strings: widget.strings,
+        sync: widget.sync,
+        settings: widget.settings,
+        onLock: widget.onLock,
+        onLanguageChanged: widget.onLanguageChanged,
+        groupId: folder.id,
+        groupName: folder.name,
+      ),
+    ));
+    await _reload(); // it may have been renamed, emptied or filled while we were inside
+  }
+
+  /// Rename or delete, on a long press. Deleting keeps the contents and lifts them up a level,
+  /// which the confirmation says out loud — "delete folder" reads like "delete the memos".
+  Future<void> _folderMenu(FfiGroup folder) async {
+    final s = widget.strings;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.drive_file_rename_outline),
+              title: Text(s.rename),
+              onTap: () => Navigator.of(context).pop('rename'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: Text(s.delete),
+              subtitle: Text(s.deleteGroupHint),
+              onTap: () => Navigator.of(context).pop('delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+
+    if (action == 'rename') {
+      final name = await _askForName(context, s, s.rename, folder.name);
+      if (name != null && name.isNotEmpty) await groupRename(id: folder.id, name: name);
+    } else if (action == 'delete') {
+      await groupDelete(id: folder.id);
+    }
+    await _reload();
+  }
+
+  /// Moves a memo into another folder, chosen from a flat list of every folder there is.
+  Future<void> _moveMemo(FfiMemo memo) async {
+    final s = widget.strings;
+    final folders = await groupList();
+    if (!mounted) return;
+    final target = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            ListTile(title: Text(s.moveTo), enabled: false),
+            ListTile(
+              leading: const Icon(Icons.home_outlined),
+              title: Text(s.rootFolder),
+              onTap: () => Navigator.of(context).pop(''),
+            ),
+            for (final folder in folders)
+              ListTile(
+                leading: const Icon(Icons.folder_outlined),
+                title: Text(folder.name),
+                onTap: () => Navigator.of(context).pop(folder.id),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || target == null) return;
+    await memoSetGroup(id: memo.id, groupId: target);
+    await _reload();
   }
 
   /// Folds in whatever the other devices have delivered, then redraws.
@@ -375,6 +492,7 @@ class _MemoListScreenState extends State<MemoListScreen> {
   /// Creates an empty memo and opens the editor; fewer taps than asking for a title first.
   Future<void> _add() async {
     final id = await memoUpsert(title: '', body: '');
+    if (!_atRoot) await memoSetGroup(id: id, groupId: widget.groupId);
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -398,9 +516,16 @@ class _MemoListScreenState extends State<MemoListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.strings.listTitle),
+        title: Text(_atRoot ? widget.strings.listTitle : widget.groupName),
         actions: [
-          SyncButton(strings: widget.strings, sync: widget.sync),
+          IconButton(
+            icon: const Icon(Icons.create_new_folder_outlined),
+            tooltip: widget.strings.newGroup,
+            onPressed: _newFolder,
+          ),
+          // Pairing, settings and the update banner belong to the screen you always start
+          // from; merging is about content, so it stays available inside a folder too.
+          if (_atRoot) SyncButton(strings: widget.strings, sync: widget.sync),
           IconButton(
             icon: const Icon(Icons.sync),
             tooltip: widget.strings.syncNow,
@@ -408,6 +533,7 @@ class _MemoListScreenState extends State<MemoListScreen> {
             // memo you just wrote on the other device.
             onPressed: _mergeNow,
           ),
+          if (_atRoot)
           IconButton(
             icon: const Icon(Icons.settings),
             tooltip: widget.strings.settings,
@@ -428,11 +554,31 @@ class _MemoListScreenState extends State<MemoListScreen> {
       body: Column(children: [
         if (_update != null)
           UpdateBanner(strings: widget.strings, release: _update!),
+        if (_folders.isEmpty && _memos.isEmpty)
+          Expanded(
+            child: Center(
+              child: Text(
+                widget.strings.emptyFolder,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+          )
+        else
         Expanded(
           child: ListView.builder(
-        itemCount: _memos.length,
+        // Folders first, then memos — the same order the desktop's tree draws them in.
+        itemCount: _folders.length + _memos.length,
         itemBuilder: (context, i) {
-          final memo = _memos[i];
+          if (i < _folders.length) {
+            final folder = _folders[i];
+            return ListTile(
+              leading: const Icon(Icons.folder),
+              title: Text(folder.name),
+              onTap: () => _openFolder(folder),
+              onLongPress: () => _folderMenu(folder),
+            );
+          }
+          final memo = _memos[i - _folders.length];
           return Dismissible(
             key: ValueKey(memo.id),
             direction: DismissDirection.endToStart,
@@ -452,6 +598,7 @@ class _MemoListScreenState extends State<MemoListScreen> {
                   ? null
                   : Text(memo.body, maxLines: 1, overflow: TextOverflow.ellipsis),
               onTap: () => _open(memo),
+              onLongPress: () => _moveMemo(memo),
             ),
           );
         },
@@ -1214,6 +1361,38 @@ class _AttachmentViewState extends State<AttachmentView> {
   }
 }
 
+/// Asks for a folder name, pre-filled when renaming. Null when the user backs out.
+Future<String?> _askForName(
+  BuildContext context,
+  FfiStrings strings,
+  String title,
+  String initial,
+) {
+  final controller = TextEditingController(text: initial);
+  return showDialog<String>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: TextField(
+        controller: controller,
+        autofocus: true,
+        decoration: InputDecoration(labelText: strings.folderName),
+        onSubmitted: (v) => Navigator.of(context).pop(v.trim()),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(strings.cancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+          child: Text(strings.ok),
+        ),
+      ],
+    ),
+  );
+}
+
 /// One line saying a newer release exists, above the memo list.
 ///
 /// Never a dialog and never dismissible-by-accident: it is information, and the app it sits
@@ -1230,7 +1409,7 @@ class UpdateBanner extends StatelessWidget {
     return Material(
       color: scheme.secondaryContainer,
       child: InkWell(
-        onTap: () => openReleasePage(release.url),
+        onTap: () => host.openUrl(release.url),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
@@ -1250,16 +1429,7 @@ class UpdateBanner extends StatelessWidget {
   }
 }
 
-/// Hands the release page to the browser through the host, since Dart cannot start an intent.
-Future<void> openReleasePage(String url) async {
-  try {
-    await const MethodChannel('dev.ymemo/native').invokeMethod<void>('openUrl', url);
-  } on PlatformException catch (e) {
-    debugPrint('could not open $url: ${e.message}');
-  } on MissingPluginException {
-    debugPrint('no host to open $url with');
-  }
-}
+
 
 /// What the last update check concluded; the text for it is built at draw time.
 enum _UpdateState { idle, checking, latest, found, failed }
@@ -1315,6 +1485,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       updateCheck: updateCheck ?? _s.updateCheck,
       lastUpdateCheck: _s.lastUpdateCheck,
     ));
+    // One switch, two protections: closing the vault and keeping the memos out of the app
+    // switcher. Someone who turned it off chose convenience, and hiding their thumbnail
+    // anyway would be deciding for them.
+    if (lockOnBackground != null) {
+      await host.setScreenshotBlock(lockOnBackground);
+    }
     if (!mounted) return;
     setState(() {});
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1442,7 +1618,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ListTile(
               leading: const Icon(Icons.open_in_new),
               title: Text(s.updateOpen),
-              onTap: () => openReleasePage(_update!.url),
+              onTap: () => host.openUrl(_update!.url),
             ),
 
           const Divider(),

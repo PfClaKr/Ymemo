@@ -172,8 +172,15 @@ flutter build ios --no-codesign
 - **Lock** — open the vault with the master password, creating it if needed. Reachable from
   here, before any password: **Sync devices**, because a new install has to pair and receive
   `vault.json` before there is anything to unlock.
-- **List** — the memos; swipe to delete, + to add. Logs that have arrived are merged every
-  15s (`sync_rebuild`), and the sync button does it now.
+- **List** — one folder at a time: subfolders first, then its memos. Tapping a folder goes
+  into it, long-pressing one offers rename and delete (delete keeps the contents and lifts
+  them up a level), and long-pressing a memo moves it to another folder. Swipe to delete, +
+  adds a memo **to the folder on screen**. Logs that have arrived are merged every 15s
+  (`sync_rebuild`), and the sync button does it now.
+
+  Folders are navigated rather than drawn as a tree: a phone has no room for indentation, and
+  drilling down means the screen only ever asks the core for one level, which no cycle in the
+  group graph can turn into an endless walk.
 - **Editor** — title and body, saved on back or the check mark, and skipped when nothing
   changed.
 - **Sync devices** — the 6-digit LAN code and a field for the other device's, this device's
@@ -244,8 +251,10 @@ must match `ndkVersion` in `android/app/build.gradle.kts`.
 Two settings, deliberately separate:
 
 - **Lock when the app is left** (default on) closes the vault the moment the app goes to the
-  background, so the memos are not sitting open behind the app switcher. It **keeps** the
-  stored key: this is not the user saying "ask me again".
+  background, and sets `FLAG_SECURE` so the app-switcher thumbnail and screenshots show
+  nothing — the thumbnail is captured on the way out, so the flag has to be set in advance
+  rather than at that moment. It **keeps** the stored key: this is not the user saying "ask me
+  again". Turning it off drops both protections, which is the point of turning it off.
 - **Stay unlocked for N days** (default 0 — ask every time) is what decides when the password
   is really needed. The key derived from it goes to `flutter_secure_storage`
   (EncryptedSharedPreferences behind a keystore-held key), never to a plain file. The expiry is
@@ -269,7 +278,7 @@ new device is supposed to get the memos.
       NAT, so it cannot exchange LAN broadcasts with anything, and this build did not bundle
       `libsyncthing.so`. Two real devices, or a device and the desktop, are what is left.
 - [ ] Show this device's pairing code as a QR too, so the desktop is not left with typing.
-- [ ] Group (folder) screen — the FFI (`group_*`) exists, only the Dart UI is missing.
 - [ ] cargokit integration, so gradle and Xcode build the Rust automatically.
-- [ ] `FLAG_SECURE` while unlocked, so the app switcher thumbnail does not show memo text.
-- [ ] Idle auto-lock (a timeout while the app is open), the desktop's `idle_lock_minutes`.
+- [ ] Idle auto-lock while the app is open (the desktop's `idle_lock_minutes`) — **decided
+      against for now**: on a phone the screen lock already covers walking away, and leaving
+      it out keeps one switch rather than two doing nearly the same thing.
