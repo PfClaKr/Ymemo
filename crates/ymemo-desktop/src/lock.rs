@@ -25,6 +25,7 @@ pub(crate) fn fill_settings_window(ctx: &Ctx, win: &SettingsWindow) {
     win.set_default_color(SharedString::from(s.default_color.clone()));
     win.set_default_opacity(s.default_opacity);
     win.set_merge_seconds(s.merge_seconds);
+    win.set_update_check(s.update_check);
 }
 
 /// Applies the language to **every** window.

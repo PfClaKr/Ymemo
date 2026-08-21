@@ -144,6 +144,11 @@ the desktop inside a Fedora container for library compatibility.
 - **Device linking** — by QR/pairing code, or by a **6-digit code** on the same LAN. Linked
   devices can be listed and revoked.
 - **Korean and English** — detected from the system locale, changeable in settings.
+- **Update check** — asks GitHub about once a day whether a newer release exists, and says so
+  in the list window and settings. It only ever tells you: nothing is downloaded and nothing
+  is installed. This is the **only** request the app makes to anyone's server — no vault data,
+  no device id, nothing identifying travels with it — but your address does reach GitHub, so
+  it can be switched off in settings.
 
 ## Roadmap
 
@@ -154,7 +159,8 @@ the desktop inside a Fedora container for library compatibility.
 - [x] **Phase 4a** — desktop locking (manual, idle, timed auto-unlock), settings, ko/en
 - [x] Packaging and CI — `.deb`, `.rpm` and a Windows installer from a release tag
 - [x] **Phase 4b** — photo attachments (encrypted blobs, platform-independent display size)
-- [ ] Flutter mobile app (the `ymemo-ffi` layer is ready) plus mobile Syncthing (gomobile `.aar`)
+- [x] Flutter mobile app, with the same bundled Syncthing and both pairing paths
+- [ ] Mobile update notice and a mobile settings screen to switch it off
 - [ ] macOS support (tray, packaging)
 
 ## License

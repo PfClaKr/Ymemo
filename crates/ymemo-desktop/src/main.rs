@@ -44,6 +44,7 @@ mod state;
 mod sticky;
 mod sync;
 mod tray;
+mod update;
 
 use icon::set_window_icon;
 use list::{move_row, refresh_list};
@@ -445,6 +446,10 @@ fn main() -> Result<()> {
                 default_color: w.get_default_color().to_string(),
                 default_opacity: w.get_default_opacity(),
                 merge_seconds: w.get_merge_seconds(),
+                update_check: w.get_update_check(),
+                // Not a user-visible field: keep whatever the last check recorded, so saving
+                // settings does not silently schedule another request.
+                last_update_check: ctx.settings.borrow().last_update_check,
             };
             next.sanitize();
             let prev_unlock_days = ctx.settings.borrow().unlock_days;
@@ -535,6 +540,7 @@ fn main() -> Result<()> {
         *a.borrow_mut() = Some(AppUi {
             lock: lock.clone_strong(),
             list: list.clone_strong(),
+            settings: settings_win.clone_strong(),
             unlocked: unlocked.clone(),
             ctx: ctx.clone(),
         })
@@ -558,6 +564,20 @@ fn main() -> Result<()> {
             }
         });
     }
+
+    // ---- Update check ----
+    // Once a day at most, and only if the user has left it on. Silent unless it finds
+    // something: an offline machine should not be told about its own network.
+    if ctx.settings.borrow().update_check_due() {
+        update::spawn_check(&ctx, false);
+    }
+    {
+        let ctx = ctx.clone();
+        // The button asks regardless of the daily gap, and says what came back.
+        settings_win.on_check_update(move || update::spawn_check(&ctx, true));
+    }
+    settings_win.on_open_update(update::open_release_page);
+    list.on_open_update(update::open_release_page);
 
     // Do not raise the lock window when the session already unlocked us.
     if !auto_unlocked {
