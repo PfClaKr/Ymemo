@@ -332,6 +332,26 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
+    // Past versions of this memo. The window belongs to main, so it is reached through the
+    // same thread_local the tray uses.
+    {
+        let id = memo.id.clone();
+        window.on_show_history(move || {
+            APP.with(|a| {
+                let borrow = a.borrow();
+                let Some(app) = borrow.as_ref() else { return };
+                touch(&app.ctx);
+                crate::history::show(
+                    &app.ctx,
+                    &app.history,
+                    &app.history_subject,
+                    ymemo_core::history::Entity::Memo,
+                    &id,
+                );
+            });
+        });
+    }
+
     // Resize a photo. The value is in em, so mobile sees the same proportion.
     {
         let ctx = ctx.clone();

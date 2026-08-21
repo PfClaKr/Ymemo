@@ -48,6 +48,8 @@ export component ListWindow inherits Window {
     callback rename-group(string, string); // id, new name
     // id, is-group, palette key. Folders and memos both carry a colour and both sync it.
     callback set-row-color(string, bool, string);
+    // id, is-group: opens the past versions of that row.
+    callback show-history(string, bool);
     // Row whose inline palette is open; empty means none.
     in-out property <string> coloring-id: "";
     callback delete-row(string, bool);     // id, is-group
@@ -308,6 +310,28 @@ export component ListWindow inherits Window {
                         overflow: elide;
                         horizontal-stretch: 1;
                     }
+
+                    // Past versions, for folders and memos alike. Only on hover, so it
+                    // never competes with the name for room.
+                    if root.coloring-id != row.id: Rectangle {
+                        width: 20px;
+                        opacity: ta.has-hover || hist-ta.has-hover ? 1 : 0;
+                        Text {
+                            text: "⟲";
+                            font-size: 14px;
+                            color: #b0a99a;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        hist-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.commit-edit();
+                                root.show-history(row.id, row.is-group);
+                            }
+                        }
+                    }
+
 
                     if row.is-group: Text {
                         text: row.child-count > 0 ? row.child-count : "";

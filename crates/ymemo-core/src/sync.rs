@@ -17,6 +17,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// How long old file versions are kept: 30 days, after which staggered versioning drops
+/// them. Long enough to notice a vault that lost records, short enough to bound the disk.
+const MAX_VERSION_AGE_SECONDS: u64 = 30 * 24 * 60 * 60;
+
 /// How long to wait for a first start, key generation included.
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -202,6 +206,39 @@ impl Syncthing {
                 "fsWatcherEnabled": true,
                 "rescanIntervalS": 60,
             }))?;
+        Ok(())
+    }
+
+    /// Turns on Syncthing's file versioning for the vault folder, if it has none.
+    ///
+    /// **This is a backup, not the history.** A memo's past lives in the change logs and is
+    /// read from there ([`crate::history`]). What this protects against is the other kind of
+    /// loss: a log truncated by a full disk or a crash syncs that truncation to every device,
+    /// and the records past the cut are gone everywhere at once. A kept copy is the only way
+    /// back from that.
+    ///
+    /// Staggered rather than the simpler schemes, because logs are appended to constantly:
+    /// every sync of a changed log would archive the version before it, and a scheme that
+    /// keeps them all would outgrow the vault. Staggered thins as versions age — hourly for
+    /// a day, daily for a month — so the cost stays bounded.
+    ///
+    /// Versions live in `.stversions` inside the folder, which Syncthing does not sync, so
+    /// each device keeps its own and nothing new travels between them.
+    pub fn ensure_versioning(&self, folder_id: &str) -> Result<()> {
+        let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
+        let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
+        let mut folder: serde_json::Value = res.body_mut().read_json()?;
+
+        // Leave a configuration the user chose alone; only an unset one is filled in.
+        if folder["versioning"]["type"].as_str().is_some_and(|t| !t.is_empty()) {
+            return Ok(());
+        }
+        folder["versioning"] = serde_json::json!({
+            "type": "staggered",
+            "params": { "maxAge": MAX_VERSION_AGE_SECONDS.to_string() },
+            "cleanupIntervalS": 3600,
+        });
+        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
         Ok(())
     }
 

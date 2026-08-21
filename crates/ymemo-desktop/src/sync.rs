@@ -98,6 +98,10 @@ pub(crate) fn start_syncthing(data_dir: &std::path::Path, vault_dir: &std::path:
             if let Err(e) = st.ensure_folder(SYNC_FOLDER_ID, "Ymemo Vault", vault_dir) {
                 eprintln!("could not register the shared folder: {e}");
             }
+            // A safety net under the logs, not the memo history — see the core's docs.
+            if let Err(e) = st.ensure_versioning(SYNC_FOLDER_ID) {
+                eprintln!("could not enable vault file versioning: {e}");
+            }
             Some(st)
         }
         Err(e) => {

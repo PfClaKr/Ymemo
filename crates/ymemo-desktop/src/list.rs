@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use slint::{SharedString, VecModel};
+use slint::{ComponentHandle, SharedString, VecModel};
 use ymemo_core::{now_millis, vault::Vault, Memo};
 
 use crate::state::Ctx;
@@ -162,6 +162,29 @@ pub(crate) fn set_row_color(ctx: &Ctx, id: &str, is_group: bool, color: &str) {
         return;
     }
     refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+}
+
+/// Redraws the list, and an open sticky, after a history restore put old values back.
+///
+/// The borrow is opened here rather than passed in: the caller has just finished writing
+/// through its own, and reaching through `Ctx` while one is still live is what used to kill
+/// the app (see `sync::start_merge_timer`).
+pub(crate) fn refresh_after_restore(ctx: &Ctx, entity: ymemo_core::history::Entity, id: &str) {
+    let guard = ctx.vault.borrow();
+    let Some(v) = guard.as_ref() else { return };
+    refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+
+    if entity == ymemo_core::history::Entity::Memo {
+        if let (Ok(Some(memo)), Some(entry)) = (v.store().get(id), ctx.stickies.borrow().get(id)) {
+            entry.window.set_memo_text(crate::sticky::sticky_text(&memo).into());
+            entry.window.set_memo_title(memo.title.into());
+            entry.window.set_sticky_color(memo.color.into());
+            entry.window.set_sticky_opacity(memo.opacity as f32);
+            // The restore is the current text now, so nothing is waiting to be saved.
+            entry.dirty.set(false);
+            entry.window.window().request_redraw();
+        }
+    }
 }
 
 pub(crate) fn memo_row(memo: &Memo, depth: i32) -> ListRow {

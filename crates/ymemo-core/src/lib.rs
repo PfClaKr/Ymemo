@@ -9,6 +9,7 @@
 pub mod blob;
 pub mod changelog;
 pub mod crypto;
+pub mod history;
 pub mod lan_pair;
 pub mod pairing;
 pub mod recovery;

@@ -151,6 +151,9 @@ the desktop inside a Fedora container for library compatibility.
   rather than pixels, so shrinking it on a phone shrinks it proportionally on the desktop.
 - **Groups** — a nestable folder tree with drag and drop. Folders carry a colour of their
   own, and it syncs like a memo's.
+- **History** — every past version of a memo or folder, with when it changed, which device
+  changed it and what it held at the time; any of them can be put back. It is read from the
+  change logs, which already are the history, so nothing extra is stored to keep it.
 - **Locking** — master password, instant lock from the tray, idle auto-lock, and optionally
   staying unlocked for a set period (a device-local session key, never synced).
 - **Password and recovery** — change the master password from the settings window, and keep a
