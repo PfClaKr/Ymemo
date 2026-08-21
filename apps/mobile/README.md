@@ -244,8 +244,10 @@ must match `ndkVersion` in `android/app/build.gradle.kts`.
 Two settings, deliberately separate:
 
 - **Lock when the app is left** (default on) closes the vault the moment the app goes to the
-  background, so the memos are not sitting open behind the app switcher. It **keeps** the
-  stored key: this is not the user saying "ask me again".
+  background, and sets `FLAG_SECURE` so the app-switcher thumbnail and screenshots show
+  nothing — the thumbnail is captured on the way out, so the flag has to be set in advance
+  rather than at that moment. It **keeps** the stored key: this is not the user saying "ask me
+  again". Turning it off drops both protections, which is the point of turning it off.
 - **Stay unlocked for N days** (default 0 — ask every time) is what decides when the password
   is really needed. The key derived from it goes to `flutter_secure_storage`
   (EncryptedSharedPreferences behind a keystore-held key), never to a plain file. The expiry is
@@ -269,7 +271,7 @@ new device is supposed to get the memos.
       NAT, so it cannot exchange LAN broadcasts with anything, and this build did not bundle
       `libsyncthing.so`. Two real devices, or a device and the desktop, are what is left.
 - [ ] Show this device's pairing code as a QR too, so the desktop is not left with typing.
-- [ ] Group (folder) screen — the FFI (`group_*`) exists, only the Dart UI is missing.
 - [ ] cargokit integration, so gradle and Xcode build the Rust automatically.
-- [ ] `FLAG_SECURE` while unlocked, so the app switcher thumbnail does not show memo text.
-- [ ] Idle auto-lock (a timeout while the app is open), the desktop's `idle_lock_minutes`.
+- [ ] Idle auto-lock while the app is open (the desktop's `idle_lock_minutes`) — **decided
+      against for now**: on a phone the screen lock already covers walking away, and leaving
+      it out keeps one switch rather than two doing nearly the same thing.

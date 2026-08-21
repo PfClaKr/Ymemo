@@ -18,6 +18,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'src/rust/api.dart';
+import 'host.dart' as host;
 import 'settings.dart';
 import 'src/rust/frb_generated.dart';
 import 'sync.dart';
@@ -94,6 +95,9 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // The app-switcher thumbnail is taken as the app leaves, so the flag has to be on well
+    // before that — not at the moment of leaving.
+    host.setScreenshotBlock(widget.settings.value.lockOnBackground);
     _restoreSession();
   }
 
@@ -1230,7 +1234,7 @@ class UpdateBanner extends StatelessWidget {
     return Material(
       color: scheme.secondaryContainer,
       child: InkWell(
-        onTap: () => openReleasePage(release.url),
+        onTap: () => host.openUrl(release.url),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
@@ -1315,6 +1319,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       updateCheck: updateCheck ?? _s.updateCheck,
       lastUpdateCheck: _s.lastUpdateCheck,
     ));
+    // One switch, two protections: closing the vault and keeping the memos out of the app
+    // switcher. Someone who turned it off chose convenience, and hiding their thumbnail
+    // anyway would be deciding for them.
+    if (lockOnBackground != null) {
+      await host.setScreenshotBlock(lockOnBackground);
+    }
     if (!mounted) return;
     setState(() {});
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1442,7 +1452,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ListTile(
               leading: const Icon(Icons.open_in_new),
               title: Text(s.updateOpen),
-              onTap: () => openReleasePage(_update!.url),
+              onTap: () => host.openUrl(_update!.url),
             ),
 
           const Divider(),
