@@ -1,6 +1,8 @@
 package dev.ymemo.ymemo_mobile
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.net.wifi.WifiManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -8,13 +10,15 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
 /**
- * The two things Dart cannot do for itself.
+ * The three things Dart cannot do for itself.
  *
  * **Where the sync daemon's executable is.** Since Android 10 an app may only execute a binary
  * from its native library directory, so syncthing ships as `libsyncthing.so` in `jniLibs/` and
  * runs from wherever the installer unpacked it. `applicationInfo.nativeLibraryDir` is
  * per-install and per-ABI and no plugin exposes it. `null` means this build has no daemon, and
  * Dart then runs local-only rather than failing.
+ *
+ * **Opening a link.** The update notice points at the release page, which needs an intent.
  *
  * **Hearing the LAN pairing broadcast.** The wifi stack drops packets that are not addressed
  * to this device unless a multicast lock is held, which would silently cost us every pairing
@@ -31,6 +35,7 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "syncBinaryPath" -> result.success(syncBinaryPath())
+                    "openUrl" -> result.success(openUrl(call.arguments as? String))
                     "acquireMulticastLock" -> result.success(acquireMulticastLock())
                     "releaseMulticastLock" -> {
                         releaseMulticastLock()
@@ -52,6 +57,17 @@ class MainActivity : FlutterActivity() {
         // Packaged with useLegacyPackaging, so it is a real file on disk; a build without the
         // daemon simply has nothing here.
         return if (file.canExecute()) file.absolutePath else null
+    }
+
+    /** Hands a URL to the browser. False when there is nothing on the device to open it. */
+    private fun openUrl(url: String?): Boolean {
+        if (url.isNullOrEmpty()) return false
+        return try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            true
+        } catch (e: Exception) {
+            false
+        }
     }
 
     /** Returns whether the lock is held; pairing is worth attempting either way. */

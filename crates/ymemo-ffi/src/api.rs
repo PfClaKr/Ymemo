@@ -147,6 +147,26 @@ pub struct FfiStrings {
     pub lan_not_found: String,
     pub lan_pairing: String,
     pub lan_searching: String,
+    pub days_unit: String,
+    pub language: String,
+    pub language_auto: String,
+    pub lock_now: String,
+    pub lock_on_background: String,
+    pub lock_on_background_hint: String,
+    pub lock_section: String,
+    pub saved: String,
+    pub settings: String,
+    pub unlock_days: String,
+    pub unlock_days_hint: String,
+    pub update_available: String,
+    pub update_check: String,
+    pub update_check_hint: String,
+    pub update_checking: String,
+    pub update_latest: String,
+    pub update_now: String,
+    pub update_open: String,
+    pub update_section: String,
+    pub version: String,
     pub list_title: String,
     pub master_password: String,
     pub my_code: String,
@@ -190,6 +210,26 @@ pub fn mobile_strings() -> FfiStrings {
         lan_not_found: t!("mobile.lan_not_found"),
         lan_pairing: t!("mobile.lan_pairing"),
         lan_searching: t!("mobile.lan_searching"),
+        days_unit: t!("mobile.days_unit"),
+        language: t!("mobile.language"),
+        language_auto: t!("mobile.language_auto"),
+        lock_now: t!("mobile.lock_now"),
+        lock_on_background: t!("mobile.lock_on_background"),
+        lock_on_background_hint: t!("mobile.lock_on_background_hint"),
+        lock_section: t!("mobile.lock_section"),
+        saved: t!("mobile.saved"),
+        settings: t!("mobile.settings"),
+        unlock_days: t!("mobile.unlock_days"),
+        unlock_days_hint: t!("mobile.unlock_days_hint"),
+        update_available: t!("mobile.update_available"),
+        update_check: t!("mobile.update_check"),
+        update_check_hint: t!("mobile.update_check_hint"),
+        update_checking: t!("mobile.update_checking"),
+        update_latest: t!("mobile.update_latest"),
+        update_now: t!("mobile.update_now"),
+        update_open: t!("mobile.update_open"),
+        update_section: t!("mobile.update_section"),
+        version: t!("mobile.version"),
         list_title: t!("mobile.list_title"),
         master_password: t!("mobile.master_password"),
         my_code: t!("mobile.my_code"),
@@ -721,4 +761,139 @@ mod tests {
     fn uuid_like() -> String {
         format!("{}-{}", std::process::id(), now_millis())
     }
+}
+
+// ===========================================================================
+// Device-local settings
+// ===========================================================================
+//
+// The mobile counterpart of the desktop's `settings.json`, and the same rule applies: this is
+// **device-local and never synced**. It lives in the app's private directory, not in the vault
+// directory, because a synced preference would mean one device deciding another's language.
+//
+// Dart passes the path rather than the app deriving one: the platform directories are the
+// Flutter side's business, exactly as they are for the vault.
+
+/// Preferences as Dart sees them. Every field has a default, so a file written by an older
+/// version still loads.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct FfiSettings {
+    /// `"auto"` (system locale), `"ko"` or `"en"`.
+    pub lang: String,
+    /// Days the vault reopens without the password after one unlock; 0 asks every time.
+    pub unlock_days: i32,
+    /// Close the vault when the app leaves the foreground.
+    pub lock_on_background: bool,
+    /// Ask GitHub about newer releases. The app's only outbound request.
+    pub update_check: bool,
+    /// When that last happened (epoch millis), so it is not asked on every start.
+    pub last_update_check: i64,
+}
+
+impl Default for FfiSettings {
+    fn default() -> Self {
+        Self {
+            lang: "auto".into(),
+            unlock_days: 0,
+            lock_on_background: true,
+            update_check: true,
+            last_update_check: 0,
+        }
+    }
+}
+
+impl FfiSettings {
+    /// Clamps everything on the way in and out, so a hand-edited file cannot put the app in a
+    /// state its own UI could not produce.
+    fn sanitize(&mut self) {
+        if self.lang != "auto" && ymemo_i18n::Lang::parse(&self.lang).is_none() {
+            self.lang = "auto".into();
+        }
+        self.unlock_days = self.unlock_days.clamp(0, UNLOCK_DAYS_MAX);
+        if self.last_update_check < 0 || self.last_update_check > now_millis() {
+            self.last_update_check = 0;
+        }
+    }
+}
+
+/// Longest stay-unlocked window, matching the desktop's.
+pub const UNLOCK_DAYS_MAX: i32 = 365;
+
+/// Reads the settings; a missing or damaged file gives the defaults rather than an error,
+/// since preferences must never be what stops the app from starting.
+pub fn settings_load(path: String) -> FfiSettings {
+    let mut settings = std::fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<FfiSettings>(&bytes).ok())
+        .unwrap_or_default();
+    settings.sanitize();
+    settings
+}
+
+/// Writes the settings back, sanitized. Returns the values as stored, so the screen can show
+/// what was actually kept.
+pub fn settings_save(path: String, settings: FfiSettings) -> Result<FfiSettings> {
+    let mut settings = settings;
+    settings.sanitize();
+    std::fs::write(&path, serde_json::to_vec_pretty(&settings)?)?;
+    Ok(settings)
+}
+
+// ===========================================================================
+// Staying unlocked
+// ===========================================================================
+//
+// The key derived from the master password, handed out so the caller can keep it and reopen
+// the vault without asking again. **While a copy of that key exists, the password buys
+// nothing** — whoever can read it can read the memos. That is the inherent cost of "stay
+// unlocked", the same one the desktop pays; on a phone the copy belongs in the platform's
+// keystore, and `unlock_days = 0` (ask every time) stays a supported answer.
+
+/// The open vault's key, for caching. Only meaningful right after an unlock.
+pub fn vault_key() -> Result<Vec<u8>> {
+    with_vault(|v| Ok(v.key_bytes().to_vec()))
+}
+
+/// Reopens the vault with a cached key instead of the password.
+///
+/// This **skips the divergent-key healing** that `vault_open` does, because healing needs the
+/// password to re-derive old keys. A vault that has diverged therefore fails here; the caller
+/// is expected to drop the cached key and ask for the password, which is exactly what the
+/// desktop does.
+pub fn vault_open_with_key(vault_dir: String, cache_db_path: String, key: Vec<u8>) -> Result<()> {
+    let bytes: [u8; ymemo_core::crypto::KEY_LEN] = key
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow!(t!("core.session_key_bad")))?;
+    let store = Store::open(&cache_db_path)?;
+    let vault = Vault::open_with_key(&vault_dir, ymemo_core::crypto::MasterKey::from_bytes(&bytes)?, store)?;
+    *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = Some(vault);
+    Ok(())
+}
+
+// ===========================================================================
+// Update check
+// ===========================================================================
+
+/// A release newer than the running build.
+pub struct FfiRelease {
+    pub version: String,
+    /// The release page; the app opens it and installs nothing itself.
+    pub url: String,
+}
+
+/// The running build's version — the same number the release tag carries, since CI checks
+/// the two against each other. Shown in settings, where it is what a bug report needs.
+pub fn app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// Asks GitHub whether there is a newer release. `None` means this build is current.
+///
+/// The **only** request the app makes to anyone's server, which is why it sits behind a
+/// setting; see `ymemo_core::update` for what it does and does not send.
+pub fn update_check() -> Result<Option<FfiRelease>> {
+    Ok(ymemo_core::update::check(env!("CARGO_PKG_VERSION"))?
+        .map(|r| FfiRelease { version: r.version, url: r.url }))
 }

@@ -30,6 +30,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool dco_decode_bool(dynamic raw);
 
   @protected
+  FfiRelease dco_decode_box_autoadd_ffi_release(dynamic raw);
+
+  @protected
+  FfiSettings dco_decode_box_autoadd_ffi_settings(dynamic raw);
+
+  @protected
   FfiAttachment dco_decode_ffi_attachment(dynamic raw);
 
   @protected
@@ -39,10 +45,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FfiMemo dco_decode_ffi_memo(dynamic raw);
 
   @protected
+  FfiRelease dco_decode_ffi_release(dynamic raw);
+
+  @protected
+  FfiSettings dco_decode_ffi_settings(dynamic raw);
+
+  @protected
   FfiSharedDevice dco_decode_ffi_shared_device(dynamic raw);
 
   @protected
   FfiStrings dco_decode_ffi_strings(dynamic raw);
+
+  @protected
+  int dco_decode_i_32(dynamic raw);
 
   @protected
   PlatformInt64 dco_decode_i_64(dynamic raw);
@@ -72,6 +87,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
+  FfiRelease? dco_decode_opt_box_autoadd_ffi_release(dynamic raw);
+
+  @protected
   BigInt dco_decode_u_64(dynamic raw);
 
   @protected
@@ -90,6 +108,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
+  FfiRelease sse_decode_box_autoadd_ffi_release(SseDeserializer deserializer);
+
+  @protected
+  FfiSettings sse_decode_box_autoadd_ffi_settings(SseDeserializer deserializer);
+
+  @protected
   FfiAttachment sse_decode_ffi_attachment(SseDeserializer deserializer);
 
   @protected
@@ -99,10 +123,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FfiMemo sse_decode_ffi_memo(SseDeserializer deserializer);
 
   @protected
+  FfiRelease sse_decode_ffi_release(SseDeserializer deserializer);
+
+  @protected
+  FfiSettings sse_decode_ffi_settings(SseDeserializer deserializer);
+
+  @protected
   FfiSharedDevice sse_decode_ffi_shared_device(SseDeserializer deserializer);
 
   @protected
   FfiStrings sse_decode_ffi_strings(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
   PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
@@ -134,6 +167,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
+  FfiRelease? sse_decode_opt_box_autoadd_ffi_release(
+      SseDeserializer deserializer);
+
+  @protected
   BigInt sse_decode_u_64(SseDeserializer deserializer);
 
   @protected
@@ -141,9 +178,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_decode_unit(SseDeserializer deserializer);
-
-  @protected
-  int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
   void sse_encode_AnyhowException(
@@ -156,6 +190,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bool(bool self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_ffi_release(
+      FfiRelease self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_ffi_settings(
+      FfiSettings self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_attachment(FfiAttachment self, SseSerializer serializer);
 
   @protected
@@ -165,11 +207,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_ffi_memo(FfiMemo self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_release(FfiRelease self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_settings(FfiSettings self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_shared_device(
       FfiSharedDevice self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_strings(FfiStrings self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
@@ -202,6 +253,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_ffi_release(
+      FfiRelease? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_u_64(BigInt self, SseSerializer serializer);
 
   @protected
@@ -209,9 +264,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_unit(void self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_i_32(int self, SseSerializer serializer);
 }
 
 // Section: wire_class

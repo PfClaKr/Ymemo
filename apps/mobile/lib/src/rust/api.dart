@@ -6,8 +6,8 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `lan_lock`, `share_with_peer`, `sync_lock`, `with_sync`, `with_vault`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `from`, `from`, `from`
+// These functions are ignored because they are not marked as `pub`: `lan_lock`, `sanitize`, `share_with_peer`, `sync_lock`, `with_sync`, `with_vault`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `fmt`, `from`, `from`, `from`
 
 /// Sets the language of core error messages (`"ko"`, `"en"`, or a locale like `"ko-KR"`).
 ///
@@ -189,6 +189,43 @@ Future<List<String>> lanPollPaired() =>
 Future<String?> lanJoin({required String code, required BigInt timeoutSecs}) =>
     RustLib.instance.api.crateApiLanJoin(code: code, timeoutSecs: timeoutSecs);
 
+/// Reads the settings; a missing or damaged file gives the defaults rather than an error,
+/// since preferences must never be what stops the app from starting.
+Future<FfiSettings> settingsLoad({required String path}) =>
+    RustLib.instance.api.crateApiSettingsLoad(path: path);
+
+/// Writes the settings back, sanitized. Returns the values as stored, so the screen can show
+/// what was actually kept.
+Future<FfiSettings> settingsSave(
+        {required String path, required FfiSettings settings}) =>
+    RustLib.instance.api.crateApiSettingsSave(path: path, settings: settings);
+
+/// The open vault's key, for caching. Only meaningful right after an unlock.
+Future<Uint8List> vaultKey() => RustLib.instance.api.crateApiVaultKey();
+
+/// Reopens the vault with a cached key instead of the password.
+///
+/// This **skips the divergent-key healing** that `vault_open` does, because healing needs the
+/// password to re-derive old keys. A vault that has diverged therefore fails here; the caller
+/// is expected to drop the cached key and ask for the password, which is exactly what the
+/// desktop does.
+Future<void> vaultOpenWithKey(
+        {required String vaultDir,
+        required String cacheDbPath,
+        required List<int> key}) =>
+    RustLib.instance.api.crateApiVaultOpenWithKey(
+        vaultDir: vaultDir, cacheDbPath: cacheDbPath, key: key);
+
+/// The running build's version — the same number the release tag carries, since CI checks
+/// the two against each other. Shown in settings, where it is what a bug report needs.
+Future<String> appVersion() => RustLib.instance.api.crateApiAppVersion();
+
+/// Asks GitHub whether there is a newer release. `None` means this build is current.
+///
+/// The **only** request the app makes to anyone's server, which is why it sits behind a
+/// setting; see `ymemo_core::update` for what it does and does not send.
+Future<FfiRelease?> updateCheck() => RustLib.instance.api.crateApiUpdateCheck();
+
 /// A photo attachment as handed to Dart.
 ///
 /// The bytes are not included: photos run to megabytes and carrying them in every list
@@ -332,6 +369,79 @@ class FfiMemo {
           updatedAt == other.updatedAt;
 }
 
+/// A release newer than the running build.
+class FfiRelease {
+  final String version;
+
+  /// The release page; the app opens it and installs nothing itself.
+  final String url;
+
+  const FfiRelease({
+    required this.version,
+    required this.url,
+  });
+
+  @override
+  int get hashCode => version.hashCode ^ url.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiRelease &&
+          runtimeType == other.runtimeType &&
+          version == other.version &&
+          url == other.url;
+}
+
+/// Preferences as Dart sees them. Every field has a default, so a file written by an older
+/// version still loads.
+class FfiSettings {
+  /// `"auto"` (system locale), `"ko"` or `"en"`.
+  final String lang;
+
+  /// Days the vault reopens without the password after one unlock; 0 asks every time.
+  final int unlockDays;
+
+  /// Close the vault when the app leaves the foreground.
+  final bool lockOnBackground;
+
+  /// Ask GitHub about newer releases. The app's only outbound request.
+  final bool updateCheck;
+
+  /// When that last happened (epoch millis), so it is not asked on every start.
+  final PlatformInt64 lastUpdateCheck;
+
+  const FfiSettings({
+    required this.lang,
+    required this.unlockDays,
+    required this.lockOnBackground,
+    required this.updateCheck,
+    required this.lastUpdateCheck,
+  });
+
+  static Future<FfiSettings> default_() =>
+      RustLib.instance.api.crateApiFfiSettingsDefault();
+
+  @override
+  int get hashCode =>
+      lang.hashCode ^
+      unlockDays.hashCode ^
+      lockOnBackground.hashCode ^
+      updateCheck.hashCode ^
+      lastUpdateCheck.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiSettings &&
+          runtimeType == other.runtimeType &&
+          lang == other.lang &&
+          unlockDays == other.unlockDays &&
+          lockOnBackground == other.lockOnBackground &&
+          updateCheck == other.updateCheck &&
+          lastUpdateCheck == other.lastUpdateCheck;
+}
+
 /// Another device sharing this vault.
 class FfiSharedDevice {
   /// Syncthing device id — also what unpairing takes.
@@ -382,6 +492,26 @@ class FfiStrings {
   final String lanNotFound;
   final String lanPairing;
   final String lanSearching;
+  final String daysUnit;
+  final String language;
+  final String languageAuto;
+  final String lockNow;
+  final String lockOnBackground;
+  final String lockOnBackgroundHint;
+  final String lockSection;
+  final String saved;
+  final String settings;
+  final String unlockDays;
+  final String unlockDaysHint;
+  final String updateAvailable;
+  final String updateCheck;
+  final String updateCheckHint;
+  final String updateChecking;
+  final String updateLatest;
+  final String updateNow;
+  final String updateOpen;
+  final String updateSection;
+  final String version;
   final String listTitle;
   final String masterPassword;
   final String myCode;
@@ -422,6 +552,26 @@ class FfiStrings {
     required this.lanNotFound,
     required this.lanPairing,
     required this.lanSearching,
+    required this.daysUnit,
+    required this.language,
+    required this.languageAuto,
+    required this.lockNow,
+    required this.lockOnBackground,
+    required this.lockOnBackgroundHint,
+    required this.lockSection,
+    required this.saved,
+    required this.settings,
+    required this.unlockDays,
+    required this.unlockDaysHint,
+    required this.updateAvailable,
+    required this.updateCheck,
+    required this.updateCheckHint,
+    required this.updateChecking,
+    required this.updateLatest,
+    required this.updateNow,
+    required this.updateOpen,
+    required this.updateSection,
+    required this.version,
     required this.listTitle,
     required this.masterPassword,
     required this.myCode,
@@ -464,6 +614,26 @@ class FfiStrings {
       lanNotFound.hashCode ^
       lanPairing.hashCode ^
       lanSearching.hashCode ^
+      daysUnit.hashCode ^
+      language.hashCode ^
+      languageAuto.hashCode ^
+      lockNow.hashCode ^
+      lockOnBackground.hashCode ^
+      lockOnBackgroundHint.hashCode ^
+      lockSection.hashCode ^
+      saved.hashCode ^
+      settings.hashCode ^
+      unlockDays.hashCode ^
+      unlockDaysHint.hashCode ^
+      updateAvailable.hashCode ^
+      updateCheck.hashCode ^
+      updateCheckHint.hashCode ^
+      updateChecking.hashCode ^
+      updateLatest.hashCode ^
+      updateNow.hashCode ^
+      updateOpen.hashCode ^
+      updateSection.hashCode ^
+      version.hashCode ^
       listTitle.hashCode ^
       masterPassword.hashCode ^
       myCode.hashCode ^
@@ -508,6 +678,26 @@ class FfiStrings {
           lanNotFound == other.lanNotFound &&
           lanPairing == other.lanPairing &&
           lanSearching == other.lanSearching &&
+          daysUnit == other.daysUnit &&
+          language == other.language &&
+          languageAuto == other.languageAuto &&
+          lockNow == other.lockNow &&
+          lockOnBackground == other.lockOnBackground &&
+          lockOnBackgroundHint == other.lockOnBackgroundHint &&
+          lockSection == other.lockSection &&
+          saved == other.saved &&
+          settings == other.settings &&
+          unlockDays == other.unlockDays &&
+          unlockDaysHint == other.unlockDaysHint &&
+          updateAvailable == other.updateAvailable &&
+          updateCheck == other.updateCheck &&
+          updateCheckHint == other.updateCheckHint &&
+          updateChecking == other.updateChecking &&
+          updateLatest == other.updateLatest &&
+          updateNow == other.updateNow &&
+          updateOpen == other.updateOpen &&
+          updateSection == other.updateSection &&
+          version == other.version &&
           listTitle == other.listTitle &&
           masterPassword == other.masterPassword &&
           myCode == other.myCode &&
