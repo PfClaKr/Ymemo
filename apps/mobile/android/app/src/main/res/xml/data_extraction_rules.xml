@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ (API 31) reads this instead of android:allowBackup. Both paths have to say
+     no: cloud backup would take the plaintext memo cache with it, and a device-to-device
+     transfer would plant a stale vault next to a live one. Pairing is how a new device gets
+     the memos. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+    </device-transfer>
+</data-extraction-rules>

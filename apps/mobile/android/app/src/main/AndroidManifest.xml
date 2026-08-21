@@ -15,9 +15,18 @@
          permission; the lock itself is only taken while the pairing screen is open. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
+    <!-- allowBackup is on by default, which would let Android copy the app's private
+         directory into the user's cloud backup — and that directory holds the **plaintext**
+         SQLite cache of every memo, alongside the encrypted vault. A local-first app that
+         quietly ships its notes to a backup server is not local-first, so it is off. It also
+         keeps a restored backup from resurrecting a stale cache on another device, which
+         syncing would then have to argue with. -->
     <application
         android:label="Ymemo"
         android:name="${applicationName}"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
