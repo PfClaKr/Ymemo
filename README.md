@@ -160,8 +160,10 @@ the desktop inside a Fedora container for library compatibility.
   recovery code for the day it is forgotten. There is no other way back: nothing but the
   password and that code can decrypt a vault, on any device. Failing both, the lock screen
   can wipe this device and start over.
-- **Device linking** — by QR/pairing code, or by a **6-digit code** on the same LAN. Linked
-  devices can be listed and revoked.
+- **Device linking** — one device scans the other's QR (or pastes its pairing code), and the
+  other is asked to allow the request; both screens show the same eight-character
+  verification code to compare first. On the same network a **6-digit code** links the two
+  outright. Linked devices can be listed and revoked.
 - **Korean and English** — detected from the system locale, changeable in settings.
 - **Update check** — asks GitHub about once a day whether a newer release exists, and says so
   in the list window and settings. It only ever tells you: nothing is downloaded and nothing

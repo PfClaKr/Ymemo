@@ -237,7 +237,10 @@ fn main() -> Result<()> {
     let settings_win = SettingsWindow::new()?;
     let security_win = SecurityWindow::new()?;
     let history_win = HistoryWindow::new()?;
-    apply_lang(&ctx, &lock, &list, &settings_win, &security_win, &history_win);
+    // Built up front and only shown when a request arrives: it has to be able to appear
+    // while every other window is closed, since the app otherwise lives in the tray.
+    let approve_win = ApproveWindow::new()?;
+    apply_lang(&ctx, &lock, &list, &settings_win, &security_win, &history_win, &approve_win);
     security::wire(&ctx, &settings_win, &security_win);
 
     // ---- Past versions of a memo or folder. ----
@@ -574,7 +577,15 @@ fn main() -> Result<()> {
     }
 
     // ---- Device linking (pairing, shared devices) is wired up by the pairing module. ----
-    let _pairing = pairing::wire(&lock, &list, &syncthing, lan.clone(), my_device_id.clone(), &vault_dir);
+    let _pairing = pairing::wire(
+        &lock,
+        &list,
+        &approve_win,
+        &syncthing,
+        lan.clone(),
+        my_device_id.clone(),
+        &vault_dir,
+    );
 
     // ---- Periodic merge, pulling other devices' logs into the list and stickies. ----
     // The interval is a setting, so saving settings re-arms the timer; hence the Rc.
@@ -616,6 +627,7 @@ fn main() -> Result<()> {
         let tray_handle = tray_handle.clone();
         let security_weak = security_win.as_weak();
         let history_weak = history_win.as_weak();
+        let approve_weak = approve_win.as_weak();
         settings_win.on_apply(move || {
             let Some(w) = win.upgrade() else { return };
             let (Some(lock), Some(list)) = (lock_weak.upgrade(), list_weak.upgrade()) else {
@@ -642,7 +654,15 @@ fn main() -> Result<()> {
 
             // Write the sanitized values back, so out-of-range input never changes silently.
             fill_settings_window(&ctx, &w);
-            apply_lang(&ctx, &lock, &list, &w, &security_weak.unwrap(), &history_weak.unwrap());
+            apply_lang(
+                &ctx,
+                &lock,
+                &list,
+                &w,
+                &security_weak.unwrap(),
+                &history_weak.unwrap(),
+                &approve_weak.unwrap(),
+            );
             if let Some(t) = tray_handle.borrow().as_ref() {
                 t.refresh();
             }

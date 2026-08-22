@@ -1258,18 +1258,23 @@ class SyncButton extends StatelessWidget {
     return ListenableBuilder(
       listenable: sync,
       builder: (context, _) {
-        final Widget icon;
+        final Widget state;
         if (sync.starting) {
-          icon = const SizedBox(
+          state = const SizedBox(
             width: 18,
             height: 18,
             child: CircularProgressIndicator(strokeWidth: 2),
           );
         } else if (sync.running) {
-          icon = const Icon(Icons.devices);
+          state = const Icon(Icons.devices);
         } else {
-          icon = const Icon(Icons.cloud_off);
+          state = const Icon(Icons.cloud_off);
         }
+        // A request only reaches this device while the app is open, so it has to be visible
+        // from the screen the user is already on rather than only inside the pairing screen.
+        final icon = sync.pending.isEmpty
+            ? state
+            : Badge(label: Text('${sync.pending.length}'), child: state);
         return IconButton(
           icon: icon,
           tooltip: strings.syncDevices,
@@ -1302,6 +1307,16 @@ class _SyncScreenState extends State<SyncScreen> {
   /// rotates once a minute; this is only so the screen never shows a stale one.
   static const _lanPollInterval = Duration(seconds: 1);
 
+  /// How often the device we asked is checked for having answered.
+  static const _waitPollInterval = Duration(seconds: 2);
+
+  /// Consecutive polls the peer must look connected before this is called a link.
+  ///
+  /// One is not enough: while the request is unanswered the peer's handshake completes and is
+  /// *then* refused, so `connected` flickers true for a fraction of a second on every retry.
+  /// Two polls two seconds apart never straddle that.
+  static const _linkedPolls = 2;
+
   List<FfiSharedDevice> _devices = const [];
 
   final _lanInput = TextEditingController();
@@ -1309,6 +1324,13 @@ class _SyncScreenState extends State<SyncScreen> {
   String? _lanMessage;
   bool _joining = false;
   Timer? _lanPoll;
+
+  /// The device this one scanned and is waiting to be allowed in by, with the eight
+  /// characters its screen is showing. Null when nothing is outstanding.
+  String? _waitingPeer;
+  String? _waitingCode;
+  int _connectedPolls = 0;
+  Timer? _waitPoll;
 
   @override
   void initState() {
@@ -1320,6 +1342,7 @@ class _SyncScreenState extends State<SyncScreen> {
   @override
   void dispose() {
     _lanPoll?.cancel();
+    _waitPoll?.cancel();
     _lanInput.dispose();
     // Leaves pairing mode: closes the socket and drops the wifi multicast lock. Anything
     // still in flight is finished by the Rust side on its own thread.
@@ -1409,12 +1432,81 @@ class _SyncScreenState extends State<SyncScreen> {
   }
 
   Future<void> _scan() async {
-    await Navigator.of(context).push(
+    final peer = await Navigator.of(context).push<String>(
       MaterialPageRoute(
         builder: (_) => ScanScreen(strings: widget.strings, sync: widget.sync),
       ),
     );
+    if (peer != null) await _startWaiting(peer);
     await _reloadDevices();
+  }
+
+  /// Enters the waiting state for a peer that has just been registered.
+  ///
+  /// Scanning only did this device's half: it is dialling a device that has never heard of
+  /// it, and nothing syncs until that device allows the request.
+  Future<void> _startWaiting(String peer) async {
+    String code = '';
+    try {
+      code = await widget.sync.verificationCode(peer);
+    } catch (e) {
+      // Without our own device id there is nothing to derive it from. The request still
+      // works; only the code the user would compare is missing.
+      debugPrint('could not derive the verification code: $e');
+    }
+    if (!mounted) return;
+    setState(() {
+      _waitingPeer = peer;
+      _waitingCode = code;
+      _connectedPolls = 0;
+      _lanMessage = null;
+    });
+    _waitPoll?.cancel();
+    _waitPoll = Timer.periodic(_waitPollInterval, (_) => _checkWaiting());
+  }
+
+  void _stopWaiting({String? message}) {
+    _waitPoll?.cancel();
+    _waitPoll = null;
+    if (!mounted) return;
+    setState(() {
+      _waitingPeer = null;
+      _waitingCode = null;
+      _connectedPolls = 0;
+      if (message != null) _lanMessage = message;
+    });
+  }
+
+  /// Has the device we asked let us in yet?
+  Future<void> _checkWaiting() async {
+    final peer = _waitingPeer;
+    if (peer == null) return;
+    final devices = await widget.sync.devices();
+    if (!mounted) return;
+    final up = devices.any((d) => d.id == peer && d.connected);
+    _connectedPolls = up ? _connectedPolls + 1 : 0;
+    setState(() => _devices = devices);
+    if (_connectedPolls >= _linkedPolls) {
+      _stopWaiting(message: widget.strings.pairConnected);
+    }
+  }
+
+  Future<void> _approve(FfiPendingDevice device) async {
+    try {
+      await widget.sync.approveDevice(device.id);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+    await _reloadDevices();
+  }
+
+  Future<void> _reject(FfiPendingDevice device) async {
+    try {
+      await widget.sync.rejectDevice(device.id);
+    } catch (e) {
+      debugPrint('could not reject the request: $e');
+    }
   }
 
   Future<void> _unpair(FfiSharedDevice device) async {
@@ -1445,7 +1537,16 @@ class _SyncScreenState extends State<SyncScreen> {
         builder: (context, _) => ListView(
           padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + _bottomInset(context)),
           children: [
+            // Requests first: someone is standing at another device waiting for this tap.
+            for (final request in widget.sync.pending) ...[
+              _requestCard(context, request),
+              const SizedBox(height: 12),
+            ],
             _status(context),
+            if (_waitingPeer != null) ...[
+              const Divider(height: 32),
+              _waitingSection(context),
+            ],
             if (_lanCode != null || _lanMessage != null) ...[
               const Divider(height: 32),
               _lanSection(context),
@@ -1536,6 +1637,121 @@ class _SyncScreenState extends State<SyncScreen> {
   }
 
   /// The top block: what the daemon is doing, and this device's code once it is up.
+  /// One incoming request, with the comparison the user is being asked to make.
+  ///
+  /// A card rather than a dialog: a request can arrive at any moment, and a dialog thrown
+  /// over whatever the user was doing is how people tap "allow" without reading it.
+  Widget _requestCard(BuildContext context, FfiPendingDevice request) {
+    final s = widget.strings;
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      color: scheme.secondaryContainer,
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.device_unknown, size: 20),
+                const SizedBox(width: 8),
+                Text(s.pairRequest, style: Theme.of(context).textTheme.titleMedium),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // The name is the asking device's own choice, so it never stands in for the id.
+            if (request.name.isNotEmpty)
+              Text(request.name, style: Theme.of(context).textTheme.bodyLarge),
+            Text(s.deviceId, style: Theme.of(context).textTheme.labelSmall),
+            SelectableText(
+              request.id,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+            ),
+            const SizedBox(height: 12),
+            Text(s.pairVerify, style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 4),
+            Center(
+              child: Text(
+                request.verificationCode,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 3,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(s.pairRequestHint, style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => _reject(request),
+                  child: Text(s.reject),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: () => _approve(request),
+                  child: Text(s.allow),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The other side of the same moment: this device asked, and is waiting to be let in.
+  Widget _waitingSection(BuildContext context) {
+    final s = widget.strings;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const SizedBox(
+              width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(s.pairWaiting, style: Theme.of(context).textTheme.titleMedium),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(s.pairWaitingHint, style: Theme.of(context).textTheme.bodySmall),
+        if ((_waitingCode ?? '').isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text(s.pairVerification, style: Theme.of(context).textTheme.labelSmall),
+          Center(
+            child: Text(
+              _waitingCode!,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 3,
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          // The link itself is already registered and keeps retrying; this only takes the
+          // panel down for someone who would rather not watch it.
+          child: TextButton(
+            onPressed: () => _stopWaiting(),
+            child: Text(s.pairCancelWait),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _status(BuildContext context) {
     final sync = widget.sync;
     if (!sync.available) {
@@ -1616,37 +1832,11 @@ class _ScanScreenState extends State<ScanScreen> {
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     try {
-      final deviceId = await pairingDecode(code: raw);
-      await widget.sync.pairWith(raw);
+      final peer = await widget.sync.pairWith(raw);
       await _controller.stop();
-      if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(widget.strings.scanResult),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SelectableText(deviceId),
-              const SizedBox(height: 12),
-              // Pairing is mutual; without this line the user would wait forever for a
-              // connection that needs a step on the other device.
-              Text(
-                widget.strings.pairAdded,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: Text(widget.strings.close),
-            ),
-          ],
-        ),
-      );
-      navigator.pop();
+      // Pops with the peer id: this device is now dialling one that has never heard of it,
+      // and the screen underneath turns that into "waiting to be allowed in".
+      navigator.pop(peer);
     } catch (e) {
       // Show the core's message as-is and allow another scan.
       messenger.showSnackBar(SnackBar(content: Text('$e')));

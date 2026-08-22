@@ -15,6 +15,7 @@
 // has to pair and receive vault.json first, or unlocking would create a second vault with a
 // different salt and the two would never converge.
 
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/widgets.dart';
@@ -44,12 +45,24 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
   /// derivation, so this is a handful of retries, not a busy loop.
   static const int _joinTimeoutSecs = 8;
 
+  /// How often incoming requests are polled for while the daemon is up. Answering one means
+  /// a person walking to another device, so seconds are plenty and a tighter loop would only
+  /// spend REST calls and battery.
+  static const _pendingPoll = Duration(seconds: 2);
+
   final SyncPaths paths;
 
   String? _binaryPath;
   String? _code;
   String? _error;
   bool _starting = false;
+
+  List<ffi.FfiPendingDevice> _pending = const [];
+  Timer? _pendingTimer;
+
+  /// Devices asking to be let in, oldest first. Polled here rather than by the screen so the
+  /// app-bar button can badge itself without the pairing screen being open.
+  List<ffi.FfiPendingDevice> get pending => _pending;
 
   /// This device's pairing code, once the daemon is up.
   String? get pairingCode => _code;
@@ -76,6 +89,7 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _pendingTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -110,6 +124,7 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
         vaultDir: paths.vaultDir,
       );
       _error = null;
+      _startPendingPoll();
     } catch (e) {
       _code = null;
       _error = '$e';
@@ -117,6 +132,31 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
       _starting = false;
       notifyListeners();
     }
+  }
+
+  void _startPendingPoll() {
+    _pendingTimer?.cancel();
+    _pendingTimer = Timer.periodic(_pendingPoll, (_) => refreshPending());
+    unawaited(refreshPending());
+  }
+
+  /// Re-reads the pending requests and notifies if the set changed.
+  ///
+  /// Compared by id rather than replaced outright: a rebuild every two seconds would rebuild
+  /// the pairing screen under the user's finger for nothing.
+  Future<void> refreshPending() async {
+    List<ffi.FfiPendingDevice> next;
+    try {
+      next = await pendingDevices();
+    } catch (e) {
+      // Offline or shutting down; the next tick tries again.
+      debugPrint('could not read the pending devices: $e');
+      return;
+    }
+    final same = next.length == _pending.length &&
+        List.generate(next.length, (i) => next[i].id == _pending[i].id).every((v) => v);
+    _pending = next;
+    if (!same) notifyListeners();
   }
 
   /// Re-registers the vault directory with the daemon.
@@ -138,12 +178,47 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
       // Nothing useful to do — the process is being backgrounded either way.
     }
     _code = null;
+    _pendingTimer?.cancel();
+    _pendingTimer = null;
+    _pending = const [];
     notifyListeners();
   }
 
   /// Registers a scanned or typed code. Only half of pairing: the other device has to add
   /// this one's code too.
-  Future<void> pairWith(String code) => ffi.syncPairWith(code: code);
+  /// Registers a scanned or typed code and returns the peer's device id.
+  ///
+  /// Only this device's half of the link. It now starts dialling a device that has never
+  /// heard of it, and nothing syncs until **that** device allows the request — which is what
+  /// the returned id is for: the screen waits on it and shows [verificationCode] meanwhile.
+  Future<String> pairWith(String code) => ffi.syncPairWith(code: code);
+
+  // ---- Incoming requests ---------------------------------------------------------------
+  //
+  // The mirror image of pairWith: a device that scanned *our* code is dialling us, the
+  // daemon refuses the caller it does not know and files it, and these three answer it.
+
+  /// Devices asking to be let in, oldest first, minus the ones already rejected.
+  Future<List<ffi.FfiPendingDevice>> pendingDevices() async {
+    if (!running) return const [];
+    return ffi.syncPendingDevices();
+  }
+
+  /// Lets a device in, completing the link.
+  Future<void> approveDevice(String deviceId) async {
+    await ffi.syncApproveDevice(deviceId: deviceId);
+    await refreshPending(); // drop it from the screen now, not on the next tick
+  }
+
+  /// Turns a device away and stops asking about it until the app is restarted.
+  Future<void> rejectDevice(String deviceId) async {
+    await ffi.syncRejectDevice(deviceId: deviceId);
+    await refreshPending();
+  }
+
+  /// The eight characters [peerDeviceId] is showing on its own approval screen.
+  Future<String> verificationCode(String peerDeviceId) =>
+      ffi.syncVerificationCode(peerDeviceId: peerDeviceId);
 
   // ---- LAN pairing (the 6-digit code) -----------------------------------------------
   //

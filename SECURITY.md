@@ -78,14 +78,31 @@ Syncthing is a **courier for ciphertext** and is not trusted.
 
 ## Pairing
 
-Two paths, both requiring knowledge of a code.
+Two paths. Neither ever moves a key: a newly linked device receives the encrypted vault and
+derives the same key from the synced salt plus the master password, which the user types.
 
-- **Pairing code / QR** (`YMEMO1:<syncthing-device-id>`) — carried by the user.
+- **Pairing code / QR** (`YMEMO1:<syncthing-device-id>`) — carried by the user, and **not a
+  secret**: it is shown on a screen, and a Syncthing device id is public by design. Scanning
+  one only registers this side. The other device sees an unknown caller, files it as a
+  pending request, and asks its own user to allow or refuse it — so the link needs a
+  deliberate act on **both** devices, and copying somebody's pairing code off a screen buys
+  nothing on its own.
+  - **Verification code.** Both screens show eight characters derived from the two device ids
+    (`sha256` over the sorted pair, rendered in the recovery alphabet). It carries no secret;
+    it exists so the person approving can check the request comes from the device in front of
+    them rather than from someone replaying a copied pairing code. It is the same
+    numeric-comparison step Bluetooth pairing uses, and skipping the comparison degrades the
+    QR path to what it was before: trust that nobody else has the code.
+  - A refusal is remembered only until the app restarts. Syncthing files the caller again on
+    every retry, so this is what stops the prompt repeating; it is not a block list, and a
+    mis-tapped "reject" is never permanent.
 - **6-digit LAN code** — only a million possibilities, so the code itself derives an Argon2
   key that encrypts the exchange; a successful decryption proves the peer knows the code.
   Also: the code rotates every minute, attempts are throttled to 200ms, and the listener only
   runs while pairing mode is on. Even a wrong pairing reveals nothing, since the vault stays
-  encrypted without the master password.
+  encrypted without the master password. This path needs no approval step: the host turned
+  pairing mode on deliberately, and the code is a rotating shared secret rather than a public
+  id.
 
 ## What it does not protect (known limits)
 
@@ -94,6 +111,10 @@ Two paths, both requiring knowledge of a code.
 - **Metadata.** Anyone who can see the vault directory learns the number of devices (log
   files), how active each is (log sizes), when they changed (mtimes) and their Syncthing
   device ids. Only the contents are hidden.
+- **An unsolicited pairing prompt.** A device id is public, so anyone holding one can make a
+  request appear on that device — a nuisance, and a phishing surface if the user approves
+  without comparing the verification code. Approving hands over the encrypted vault, though
+  not the master password that opens it.
 - **Photo metadata.** Blobs are stored **at original size**, so the number of photos and each
   file's size are visible. Encryption is also convergent (same plaintext, same ciphertext), so
   someone holding a photo can check whether that photo is in the vault by file name alone.

@@ -35,6 +35,9 @@ export component ListWindow inherits Window {
     in property <string> peer-message;
     in property <string> lan-pair-code;
     in property <string> lan-message;
+    // Set while a peer registered from here has not allowed the request yet; the eight
+    // characters its own screen shows, so the user can see the two agree.
+    in property <string> pair-waiting-code;
     in property <[SharedDeviceRow]> shared-devices;
     callback lan-join(string);
     callback unshare(string);
@@ -157,6 +160,7 @@ export component ListWindow inherits Window {
                 message: root.peer-message;
                 lan-code: root.lan-pair-code;
                 lan-message: root.lan-message;
+                waiting-code: root.pair-waiting-code;
                 devices: root.shared-devices;
                 ink: #d8d2c2;
                 add-peer(code) => { root.add-peer(code); }

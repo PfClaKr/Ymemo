@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `lan_lock`, `sanitize`, `share_with_peer`, `sync_lock`, `with_sync`, `with_vault`
+// These functions are ignored because they are not marked as `pub`: `lan_lock`, `rejected_lock`, `sanitize`, `share_with_peer`, `sync_lock`, `with_sync`, `with_vault`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `fmt`, `from`, `from`, `from`
 
 /// Sets the language of core error messages (`"ko"`, `"en"`, or a locale like `"ko-KR"`).
@@ -193,10 +193,6 @@ Future<void> groupDelete({required String id}) =>
 /// delivered new logs.
 Future<void> syncRebuild() => RustLib.instance.api.crateApiSyncRebuild();
 
-/// Validates a scanned pairing code and extracts the device id, without pairing.
-Future<String> pairingDecode({required String code}) =>
-    RustLib.instance.api.crateApiPairingDecode(code: code);
-
 /// Starts the daemon and registers the vault directory, returning this device's pairing code.
 ///
 /// Idempotent, which is what makes it safe to call on every resume. The first start generates
@@ -230,9 +226,11 @@ Future<String> syncPairingCode() =>
 
 /// Pairs with a scanned or typed code: registers the peer and shares the vault with it.
 ///
-/// This is **one half of pairing**. The other device has to do the same with our code, or
-/// syncthing will never connect the two.
-Future<void> syncPairWith({required String code}) =>
+/// Returns the peer's device id, which the screen then waits on: this side is now dialling a
+/// device that has never heard of it, so nothing syncs until the **other** device allows the
+/// request in (`sync_pending_devices` there). It no longer has to be given this device's code
+/// by hand — that was the second scan nobody remembered to do.
+Future<String> syncPairWith({required String code}) =>
     RustLib.instance.api.crateApiSyncPairWith(code: code);
 
 /// Devices this vault is shared with, ourselves excluded.
@@ -243,6 +241,29 @@ Future<List<FfiSharedDevice>> syncDevices() =>
 /// unpairs too.
 Future<void> syncUnpair({required String deviceId}) =>
     RustLib.instance.api.crateApiSyncUnpair(deviceId: deviceId);
+
+/// Requests waiting for an answer, oldest first, minus the ones already rejected.
+Future<List<FfiPendingDevice>> syncPendingDevices() =>
+    RustLib.instance.api.crateApiSyncPendingDevices();
+
+/// Allows a device in: shares the vault with it, completing the link.
+///
+/// Syncthing drops the pending entry as soon as the device is in the config, so there is
+/// nothing to clear afterwards.
+Future<void> syncApproveDevice({required String deviceId}) =>
+    RustLib.instance.api.crateApiSyncApproveDevice(deviceId: deviceId);
+
+/// Turns a device away and stops asking about it for the rest of this run.
+Future<void> syncRejectDevice({required String deviceId}) =>
+    RustLib.instance.api.crateApiSyncRejectDevice(deviceId: deviceId);
+
+/// The verification code to show while waiting for `peer_device_id` to allow this device in.
+///
+/// The same eight characters the other side sees on its approval prompt, derived from the
+/// two device ids alone.
+Future<String> syncVerificationCode({required String peerDeviceId}) =>
+    RustLib.instance.api
+        .crateApiSyncVerificationCode(peerDeviceId: peerDeviceId);
 
 /// Enters pairing mode and returns the code to show. Needs the daemon, since the code's whole
 /// purpose is to hand over its device id.
@@ -453,6 +474,38 @@ class FfiMemo {
           updatedAt == other.updatedAt;
 }
 
+/// A device asking to be let in.
+class FfiPendingDevice {
+  /// Syncthing device id; the handle for approving or rejecting.
+  final String id;
+
+  /// The name it announced. **It chose this itself**, so the UI must show it as a hint
+  /// next to the id and never in place of one.
+  final String name;
+
+  /// The eight characters the other device is showing on its own screen right now. The
+  /// user comparing the two is what makes an approval safe; see `ymemo_core::pairing`.
+  final String verificationCode;
+
+  const FfiPendingDevice({
+    required this.id,
+    required this.name,
+    required this.verificationCode,
+  });
+
+  @override
+  int get hashCode => id.hashCode ^ name.hashCode ^ verificationCode.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiPendingDevice &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          verificationCode == other.verificationCode;
+}
+
 /// A release newer than the running build.
 class FfiRelease {
   final String version;
@@ -564,7 +617,6 @@ class FfiStrings {
   final String addPhoto;
   final String bodyHint;
   final String cameraError;
-  final String close;
   final String connected;
   final String copied;
   final String copy;
@@ -612,7 +664,6 @@ class FfiStrings {
   final String newMemo;
   final String noDevices;
   final String opening;
-  final String pairAdded;
   final String photoCamera;
   final String photoGallery;
   final String photoMissing;
@@ -621,7 +672,6 @@ class FfiStrings {
   final String save;
   final String scanHint;
   final String scanQr;
-  final String scanResult;
   final String syncDevices;
   final String syncNow;
   final String syncStarting;
@@ -657,12 +707,22 @@ class FfiStrings {
   final String resetVaultConfirm;
   final String resetVaultHint;
   final String securitySection;
+  final String allow;
+  final String deviceId;
+  final String pairCancelWait;
+  final String pairConnected;
+  final String pairRequest;
+  final String pairRequestHint;
+  final String pairVerification;
+  final String pairVerify;
+  final String pairWaiting;
+  final String pairWaitingHint;
+  final String reject;
 
   const FfiStrings({
     required this.addPhoto,
     required this.bodyHint,
     required this.cameraError,
-    required this.close,
     required this.connected,
     required this.copied,
     required this.copy,
@@ -710,7 +770,6 @@ class FfiStrings {
     required this.newMemo,
     required this.noDevices,
     required this.opening,
-    required this.pairAdded,
     required this.photoCamera,
     required this.photoGallery,
     required this.photoMissing,
@@ -719,7 +778,6 @@ class FfiStrings {
     required this.save,
     required this.scanHint,
     required this.scanQr,
-    required this.scanResult,
     required this.syncDevices,
     required this.syncNow,
     required this.syncStarting,
@@ -755,6 +813,17 @@ class FfiStrings {
     required this.resetVaultConfirm,
     required this.resetVaultHint,
     required this.securitySection,
+    required this.allow,
+    required this.deviceId,
+    required this.pairCancelWait,
+    required this.pairConnected,
+    required this.pairRequest,
+    required this.pairRequestHint,
+    required this.pairVerification,
+    required this.pairVerify,
+    required this.pairWaiting,
+    required this.pairWaitingHint,
+    required this.reject,
   });
 
   @override
@@ -762,7 +831,6 @@ class FfiStrings {
       addPhoto.hashCode ^
       bodyHint.hashCode ^
       cameraError.hashCode ^
-      close.hashCode ^
       connected.hashCode ^
       copied.hashCode ^
       copy.hashCode ^
@@ -810,7 +878,6 @@ class FfiStrings {
       newMemo.hashCode ^
       noDevices.hashCode ^
       opening.hashCode ^
-      pairAdded.hashCode ^
       photoCamera.hashCode ^
       photoGallery.hashCode ^
       photoMissing.hashCode ^
@@ -819,7 +886,6 @@ class FfiStrings {
       save.hashCode ^
       scanHint.hashCode ^
       scanQr.hashCode ^
-      scanResult.hashCode ^
       syncDevices.hashCode ^
       syncNow.hashCode ^
       syncStarting.hashCode ^
@@ -854,7 +920,18 @@ class FfiStrings {
       resetVault.hashCode ^
       resetVaultConfirm.hashCode ^
       resetVaultHint.hashCode ^
-      securitySection.hashCode;
+      securitySection.hashCode ^
+      allow.hashCode ^
+      deviceId.hashCode ^
+      pairCancelWait.hashCode ^
+      pairConnected.hashCode ^
+      pairRequest.hashCode ^
+      pairRequestHint.hashCode ^
+      pairVerification.hashCode ^
+      pairVerify.hashCode ^
+      pairWaiting.hashCode ^
+      pairWaitingHint.hashCode ^
+      reject.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -864,7 +941,6 @@ class FfiStrings {
           addPhoto == other.addPhoto &&
           bodyHint == other.bodyHint &&
           cameraError == other.cameraError &&
-          close == other.close &&
           connected == other.connected &&
           copied == other.copied &&
           copy == other.copy &&
@@ -912,7 +988,6 @@ class FfiStrings {
           newMemo == other.newMemo &&
           noDevices == other.noDevices &&
           opening == other.opening &&
-          pairAdded == other.pairAdded &&
           photoCamera == other.photoCamera &&
           photoGallery == other.photoGallery &&
           photoMissing == other.photoMissing &&
@@ -921,7 +996,6 @@ class FfiStrings {
           save == other.save &&
           scanHint == other.scanHint &&
           scanQr == other.scanQr &&
-          scanResult == other.scanResult &&
           syncDevices == other.syncDevices &&
           syncNow == other.syncNow &&
           syncStarting == other.syncStarting &&
@@ -956,5 +1030,16 @@ class FfiStrings {
           resetVault == other.resetVault &&
           resetVaultConfirm == other.resetVaultConfirm &&
           resetVaultHint == other.resetVaultHint &&
-          securitySection == other.securitySection;
+          securitySection == other.securitySection &&
+          allow == other.allow &&
+          deviceId == other.deviceId &&
+          pairCancelWait == other.pairCancelWait &&
+          pairConnected == other.pairConnected &&
+          pairRequest == other.pairRequest &&
+          pairRequestHint == other.pairRequestHint &&
+          pairVerification == other.pairVerification &&
+          pairVerify == other.pairVerify &&
+          pairWaiting == other.pairWaiting &&
+          pairWaitingHint == other.pairWaitingHint &&
+          reject == other.reject;
 }

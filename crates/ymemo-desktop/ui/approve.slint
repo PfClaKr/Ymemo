@@ -1,0 +1,134 @@
+import { Button } from "std-widgets.slint";
+import { Strings } from "@i18n";
+
+// ---------------------------------------------------------------------------
+// Approval window: the other half of pairing.
+//
+// A device that scanned this one's code is already dialling; Syncthing here refuses the
+// unknown caller and files the attempt, and this window is where the user lets it in. It is
+// its own window rather than a panel because the app lives in the tray: a request that only
+// showed inside the pairing panel would never be seen by someone who closed it.
+//
+// The verification code is the point of the whole screen. A pairing code is not a secret —
+// it is on a screen, and a device id is public — so anyone who copies one can make a request
+// appear here. What they cannot do is make the *same eight characters* show up on the other
+// device. See crates/ymemo-core/src/pairing.rs.
+// ---------------------------------------------------------------------------
+
+// One "label: value" line of the requesting device's details.
+component Field inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <length> value-size: 12px;
+    spacing: 2px;
+    Text {
+        text: root.label;
+        font-size: 10px;
+        color: #a8a294;
+    }
+    Text {
+        text: root.value;
+        font-size: root.value-size;
+        color: #f0ead6;
+        wrap: char-wrap;
+    }
+}
+
+export component ApproveWindow inherits Window {
+    title: Strings.ui_approve_title;
+    preferred-width: 400px;
+    preferred-height: 420px;
+    min-width: 340px;
+    background: #2e2b27;
+
+    // The request on screen. Empty `device-id` means there is nothing to answer and the
+    // window should not be up at all.
+    in property <string> device-id;
+    // The name the asking device chose for itself: a hint, never an identity, so it is shown
+    // next to the id rather than in place of it.
+    in property <string> device-name;
+    in property <string> verification-code;
+    // "N more requests", already interpolated by Rust; empty when this is the only one.
+    in property <string> more-message;
+    in property <string> status;
+    in property <bool> status-is-error: false;
+
+    callback allow();
+    callback reject();
+    callback close-requested();
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 12px;
+
+        Text {
+            text: Strings.ui_approve_heading;
+            font-size: 15px;
+            font-weight: 700;
+            color: #f0ead6;
+            wrap: word-wrap;
+        }
+
+        Field {
+            label: Strings.ui_approve_device_name;
+            value: root.device-name == "" ? "—" : root.device-name;
+        }
+        Field {
+            label: Strings.ui_approve_device_id;
+            value: root.device-id;
+            value-size: 10px;
+        }
+
+        // The comparison the user is actually being asked to make, so it is the largest
+        // thing on the window.
+        Rectangle { height: 1px; background: #f0ead6; opacity: 0.2; }
+        Text {
+            text: Strings.ui_approve_verify;
+            font-size: 11px;
+            color: #a8a294;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.verification-code;
+            font-size: 30px;
+            font-weight: 800;
+            letter-spacing: 4px;
+            color: #ffe15c;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: Strings.ui_approve_hint;
+            font-size: 10px;
+            color: #a8a294;
+            wrap: word-wrap;
+        }
+
+        if root.status != "": Text {
+            text: root.status;
+            font-size: 11px;
+            color: root.status-is-error ? #d98a8a : #a8c8a0;
+            wrap: word-wrap;
+        }
+        if root.more-message != "": Text {
+            text: root.more-message;
+            font-size: 10px;
+            color: #a8a294;
+            wrap: word-wrap;
+        }
+
+        Rectangle {} // pushes the buttons to the bottom
+
+        HorizontalLayout {
+            spacing: 8px;
+            Button {
+                text: Strings.ui_approve_reject;
+                clicked => { root.reject(); }
+            }
+            Button {
+                text: Strings.ui_approve_allow;
+                primary: true;
+                clicked => { root.allow(); }
+            }
+        }
+    }
+}
