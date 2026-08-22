@@ -35,6 +35,54 @@ Future<void> vaultOpen(
 /// Closes the vault (log out).
 Future<void> vaultClose() => RustLib.instance.api.crateApiVaultClose();
 
+/// Whether `vault_dir` already holds a vault.
+///
+/// The lock screen asks before anything is unlocked, to tell "set a password" from "enter
+/// the password" — and to know that the vault it just created is the one to show a recovery
+/// code for.
+Future<bool> vaultExists({required String vaultDir}) =>
+    RustLib.instance.api.crateApiVaultExists(vaultDir: vaultDir);
+
+/// Whether the vault at `vault_dir` has a recovery code, without opening it.
+Future<bool> vaultHasRecoveryCode({required String vaultDir}) =>
+    RustLib.instance.api.crateApiVaultHasRecoveryCode(vaultDir: vaultDir);
+
+/// Replaces the master password of the open vault, after checking the current one.
+Future<void> vaultChangePassword(
+        {required String current, required String newPassword}) =>
+    RustLib.instance.api.crateApiVaultChangePassword(
+        current: current, newPassword: newPassword);
+
+/// Issues a fresh recovery code, retiring any earlier one, and returns it.
+///
+/// **The only time the code is readable.** Only its Argon2id wrapper is stored, so a code
+/// that is not written down is gone.
+Future<String> vaultIssueRecoveryCode() =>
+    RustLib.instance.api.crateApiVaultIssueRecoveryCode();
+
+/// Sets a new master password from the recovery code, for a vault nobody can unlock.
+///
+/// Takes the directory rather than an open vault, because the whole point is that it cannot
+/// be opened. Unlock with the new password afterwards; the recovery code stays valid.
+Future<void> vaultResetPasswordWithRecovery(
+        {required String vaultDir,
+        required String code,
+        required String newPassword}) =>
+    RustLib.instance.api.crateApiVaultResetPasswordWithRecovery(
+        vaultDir: vaultDir, code: code, newPassword: newPassword);
+
+/// Deletes this device's vault and its cache: the way out of a forgotten password when there
+/// is no recovery code either.
+///
+/// **Unsharing comes first and is not optional.** Syncthing propagates deletions, so emptying
+/// a folder it still carries would delete the memos on every paired device too. If the folder
+/// cannot be released, nothing is deleted at all. The daemon keeps running: it is still this
+/// device's identity, and the vault created next registers a folder under the same id.
+Future<void> vaultReset(
+        {required String vaultDir, required String cacheDbPath}) =>
+    RustLib.instance.api
+        .crateApiVaultReset(vaultDir: vaultDir, cacheDbPath: cacheDbPath);
+
 /// Memos, most recently updated first.
 Future<List<FfiMemo>> memoList() => RustLib.instance.api.crateApiMemoList();
 
@@ -128,6 +176,11 @@ Future<String> groupCreate({required String name, required String parentId}) =>
 Future<void> groupRename({required String id, required String name}) =>
     RustLib.instance.api.crateApiGroupRename(id: id, name: name);
 
+/// Sets a group's palette key. Folders carry a color just like memos and sync it the same
+/// way, so the two UIs agree on what a folder looks like.
+Future<void> groupSetColor({required String id, required String color}) =>
+    RustLib.instance.api.crateApiGroupSetColor(id: id, color: color);
+
 /// Moves a group under another; moving it into its own subtree is rejected.
 Future<void> groupMove({required String id, required String parentId}) =>
     RustLib.instance.api.crateApiGroupMove(id: id, parentId: parentId);
@@ -155,6 +208,15 @@ Future<String> syncStart(
         required String vaultDir}) =>
     RustLib.instance.api.crateApiSyncStart(
         binaryPath: binaryPath, homeDir: homeDir, vaultDir: vaultDir);
+
+/// Re-registers the vault directory with the running daemon.
+///
+/// [`sync_start`] does this on its first run and then short-circuits, so a vault created
+/// after [`vault_reset`] — which removes the folder on purpose — would sit there unshared
+/// until the app was next restarted. Doing nothing when the daemon is down is correct: the
+/// next `sync_start` registers it anyway.
+Future<void> syncEnsureFolder({required String vaultDir}) =>
+    RustLib.instance.api.crateApiSyncEnsureFolder(vaultDir: vaultDir);
 
 /// Stops the daemon. Safe to call when it is not running.
 Future<void> syncStop() => RustLib.instance.api.crateApiSyncStop();
@@ -306,6 +368,9 @@ class FfiGroup {
   final String id;
   final String name;
   final String parentId;
+
+  /// Palette key, the same set memos use; the core never turns it into a real color.
+  final String color;
   final PlatformInt64 createdAt;
   final PlatformInt64 updatedAt;
 
@@ -313,6 +378,7 @@ class FfiGroup {
     required this.id,
     required this.name,
     required this.parentId,
+    required this.color,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -322,6 +388,7 @@ class FfiGroup {
       id.hashCode ^
       name.hashCode ^
       parentId.hashCode ^
+      color.hashCode ^
       createdAt.hashCode ^
       updatedAt.hashCode;
 
@@ -333,6 +400,7 @@ class FfiGroup {
           id == other.id &&
           name == other.name &&
           parentId == other.parentId &&
+          color == other.color &&
           createdAt == other.createdAt &&
           updatedAt == other.updatedAt;
 }
@@ -561,6 +629,34 @@ class FfiStrings {
   final String titleHint;
   final String unlock;
   final String unpair;
+  final String color;
+  final String changePassword;
+  final String confirmPassword;
+  final String createVault;
+  final String currentPassword;
+  final String forgotPassword;
+  final String issueRecovery;
+  final String newPassword;
+  final String newVaultHint;
+  final String noRecovery;
+  final String passwordChanged;
+  final String passwordHint;
+  final String passwordMismatch;
+  final String recoveryAbsent;
+  final String recoveryAck;
+  final String recoveryCode;
+  final String recoveryHint;
+  final String recoveryIssued;
+  final String recoveryPresent;
+  final String recoveryPrompt;
+  final String recoveryWarning;
+  final String reissueRecovery;
+  final String resetDone;
+  final String resetPassword;
+  final String resetVault;
+  final String resetVaultConfirm;
+  final String resetVaultHint;
+  final String securitySection;
 
   const FfiStrings({
     required this.addPhoto,
@@ -631,6 +727,34 @@ class FfiStrings {
     required this.titleHint,
     required this.unlock,
     required this.unpair,
+    required this.color,
+    required this.changePassword,
+    required this.confirmPassword,
+    required this.createVault,
+    required this.currentPassword,
+    required this.forgotPassword,
+    required this.issueRecovery,
+    required this.newPassword,
+    required this.newVaultHint,
+    required this.noRecovery,
+    required this.passwordChanged,
+    required this.passwordHint,
+    required this.passwordMismatch,
+    required this.recoveryAbsent,
+    required this.recoveryAck,
+    required this.recoveryCode,
+    required this.recoveryHint,
+    required this.recoveryIssued,
+    required this.recoveryPresent,
+    required this.recoveryPrompt,
+    required this.recoveryWarning,
+    required this.reissueRecovery,
+    required this.resetDone,
+    required this.resetPassword,
+    required this.resetVault,
+    required this.resetVaultConfirm,
+    required this.resetVaultHint,
+    required this.securitySection,
   });
 
   @override
@@ -702,7 +826,35 @@ class FfiStrings {
       syncUnavailable.hashCode ^
       titleHint.hashCode ^
       unlock.hashCode ^
-      unpair.hashCode;
+      unpair.hashCode ^
+      color.hashCode ^
+      changePassword.hashCode ^
+      confirmPassword.hashCode ^
+      createVault.hashCode ^
+      currentPassword.hashCode ^
+      forgotPassword.hashCode ^
+      issueRecovery.hashCode ^
+      newPassword.hashCode ^
+      newVaultHint.hashCode ^
+      noRecovery.hashCode ^
+      passwordChanged.hashCode ^
+      passwordHint.hashCode ^
+      passwordMismatch.hashCode ^
+      recoveryAbsent.hashCode ^
+      recoveryAck.hashCode ^
+      recoveryCode.hashCode ^
+      recoveryHint.hashCode ^
+      recoveryIssued.hashCode ^
+      recoveryPresent.hashCode ^
+      recoveryPrompt.hashCode ^
+      recoveryWarning.hashCode ^
+      reissueRecovery.hashCode ^
+      resetDone.hashCode ^
+      resetPassword.hashCode ^
+      resetVault.hashCode ^
+      resetVaultConfirm.hashCode ^
+      resetVaultHint.hashCode ^
+      securitySection.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -776,5 +928,33 @@ class FfiStrings {
           syncUnavailable == other.syncUnavailable &&
           titleHint == other.titleHint &&
           unlock == other.unlock &&
-          unpair == other.unpair;
+          unpair == other.unpair &&
+          color == other.color &&
+          changePassword == other.changePassword &&
+          confirmPassword == other.confirmPassword &&
+          createVault == other.createVault &&
+          currentPassword == other.currentPassword &&
+          forgotPassword == other.forgotPassword &&
+          issueRecovery == other.issueRecovery &&
+          newPassword == other.newPassword &&
+          newVaultHint == other.newVaultHint &&
+          noRecovery == other.noRecovery &&
+          passwordChanged == other.passwordChanged &&
+          passwordHint == other.passwordHint &&
+          passwordMismatch == other.passwordMismatch &&
+          recoveryAbsent == other.recoveryAbsent &&
+          recoveryAck == other.recoveryAck &&
+          recoveryCode == other.recoveryCode &&
+          recoveryHint == other.recoveryHint &&
+          recoveryIssued == other.recoveryIssued &&
+          recoveryPresent == other.recoveryPresent &&
+          recoveryPrompt == other.recoveryPrompt &&
+          recoveryWarning == other.recoveryWarning &&
+          reissueRecovery == other.reissueRecovery &&
+          resetDone == other.resetDone &&
+          resetPassword == other.resetPassword &&
+          resetVault == other.resetVault &&
+          resetVaultConfirm == other.resetVaultConfirm &&
+          resetVaultHint == other.resetVaultHint &&
+          securitySection == other.securitySection;
 }

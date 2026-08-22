@@ -37,7 +37,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1623336181;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1325937936;
 
 // Section: executor
 
@@ -538,6 +538,42 @@ fn wire__crate__api__group_rename_impl(
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || {
                         let output_ok = crate::api::group_rename(api_id, api_name)?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__group_set_color_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "group_set_color",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_id = <String>::sse_decode(&mut deserializer);
+            let api_color = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::group_set_color(api_id, api_color)?;
                         Ok(output_ok)
                     })(),
                 )
@@ -1203,6 +1239,41 @@ fn wire__crate__api__sync_devices_impl(
         },
     )
 }
+fn wire__crate__api__sync_ensure_folder_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "sync_ensure_folder",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_vault_dir = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::sync_ensure_folder(api_vault_dir)?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__sync_pair_with_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1479,6 +1550,43 @@ fn wire__crate__api__update_check_impl(
         },
     )
 }
+fn wire__crate__api__vault_change_password_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "vault_change_password",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_current = <String>::sse_decode(&mut deserializer);
+            let api_new_password = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok =
+                            crate::api::vault_change_password(api_current, api_new_password)?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__vault_close_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1506,6 +1614,107 @@ fn wire__crate__api__vault_close_impl(
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || {
                         let output_ok = crate::api::vault_close()?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__vault_exists_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "vault_exists",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_vault_dir = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Result::<_, ()>::Ok(crate::api::vault_exists(api_vault_dir))?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__vault_has_recovery_code_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "vault_has_recovery_code",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_vault_dir = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok =
+                        Result::<_, ()>::Ok(crate::api::vault_has_recovery_code(api_vault_dir))?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__vault_issue_recovery_code_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "vault_issue_recovery_code",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::vault_issue_recovery_code()?;
                         Ok(output_ok)
                     })(),
                 )
@@ -1626,6 +1835,83 @@ fn wire__crate__api__vault_open_with_key_impl(
         },
     )
 }
+fn wire__crate__api__vault_reset_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "vault_reset",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_vault_dir = <String>::sse_decode(&mut deserializer);
+            let api_cache_db_path = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::vault_reset(api_vault_dir, api_cache_db_path)?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__vault_reset_password_with_recovery_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "vault_reset_password_with_recovery",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_vault_dir = <String>::sse_decode(&mut deserializer);
+            let api_code = <String>::sse_decode(&mut deserializer);
+            let api_new_password = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::vault_reset_password_with_recovery(
+                            api_vault_dir,
+                            api_code,
+                            api_new_password,
+                        )?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
 
 // Section: dart2rust
 
@@ -1684,12 +1970,14 @@ impl SseDecode for crate::api::FfiGroup {
         let mut var_id = <String>::sse_decode(deserializer);
         let mut var_name = <String>::sse_decode(deserializer);
         let mut var_parentId = <String>::sse_decode(deserializer);
+        let mut var_color = <String>::sse_decode(deserializer);
         let mut var_createdAt = <i64>::sse_decode(deserializer);
         let mut var_updatedAt = <i64>::sse_decode(deserializer);
         return crate::api::FfiGroup {
             id: var_id,
             name: var_name,
             parent_id: var_parentId,
+            color: var_color,
             created_at: var_createdAt,
             updated_at: var_updatedAt,
         };
@@ -1835,6 +2123,34 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_titleHint = <String>::sse_decode(deserializer);
         let mut var_unlock = <String>::sse_decode(deserializer);
         let mut var_unpair = <String>::sse_decode(deserializer);
+        let mut var_color = <String>::sse_decode(deserializer);
+        let mut var_changePassword = <String>::sse_decode(deserializer);
+        let mut var_confirmPassword = <String>::sse_decode(deserializer);
+        let mut var_createVault = <String>::sse_decode(deserializer);
+        let mut var_currentPassword = <String>::sse_decode(deserializer);
+        let mut var_forgotPassword = <String>::sse_decode(deserializer);
+        let mut var_issueRecovery = <String>::sse_decode(deserializer);
+        let mut var_newPassword = <String>::sse_decode(deserializer);
+        let mut var_newVaultHint = <String>::sse_decode(deserializer);
+        let mut var_noRecovery = <String>::sse_decode(deserializer);
+        let mut var_passwordChanged = <String>::sse_decode(deserializer);
+        let mut var_passwordHint = <String>::sse_decode(deserializer);
+        let mut var_passwordMismatch = <String>::sse_decode(deserializer);
+        let mut var_recoveryAbsent = <String>::sse_decode(deserializer);
+        let mut var_recoveryAck = <String>::sse_decode(deserializer);
+        let mut var_recoveryCode = <String>::sse_decode(deserializer);
+        let mut var_recoveryHint = <String>::sse_decode(deserializer);
+        let mut var_recoveryIssued = <String>::sse_decode(deserializer);
+        let mut var_recoveryPresent = <String>::sse_decode(deserializer);
+        let mut var_recoveryPrompt = <String>::sse_decode(deserializer);
+        let mut var_recoveryWarning = <String>::sse_decode(deserializer);
+        let mut var_reissueRecovery = <String>::sse_decode(deserializer);
+        let mut var_resetDone = <String>::sse_decode(deserializer);
+        let mut var_resetPassword = <String>::sse_decode(deserializer);
+        let mut var_resetVault = <String>::sse_decode(deserializer);
+        let mut var_resetVaultConfirm = <String>::sse_decode(deserializer);
+        let mut var_resetVaultHint = <String>::sse_decode(deserializer);
+        let mut var_securitySection = <String>::sse_decode(deserializer);
         return crate::api::FfiStrings {
             add_photo: var_addPhoto,
             body_hint: var_bodyHint,
@@ -1904,6 +2220,34 @@ impl SseDecode for crate::api::FfiStrings {
             title_hint: var_titleHint,
             unlock: var_unlock,
             unpair: var_unpair,
+            color: var_color,
+            change_password: var_changePassword,
+            confirm_password: var_confirmPassword,
+            create_vault: var_createVault,
+            current_password: var_currentPassword,
+            forgot_password: var_forgotPassword,
+            issue_recovery: var_issueRecovery,
+            new_password: var_newPassword,
+            new_vault_hint: var_newVaultHint,
+            no_recovery: var_noRecovery,
+            password_changed: var_passwordChanged,
+            password_hint: var_passwordHint,
+            password_mismatch: var_passwordMismatch,
+            recovery_absent: var_recoveryAbsent,
+            recovery_ack: var_recoveryAck,
+            recovery_code: var_recoveryCode,
+            recovery_hint: var_recoveryHint,
+            recovery_issued: var_recoveryIssued,
+            recovery_present: var_recoveryPresent,
+            recovery_prompt: var_recoveryPrompt,
+            recovery_warning: var_recoveryWarning,
+            reissue_recovery: var_reissueRecovery,
+            reset_done: var_resetDone,
+            reset_password: var_resetPassword,
+            reset_vault: var_resetVault,
+            reset_vault_confirm: var_resetVaultConfirm,
+            reset_vault_hint: var_resetVaultHint,
+            security_section: var_securitySection,
         };
     }
 }
@@ -2058,37 +2402,50 @@ fn pde_ffi_dispatcher_primary_impl(
         12 => wire__crate__api__group_list_impl(port, ptr, rust_vec_len, data_len),
         13 => wire__crate__api__group_move_impl(port, ptr, rust_vec_len, data_len),
         14 => wire__crate__api__group_rename_impl(port, ptr, rust_vec_len, data_len),
-        15 => wire__crate__api__lan_code_impl(port, ptr, rust_vec_len, data_len),
-        16 => wire__crate__api__lan_join_impl(port, ptr, rust_vec_len, data_len),
-        17 => wire__crate__api__lan_poll_paired_impl(port, ptr, rust_vec_len, data_len),
-        18 => wire__crate__api__lan_start_impl(port, ptr, rust_vec_len, data_len),
-        19 => wire__crate__api__lan_stop_impl(port, ptr, rust_vec_len, data_len),
-        20 => wire__crate__api__language_impl(port, ptr, rust_vec_len, data_len),
-        21 => wire__crate__api__memo_delete_impl(port, ptr, rust_vec_len, data_len),
-        22 => wire__crate__api__memo_list_impl(port, ptr, rust_vec_len, data_len),
-        23 => wire__crate__api__memo_set_color_impl(port, ptr, rust_vec_len, data_len),
-        24 => wire__crate__api__memo_set_group_impl(port, ptr, rust_vec_len, data_len),
-        25 => wire__crate__api__memo_set_opacity_impl(port, ptr, rust_vec_len, data_len),
-        26 => wire__crate__api__memo_upsert_impl(port, ptr, rust_vec_len, data_len),
-        27 => wire__crate__api__memos_in_group_impl(port, ptr, rust_vec_len, data_len),
-        28 => wire__crate__api__mobile_strings_impl(port, ptr, rust_vec_len, data_len),
-        29 => wire__crate__api__pairing_decode_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__set_language_impl(port, ptr, rust_vec_len, data_len),
-        31 => wire__crate__api__settings_load_impl(port, ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__settings_save_impl(port, ptr, rust_vec_len, data_len),
-        33 => wire__crate__api__sync_devices_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__sync_pair_with_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__sync_pairing_code_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__sync_rebuild_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__sync_running_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__sync_start_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__sync_stop_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__sync_unpair_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__update_check_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__vault_close_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__vault_key_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__vault_open_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__api__vault_open_with_key_impl(port, ptr, rust_vec_len, data_len),
+        15 => wire__crate__api__group_set_color_impl(port, ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__lan_code_impl(port, ptr, rust_vec_len, data_len),
+        17 => wire__crate__api__lan_join_impl(port, ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__lan_poll_paired_impl(port, ptr, rust_vec_len, data_len),
+        19 => wire__crate__api__lan_start_impl(port, ptr, rust_vec_len, data_len),
+        20 => wire__crate__api__lan_stop_impl(port, ptr, rust_vec_len, data_len),
+        21 => wire__crate__api__language_impl(port, ptr, rust_vec_len, data_len),
+        22 => wire__crate__api__memo_delete_impl(port, ptr, rust_vec_len, data_len),
+        23 => wire__crate__api__memo_list_impl(port, ptr, rust_vec_len, data_len),
+        24 => wire__crate__api__memo_set_color_impl(port, ptr, rust_vec_len, data_len),
+        25 => wire__crate__api__memo_set_group_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__api__memo_set_opacity_impl(port, ptr, rust_vec_len, data_len),
+        27 => wire__crate__api__memo_upsert_impl(port, ptr, rust_vec_len, data_len),
+        28 => wire__crate__api__memos_in_group_impl(port, ptr, rust_vec_len, data_len),
+        29 => wire__crate__api__mobile_strings_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__api__pairing_decode_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__set_language_impl(port, ptr, rust_vec_len, data_len),
+        32 => wire__crate__api__settings_load_impl(port, ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__settings_save_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__sync_devices_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__sync_ensure_folder_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__sync_pair_with_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__sync_pairing_code_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__sync_rebuild_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__sync_running_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__sync_start_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__sync_stop_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__sync_unpair_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__update_check_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__vault_change_password_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__vault_close_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__vault_exists_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__vault_has_recovery_code_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__api__vault_issue_recovery_code_impl(port, ptr, rust_vec_len, data_len),
+        49 => wire__crate__api__vault_key_impl(port, ptr, rust_vec_len, data_len),
+        50 => wire__crate__api__vault_open_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__vault_open_with_key_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__vault_reset_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__vault_reset_password_with_recovery_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
         _ => unreachable!(),
     }
 }
@@ -2137,6 +2494,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiGroup {
             self.id.into_into_dart().into_dart(),
             self.name.into_into_dart().into_dart(),
             self.parent_id.into_into_dart().into_dart(),
+            self.color.into_into_dart().into_dart(),
             self.created_at.into_into_dart().into_dart(),
             self.updated_at.into_into_dart().into_dart(),
         ]
@@ -2297,6 +2655,34 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.title_hint.into_into_dart().into_dart(),
             self.unlock.into_into_dart().into_dart(),
             self.unpair.into_into_dart().into_dart(),
+            self.color.into_into_dart().into_dart(),
+            self.change_password.into_into_dart().into_dart(),
+            self.confirm_password.into_into_dart().into_dart(),
+            self.create_vault.into_into_dart().into_dart(),
+            self.current_password.into_into_dart().into_dart(),
+            self.forgot_password.into_into_dart().into_dart(),
+            self.issue_recovery.into_into_dart().into_dart(),
+            self.new_password.into_into_dart().into_dart(),
+            self.new_vault_hint.into_into_dart().into_dart(),
+            self.no_recovery.into_into_dart().into_dart(),
+            self.password_changed.into_into_dart().into_dart(),
+            self.password_hint.into_into_dart().into_dart(),
+            self.password_mismatch.into_into_dart().into_dart(),
+            self.recovery_absent.into_into_dart().into_dart(),
+            self.recovery_ack.into_into_dart().into_dart(),
+            self.recovery_code.into_into_dart().into_dart(),
+            self.recovery_hint.into_into_dart().into_dart(),
+            self.recovery_issued.into_into_dart().into_dart(),
+            self.recovery_present.into_into_dart().into_dart(),
+            self.recovery_prompt.into_into_dart().into_dart(),
+            self.recovery_warning.into_into_dart().into_dart(),
+            self.reissue_recovery.into_into_dart().into_dart(),
+            self.reset_done.into_into_dart().into_dart(),
+            self.reset_password.into_into_dart().into_dart(),
+            self.reset_vault.into_into_dart().into_dart(),
+            self.reset_vault_confirm.into_into_dart().into_dart(),
+            self.reset_vault_hint.into_into_dart().into_dart(),
+            self.security_section.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -2350,6 +2736,7 @@ impl SseEncode for crate::api::FfiGroup {
         <String>::sse_encode(self.id, serializer);
         <String>::sse_encode(self.name, serializer);
         <String>::sse_encode(self.parent_id, serializer);
+        <String>::sse_encode(self.color, serializer);
         <i64>::sse_encode(self.created_at, serializer);
         <i64>::sse_encode(self.updated_at, serializer);
     }
@@ -2468,6 +2855,34 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.title_hint, serializer);
         <String>::sse_encode(self.unlock, serializer);
         <String>::sse_encode(self.unpair, serializer);
+        <String>::sse_encode(self.color, serializer);
+        <String>::sse_encode(self.change_password, serializer);
+        <String>::sse_encode(self.confirm_password, serializer);
+        <String>::sse_encode(self.create_vault, serializer);
+        <String>::sse_encode(self.current_password, serializer);
+        <String>::sse_encode(self.forgot_password, serializer);
+        <String>::sse_encode(self.issue_recovery, serializer);
+        <String>::sse_encode(self.new_password, serializer);
+        <String>::sse_encode(self.new_vault_hint, serializer);
+        <String>::sse_encode(self.no_recovery, serializer);
+        <String>::sse_encode(self.password_changed, serializer);
+        <String>::sse_encode(self.password_hint, serializer);
+        <String>::sse_encode(self.password_mismatch, serializer);
+        <String>::sse_encode(self.recovery_absent, serializer);
+        <String>::sse_encode(self.recovery_ack, serializer);
+        <String>::sse_encode(self.recovery_code, serializer);
+        <String>::sse_encode(self.recovery_hint, serializer);
+        <String>::sse_encode(self.recovery_issued, serializer);
+        <String>::sse_encode(self.recovery_present, serializer);
+        <String>::sse_encode(self.recovery_prompt, serializer);
+        <String>::sse_encode(self.recovery_warning, serializer);
+        <String>::sse_encode(self.reissue_recovery, serializer);
+        <String>::sse_encode(self.reset_done, serializer);
+        <String>::sse_encode(self.reset_password, serializer);
+        <String>::sse_encode(self.reset_vault, serializer);
+        <String>::sse_encode(self.reset_vault_confirm, serializer);
+        <String>::sse_encode(self.reset_vault_hint, serializer);
+        <String>::sse_encode(self.security_section, serializer);
     }
 }
 

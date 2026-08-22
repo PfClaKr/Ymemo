@@ -19,6 +19,8 @@ import 'package:path_provider/path_provider.dart';
 
 import 'src/rust/api.dart';
 import 'host.dart' as host;
+import 'palette.dart';
+import 'security.dart';
 import 'settings.dart';
 import 'src/rust/frb_generated.dart';
 import 'sync.dart';
@@ -240,20 +242,100 @@ class LockScreen extends StatefulWidget {
 }
 
 class _LockScreenState extends State<LockScreen> {
+  /// How often `vault.json` is re-read while this screen is up. Cheap — two `exists` checks
+  /// — and it has to be a poll: the daemon delivers a paired device's vault whenever it
+  /// likes, with no user action to hang the update on.
+  static const _probeInterval = Duration(seconds: 3);
+
   final _password = TextEditingController();
+
+  /// Recovery inputs, only built while the forgotten-password panel is open.
+  final _recoveryCode = TextEditingController();
+  final _recoveryPassword = TextEditingController();
+
   String? _error;
+
+  /// A plain message rather than a failure — only "everything was deleted, create a new
+  /// vault" so far. Kept apart from [_error] because red would make a completed reset read
+  /// as a failed one.
+  String? _notice;
+
   bool _busy = false;
+
+  /// Whether `vault.json` is already there. It decides the whole screen: entering a password
+  /// versus setting one, and whether there is anything to recover in the first place.
+  bool _vaultExists = false;
+  bool _hasRecovery = false;
+
+  /// Whether the forgotten-password panel is open, and whether the wipe inside it has been
+  /// confirmed once — deleting every memo on the device is not a single tap.
+  bool _recovering = false;
+  bool _confirmingReset = false;
+
+  Timer? _probe;
+
+  @override
+  void initState() {
+    super.initState();
+    _probeVault();
+    _probe = Timer.periodic(_probeInterval, (_) => _probeVault());
+  }
+
+  @override
+  void dispose() {
+    _probe?.cancel();
+    _password.dispose();
+    _recoveryCode.dispose();
+    _recoveryPassword.dispose();
+    super.dispose();
+  }
+
+  /// Reads what `vault.json` says, without unlocking anything.
+  ///
+  /// Pairing runs from this very screen, and a fresh install receives the existing vault
+  /// while the screen sits there — so this is what turns "set a password" into "enter the
+  /// password" the moment the vault lands, instead of inviting the user to create a second
+  /// one with a different salt that could never converge with the first.
+  Future<void> _probeVault() async {
+    final dir = widget.sync.paths.vaultDir;
+    final exists = await vaultExists(vaultDir: dir);
+    final hasRecovery = await vaultHasRecoveryCode(vaultDir: dir);
+    // Only on a real change: a rebuild every three seconds would be pure waste, and it would
+    // land in the middle of typing.
+    if (!mounted || (exists == _vaultExists && hasRecovery == _hasRecovery)) return;
+    setState(() {
+      _vaultExists = exists;
+      _hasRecovery = hasRecovery;
+    });
+  }
 
   Future<void> _unlock() async {
     if (_password.text.isEmpty || _busy) return;
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _error = null;
+      _notice = null;
+    });
     try {
+      // A device that has never had a vault is creating one here; `vaultOpen` does both, and
+      // this is the only moment that can be told apart afterwards.
+      final creating = !await vaultExists(vaultDir: widget.sync.paths.vaultDir);
       // The same directory the daemon shares (see main), so what arrives is what is opened.
       await vaultOpen(
         vaultDir: widget.sync.paths.vaultDir,
         cacheDbPath: widget.cacheDbPath,
         password: _password.text,
       );
+      if (creating) {
+        // A vault created right after a reset needs the shared folder back; the daemon is
+        // already running by then, so nothing else would put it there.
+        try {
+          await widget.sync.ensureFolder();
+        } catch (e) {
+          debugPrint('could not register the shared folder: $e');
+        }
+        await _showFreshRecoveryCode();
+      }
       await widget.onUnlocked();
     } catch (e) {
       // Core errors already arrive in the current language.
@@ -263,48 +345,223 @@ class _LockScreenState extends State<LockScreen> {
     }
   }
 
+  /// Issues the new vault's recovery code and shows it before the memo list ever appears.
+  ///
+  /// A vault whose password is lost on the day it was created is the case this exists for, so
+  /// the code is put in front of the user at the one moment they are certainly paying
+  /// attention. A vault without a code still works, so a failure here is reported and stepped
+  /// over rather than blocking the app somebody just set up.
+  Future<void> _showFreshRecoveryCode() async {
+    try {
+      final code = await vaultIssueRecoveryCode();
+      if (!mounted) return;
+      await showRecoveryCode(context, widget.strings, code);
+    } catch (e) {
+      debugPrint('could not issue a recovery code: $e');
+    }
+  }
+
+  /// Sets a new password from the recovery code, then unlocks with it.
+  ///
+  /// Only the header is rewritten, so a wrong code costs one Argon2id run and leaves the
+  /// vault exactly as it was.
+  Future<void> _recover() async {
+    if (_recoveryCode.text.isEmpty || _recoveryPassword.text.isEmpty || _busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _notice = null;
+    });
+    try {
+      await vaultResetPasswordWithRecovery(
+        vaultDir: widget.sync.paths.vaultDir,
+        code: _recoveryCode.text,
+        newPassword: _recoveryPassword.text,
+      );
+      await vaultOpen(
+        vaultDir: widget.sync.paths.vaultDir,
+        cacheDbPath: widget.cacheDbPath,
+        password: _recoveryPassword.text,
+      );
+      _leaveRecovery();
+      await widget.onUnlocked();
+    } catch (e) {
+      setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Deletes this device's vault and cache: the last way out of a forgotten password.
+  ///
+  /// The unsharing that has to come first is the core's job (`vaultReset`), not this
+  /// screen's — syncthing propagates deletions, and wiping a folder it still carries would
+  /// take the other devices' memos with it. The stored session key goes too: it is the data
+  /// key of a vault that no longer exists.
+  Future<void> _reset() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+      _notice = null;
+    });
+    try {
+      await vaultReset(
+        vaultDir: widget.sync.paths.vaultDir,
+        cacheDbPath: widget.cacheDbPath,
+      );
+      await const SessionStore().clear();
+      _leaveRecovery();
+      await _probeVault();
+      if (mounted) setState(() => _notice = widget.strings.resetDone);
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Closes the panel and empties it; a recovery code must not be left in a field.
+  void _leaveRecovery() {
+    _recoveryCode.clear();
+    _recoveryPassword.clear();
+    if (mounted) {
+      setState(() {
+        _recovering = false;
+        _confirmingReset = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final s = widget.strings;
     return Scaffold(
       appBar: AppBar(
         // No title: the lock screen says what it is. The action is here so a fresh install
         // can pair before it has a vault to unlock.
         backgroundColor: Colors.transparent,
-        actions: [SyncButton(strings: widget.strings, sync: widget.sync)],
+        actions: [SyncButton(strings: s, sync: widget.sync)],
       ),
       body: Center(
-        child: Padding(
+        // Scrollable, because the recovery panel plus a keyboard is taller than a phone.
+        child: SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + _bottomInset(context)),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Ymemo 🔒', style: TextStyle(fontSize: 24)),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _password,
-                obscureText: true,
-                decoration: InputDecoration(labelText: widget.strings.masterPassword),
-                onSubmitted: (_) => _unlock(),
-              ),
-              if (_error != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(_error!, style: const TextStyle(color: Colors.red)),
-                ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: _busy ? null : _unlock,
-                child: Text(_busy ? widget.strings.opening : widget.strings.unlock),
-              ),
-            ],
+            children: _recovering ? _recoveryPanel(s) : _passwordPanel(s),
           ),
         ),
       ),
     );
   }
+
+  /// The normal way in: type the password, or set one on a device with no vault yet.
+  List<Widget> _passwordPanel(FfiStrings s) => [
+        const Text('Ymemo 🔒', style: TextStyle(fontSize: 24)),
+        const SizedBox(height: 16),
+        if (!_vaultExists)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              s.newVaultHint,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        TextField(
+          controller: _password,
+          obscureText: true,
+          decoration: InputDecoration(
+            labelText: _vaultExists ? s.masterPassword : s.newPassword,
+          ),
+          onSubmitted: (_) => _unlock(),
+        ),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(_error!, style: const TextStyle(color: Colors.red)),
+          ),
+        if (_notice != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(_notice!, textAlign: TextAlign.center),
+          ),
+        const SizedBox(height: 16),
+        FilledButton(
+          onPressed: _busy ? null : _unlock,
+          child: Text(_busy
+              ? s.opening
+              : _vaultExists
+                  ? s.unlock
+                  : s.createVault),
+        ),
+        // Nothing to recover before a vault exists, and offering it would only confuse.
+        if (_vaultExists)
+          TextButton(
+            onPressed: _busy
+                ? null
+                : () => setState(() {
+                      _recovering = true;
+                      _error = null;
+                      _notice = null;
+                    }),
+            child: Text(s.forgotPassword),
+          ),
+      ];
+
+  /// The forgotten-password panel: the recovery code, or starting over.
+  List<Widget> _recoveryPanel(FfiStrings s) => [
+        Text(s.forgotPassword, style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 16),
+        if (_hasRecovery) ...[
+          Text(s.recoveryPrompt, style: Theme.of(context).textTheme.bodyMedium),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _recoveryCode,
+            autocorrect: false,
+            decoration: InputDecoration(labelText: s.recoveryCode),
+            textInputAction: TextInputAction.next,
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _recoveryPassword,
+            obscureText: true,
+            decoration: InputDecoration(labelText: s.newPassword),
+            onSubmitted: (_) => _recover(),
+          ),
+          const SizedBox(height: 12),
+          FilledButton(
+            onPressed: _busy ? null : _recover,
+            child: Text(s.resetPassword),
+          ),
+        ] else
+          Text(s.noRecovery, style: Theme.of(context).textTheme.bodyMedium),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(_error!, style: const TextStyle(color: Colors.red)),
+          ),
+        const Divider(height: 40),
+        Text(s.resetVaultHint, style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(height: 12),
+        // Two taps, and the second one says what it does. The first press only arms the
+        // button; nothing is deleted until the confirmation is pressed.
+        OutlinedButton(
+          onPressed: _busy
+              ? null
+              : _confirmingReset
+                  ? _reset
+                  : () => setState(() => _confirmingReset = true),
+          style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+          child: Text(_confirmingReset ? s.resetVaultConfirm : s.resetVault),
+        ),
+        TextButton(
+          onPressed: _busy ? null : _leaveRecovery,
+          child: Text(s.cancel),
+        ),
+      ];
 }
 
-/// Memo list, with add, open and delete.
 /// Memo list for one folder.
 ///
 /// Folders are navigated into rather than drawn as a tree: a phone has no room for indentation
@@ -415,8 +672,9 @@ class _MemoListScreenState extends State<MemoListScreen> {
     await _reload(); // it may have been renamed, emptied or filled while we were inside
   }
 
-  /// Rename or delete, on a long press. Deleting keeps the contents and lifts them up a level,
-  /// which the confirmation says out loud — "delete folder" reads like "delete the memos".
+  /// Recolor, rename or delete, on a long press. Deleting keeps the contents and lifts them
+  /// up a level, which the confirmation says out loud — "delete folder" reads like "delete
+  /// the memos".
   Future<void> _folderMenu(FfiGroup folder) async {
     final s = widget.strings;
     final action = await showModalBottomSheet<String>(
@@ -425,6 +683,8 @@ class _MemoListScreenState extends State<MemoListScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            _colorSection(context, s, folder.color),
+            const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.drive_file_rename_outline),
               title: Text(s.rename),
@@ -442,7 +702,11 @@ class _MemoListScreenState extends State<MemoListScreen> {
     );
     if (!mounted || action == null) return;
 
-    if (action == 'rename') {
+    if (action.startsWith(_colorAction)) {
+      // Folders carry the same palette key memos do and sync it the same way, so this shows
+      // up on the desktop's tree as the color it was given here.
+      await groupSetColor(id: folder.id, color: action.substring(_colorAction.length));
+    } else if (action == 'rename') {
       final name = await _askForName(context, s, s.rename, folder.name);
       if (name != null && name.isNotEmpty) await groupRename(id: folder.id, name: name);
     } else if (action == 'delete') {
@@ -450,6 +714,70 @@ class _MemoListScreenState extends State<MemoListScreen> {
     }
     await _reload();
   }
+
+  /// Recolor or move, on a long press. Deleting is the swipe, so it is not repeated here.
+  Future<void> _memoMenu(FfiMemo memo) async {
+    final s = widget.strings;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _colorSection(context, s, memo.color),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.drive_file_move_outline),
+              title: Text(s.moveTo),
+              onTap: () => Navigator.of(context).pop('move'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+
+    if (action.startsWith(_colorAction)) {
+      await memoSetColor(id: memo.id, color: action.substring(_colorAction.length));
+      await _reload();
+    } else if (action == 'move') {
+      await _moveMemo(memo);
+    }
+  }
+
+  /// One row, wearing its palette key: a wash of the color behind it and a saturated stripe
+  /// down the leading edge.
+  ///
+  /// The wash alone is too faint to separate at a glance once the list is long, and the
+  /// stripe alone loses to the row's own text; together they are the signal the desktop's
+  /// list gives, at a size a thumb scrolls past.
+  Widget _tinted(BuildContext context, String color, Widget child) => Container(
+        decoration: BoxDecoration(
+          color: paletteRow(color, Theme.of(context).colorScheme.surface),
+          border: Border(left: BorderSide(color: paletteSwatch(color), width: 5)),
+        ),
+        child: child,
+      );
+
+  /// The palette, at the top of both long-press sheets.
+  ///
+  /// Picking pops the sheet with the chosen key rather than writing from in here: the sheet's
+  /// own context is gone the moment it closes, and one return value keeps every write in the
+  /// caller, where the reload already is.
+  Widget _colorSection(BuildContext sheetContext, FfiStrings s, String selected) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(s.color, style: Theme.of(sheetContext).textTheme.labelLarge),
+            const SizedBox(height: 4),
+            ColorSwatches(
+              selected: selected,
+              onPick: (key) => Navigator.of(sheetContext).pop('$_colorAction$key'),
+            ),
+          ],
+        ),
+      );
 
   /// Moves a memo into another folder, chosen from a flat list of every folder there is.
   Future<void> _moveMemo(FfiMemo memo) async {
@@ -502,7 +830,13 @@ class _MemoListScreenState extends State<MemoListScreen> {
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => MemoEditScreen(strings: widget.strings, id: id, title: '', body: ''),
+        builder: (_) => MemoEditScreen(
+          strings: widget.strings,
+          id: id,
+          title: '',
+          body: '',
+          color: defaultColor,
+        ),
       ),
     );
     await _reload();
@@ -511,8 +845,13 @@ class _MemoListScreenState extends State<MemoListScreen> {
   Future<void> _open(FfiMemo memo) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) =>
-            MemoEditScreen(strings: widget.strings, id: memo.id, title: memo.title, body: memo.body),
+        builder: (_) => MemoEditScreen(
+          strings: widget.strings,
+          id: memo.id,
+          title: memo.title,
+          body: memo.body,
+          color: memo.color,
+        ),
       ),
     );
     await _reload();
@@ -548,6 +887,7 @@ class _MemoListScreenState extends State<MemoListScreen> {
                 builder: (_) => SettingsScreen(
                   strings: widget.strings,
                   settings: widget.settings,
+                  vaultDir: widget.sync.paths.vaultDir,
                   onLock: widget.onLock,
                   onLanguageChanged: widget.onLanguageChanged,
                 ),
@@ -571,20 +911,27 @@ class _MemoListScreenState extends State<MemoListScreen> {
           )
         else
         Expanded(
-          child: ListView.builder(
+          child: ListView.separated(
         // Room for the gesture bar and for the button floating above it, or the last memo
         // in the list is unreachable behind one or the other.
         padding: EdgeInsets.only(bottom: _bottomInset(context) + 88),
         // Folders first, then memos — the same order the desktop's tree draws them in.
         itemCount: _folders.length + _memos.length,
+        // Two pastel rows of neighbouring colors have no edge between them, and two of the
+        // same color have none at all; the rule is what keeps a long list countable.
+        separatorBuilder: (_, __) => const Divider(height: 1, thickness: 1),
         itemBuilder: (context, i) {
           if (i < _folders.length) {
             final folder = _folders[i];
-            return ListTile(
-              leading: const Icon(Icons.folder),
-              title: Text(folder.name),
-              onTap: () => _openFolder(folder),
-              onLongPress: () => _folderMenu(folder),
+            return _tinted(
+              context,
+              folder.color,
+              ListTile(
+                leading: Icon(Icons.folder, color: paletteInk(folder.color)),
+                title: Text(folder.name),
+                onTap: () => _openFolder(folder),
+                onLongPress: () => _folderMenu(folder),
+              ),
             );
           }
           final memo = _memos[i - _folders.length];
@@ -601,13 +948,17 @@ class _MemoListScreenState extends State<MemoListScreen> {
               padding: const EdgeInsets.only(right: 16),
               child: const Icon(Icons.delete, color: Colors.white),
             ),
-            child: ListTile(
-              title: Text(memo.title.isEmpty ? widget.strings.newMemo : memo.title),
-              subtitle: memo.body.isEmpty
-                  ? null
-                  : Text(memo.body, maxLines: 1, overflow: TextOverflow.ellipsis),
-              onTap: () => _open(memo),
-              onLongPress: () => _moveMemo(memo),
+            child: _tinted(
+              context,
+              memo.color,
+              ListTile(
+                title: Text(memo.title.isEmpty ? widget.strings.newMemo : memo.title),
+                subtitle: memo.body.isEmpty
+                    ? null
+                    : Text(memo.body, maxLines: 1, overflow: TextOverflow.ellipsis),
+                onTap: () => _open(memo),
+                onLongPress: () => _memoMenu(memo),
+              ),
             ),
           );
         },
@@ -627,6 +978,10 @@ class _MemoListScreenState extends State<MemoListScreen> {
   }
 }
 
+/// Prefix a long-press sheet returns a chosen palette key under, so one `String?` result can
+/// carry both "recolor to this" and the plain actions next to it.
+const _colorAction = 'color:';
+
 /// Height of the system navigation bar (or gesture pill) at the bottom of the screen.
 ///
 /// Scrollables add it to their padding rather than being wrapped in a `SafeArea`: the
@@ -642,12 +997,17 @@ class MemoEditScreen extends StatefulWidget {
     required this.id,
     required this.title,
     required this.body,
+    required this.color,
   });
 
   final FfiStrings strings;
   final String id;
   final String title;
   final String body;
+
+  /// Palette key the memo arrived with; the editor wears it the way the desktop's sticky
+  /// does, so the same memo looks like the same memo on either device.
+  final String color;
 
   @override
   State<MemoEditScreen> createState() => _MemoEditScreenState();
@@ -656,7 +1016,38 @@ class MemoEditScreen extends StatefulWidget {
 class _MemoEditScreenState extends State<MemoEditScreen> {
   late final TextEditingController _title = TextEditingController(text: widget.title);
   late final TextEditingController _body = TextEditingController(text: widget.body);
+  late String _color = widget.color;
   List<FfiAttachment> _photos = [];
+
+  /// Writes the new palette key straight through and repaints.
+  ///
+  /// Not batched into `_save` with the text: the color *is* what the screen looks like, and a
+  /// swatch that did nothing until you left would read as a broken button.
+  Future<void> _setColor(String color) async {
+    setState(() => _color = color);
+    await memoSetColor(id: widget.id, color: color);
+  }
+
+  Future<void> _pickColor() async {
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(widget.strings.color, style: Theme.of(context).textTheme.labelLarge),
+              const SizedBox(height: 4),
+              ColorSwatches(selected: _color, onPick: (key) => Navigator.of(context).pop(key)),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (chosen != null) await _setColor(chosen);
+  }
 
   @override
   void initState() {
@@ -743,7 +1134,22 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
+    final base = Theme.of(context);
+    final ink = paletteInk(_color);
+    // Focus underlines, labels and the caret all come from `colorScheme.primary`, which is
+    // the app's yellow accent — the one thing left on a blue or purple sticky that does not
+    // belong to it. Swapped for the palette's own ink, for this screen only.
+    final sticky = base.copyWith(
+      colorScheme: base.colorScheme.copyWith(primary: ink),
+      textSelectionTheme: TextSelectionThemeData(
+        cursorColor: ink,
+        selectionHandleColor: ink,
+        selectionColor: ink.withValues(alpha: 0.3),
+      ),
+    );
+    return Theme(
+      data: sticky,
+      child: PopScope(
       // Going back saves. There is a save button too, but saving never requires it.
       //
       // `canPop: false` and pop by hand **after** saving. With the default the route is
@@ -759,9 +1165,17 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
         navigator.pop();
       },
       child: Scaffold(
+        backgroundColor: paletteBg(_color),
         appBar: AppBar(
           title: Text(widget.strings.newMemo),
+          backgroundColor: paletteBar(_color),
+          foregroundColor: ink,
           actions: [
+            IconButton(
+              icon: const Icon(Icons.palette_outlined),
+              tooltip: widget.strings.color,
+              onPressed: _pickColor,
+            ),
             IconButton(
               icon: const Icon(Icons.add_photo_alternate),
               tooltip: widget.strings.addPhoto,
@@ -810,6 +1224,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -1465,12 +1880,18 @@ class SettingsScreen extends StatefulWidget {
     super.key,
     required this.strings,
     required this.settings,
+    required this.vaultDir,
     required this.onLock,
     required this.onLanguageChanged,
   });
 
   final FfiStrings strings;
   final SettingsStore settings;
+
+  /// Passed through to the security screen, which asks `vault.json` itself whether a
+  /// recovery code exists.
+  final String vaultDir;
+
   final Future<void> Function() onLock;
   final Future<void> Function(String) onLanguageChanged;
 
@@ -1616,6 +2037,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
             // No pop here. Locking already pops back to the root and swaps in the lock
             // screen; popping again would take the root with it and leave a black screen.
             onTap: widget.onLock,
+          ),
+
+          const Divider(),
+          _header(s.securitySection),
+          ListTile(
+            leading: const Icon(Icons.password),
+            title: Text(s.changePassword),
+            subtitle: Text(s.recoveryCode),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => SecurityScreen(
+                strings: widget.strings,
+                vaultDir: widget.vaultDir,
+              ),
+            )),
           ),
 
           const Divider(),

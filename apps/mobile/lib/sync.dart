@@ -119,6 +119,13 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  /// Re-registers the vault directory with the daemon.
+  ///
+  /// [start] does it too, but it is idempotent by short-circuiting on an already running
+  /// daemon, so the folder a reset removed would stay removed for the rest of the session.
+  /// Called after a vault is created, which is the one moment that can follow a reset.
+  Future<void> ensureFolder() => ffi.syncEnsureFolder(vaultDir: paths.vaultDir);
+
   /// Stops the daemon. Errors are swallowed: this runs while the app is going away.
   Future<void> stop() async {
     if (_code == null && !_starting) return;
