@@ -43,6 +43,25 @@ pub struct Syncthing {
     _job: Option<JobHandle>,
 }
 
+/// A device that asked to connect and was turned away because this one has never heard of
+/// it, as returned by [`Syncthing::pending_devices`].
+///
+/// This is the whole basis of the approval flow: the side that scanned a pairing code adds
+/// the other and starts dialling, and the side that was scanned learns about it here rather
+/// than having to scan something back. See [`crate::pairing`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingDevice {
+    /// Syncthing device id — what [`Syncthing::share_folder_with`] takes to approve it.
+    pub id: String,
+    /// Name the device announced for itself; empty when it announced none. **Chosen by the
+    /// device that is asking**, so it is a hint for the user and never an identity.
+    pub name: String,
+    /// Address it dialled from, which may be a relay rather than the device itself.
+    pub address: String,
+    /// When it last tried, as Syncthing's RFC 3339 string; empty when absent.
+    pub time: String,
+}
+
 /// Another device sharing this vault, as returned by [`Syncthing::shared_devices`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SharedDevice {
@@ -260,6 +279,51 @@ impl Syncthing {
             devices.push(serde_json::json!({ "deviceID": peer_device_id }));
             ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
         }
+        Ok(())
+    }
+
+    /// Devices that tried to connect and are waiting to be allowed in, oldest request first.
+    ///
+    /// Syncthing keeps this list itself: an inbound connection from a device that is not in
+    /// the config is refused and recorded here. Approving one is just
+    /// [`Syncthing::share_folder_with`] — Syncthing drops the entry as soon as the device is
+    /// configured, so nothing has to clear it afterwards.
+    ///
+    /// Empty is the normal state, and this is polled, so it stays a single cheap GET.
+    pub fn pending_devices(&self) -> Result<Vec<PendingDevice>> {
+        let mut res = ureq::get(format!("{}/rest/cluster/pending/devices", self.base_url))
+            .header("X-API-Key", &self.api_key)
+            .call()?;
+        let body: serde_json::Value = res.body_mut().read_json()?;
+        let Some(map) = body.as_object() else { return Ok(Vec::new()) };
+
+        let mut out: Vec<PendingDevice> = map
+            .iter()
+            .map(|(id, v)| PendingDevice {
+                id: id.clone(),
+                name: v["name"].as_str().unwrap_or_default().to_string(),
+                address: v["address"].as_str().unwrap_or_default().to_string(),
+                time: v["time"].as_str().unwrap_or_default().to_string(),
+            })
+            .collect();
+        // Oldest first, so a queue of requests keeps its order between polls. The timestamps
+        // are RFC 3339 in UTC, which sorts correctly as text.
+        out.sort_by(|a, b| a.time.cmp(&b.time).then_with(|| a.id.cmp(&b.id)));
+        Ok(out)
+    }
+
+    /// Drops one pending request without allowing it.
+    ///
+    /// **Syncthing does not remember the refusal.** A device that keeps dialling is recorded
+    /// again on its next attempt, so a front end that does not want to ask twice has to
+    /// remember the answer itself.
+    pub fn dismiss_pending_device(&self, device_id: &str) -> Result<()> {
+        ureq::delete(format!(
+            "{}/rest/cluster/pending/devices?device={device_id}",
+            self.base_url
+        ))
+        .header("X-API-Key", &self.api_key)
+        .call()?;
         Ok(())
     }
 

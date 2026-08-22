@@ -37,7 +37,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1325937936;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1683087493;
 
 // Section: executor
 
@@ -1066,41 +1066,6 @@ fn wire__crate__api__mobile_strings_impl(
         },
     )
 }
-fn wire__crate__api__pairing_decode_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "pairing_decode",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_code = <String>::sse_decode(&mut deserializer);
-            deserializer.end();
-            move |context| {
-                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
-                    (move || {
-                        let output_ok = crate::api::pairing_decode(api_code)?;
-                        Ok(output_ok)
-                    })(),
-                )
-            }
-        },
-    )
-}
 fn wire__crate__api__set_language_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1198,6 +1163,41 @@ fn wire__crate__api__settings_save_impl(
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || {
                         let output_ok = crate::api::settings_save(api_path, api_settings)?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__sync_approve_device_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "sync_approve_device",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_device_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::sync_approve_device(api_device_id)?;
                         Ok(output_ok)
                     })(),
                 )
@@ -1343,6 +1343,40 @@ fn wire__crate__api__sync_pairing_code_impl(
         },
     )
 }
+fn wire__crate__api__sync_pending_devices_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "sync_pending_devices",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::sync_pending_devices()?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__sync_rebuild_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1370,6 +1404,41 @@ fn wire__crate__api__sync_rebuild_impl(
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || {
                         let output_ok = crate::api::sync_rebuild()?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__sync_reject_device_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "sync_reject_device",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_device_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::sync_reject_device(api_device_id)?;
                         Ok(output_ok)
                     })(),
                 )
@@ -1509,6 +1578,41 @@ fn wire__crate__api__sync_unpair_impl(
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || {
                         let output_ok = crate::api::sync_unpair(api_device_id)?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__sync_verification_code_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "sync_verification_code",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_peer_device_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::sync_verification_code(api_peer_device_id)?;
                         Ok(output_ok)
                     })(),
                 )
@@ -2008,6 +2112,20 @@ impl SseDecode for crate::api::FfiMemo {
     }
 }
 
+impl SseDecode for crate::api::FfiPendingDevice {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_name = <String>::sse_decode(deserializer);
+        let mut var_verificationCode = <String>::sse_decode(deserializer);
+        return crate::api::FfiPendingDevice {
+            id: var_id,
+            name: var_name,
+            verification_code: var_verificationCode,
+        };
+    }
+}
+
 impl SseDecode for crate::api::FfiRelease {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2058,7 +2176,6 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_addPhoto = <String>::sse_decode(deserializer);
         let mut var_bodyHint = <String>::sse_decode(deserializer);
         let mut var_cameraError = <String>::sse_decode(deserializer);
-        let mut var_close = <String>::sse_decode(deserializer);
         let mut var_connected = <String>::sse_decode(deserializer);
         let mut var_copied = <String>::sse_decode(deserializer);
         let mut var_copy = <String>::sse_decode(deserializer);
@@ -2106,7 +2223,6 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_newMemo = <String>::sse_decode(deserializer);
         let mut var_noDevices = <String>::sse_decode(deserializer);
         let mut var_opening = <String>::sse_decode(deserializer);
-        let mut var_pairAdded = <String>::sse_decode(deserializer);
         let mut var_photoCamera = <String>::sse_decode(deserializer);
         let mut var_photoGallery = <String>::sse_decode(deserializer);
         let mut var_photoMissing = <String>::sse_decode(deserializer);
@@ -2115,7 +2231,6 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_save = <String>::sse_decode(deserializer);
         let mut var_scanHint = <String>::sse_decode(deserializer);
         let mut var_scanQr = <String>::sse_decode(deserializer);
-        let mut var_scanResult = <String>::sse_decode(deserializer);
         let mut var_syncDevices = <String>::sse_decode(deserializer);
         let mut var_syncNow = <String>::sse_decode(deserializer);
         let mut var_syncStarting = <String>::sse_decode(deserializer);
@@ -2151,11 +2266,21 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_resetVaultConfirm = <String>::sse_decode(deserializer);
         let mut var_resetVaultHint = <String>::sse_decode(deserializer);
         let mut var_securitySection = <String>::sse_decode(deserializer);
+        let mut var_allow = <String>::sse_decode(deserializer);
+        let mut var_deviceId = <String>::sse_decode(deserializer);
+        let mut var_pairCancelWait = <String>::sse_decode(deserializer);
+        let mut var_pairConnected = <String>::sse_decode(deserializer);
+        let mut var_pairRequest = <String>::sse_decode(deserializer);
+        let mut var_pairRequestHint = <String>::sse_decode(deserializer);
+        let mut var_pairVerification = <String>::sse_decode(deserializer);
+        let mut var_pairVerify = <String>::sse_decode(deserializer);
+        let mut var_pairWaiting = <String>::sse_decode(deserializer);
+        let mut var_pairWaitingHint = <String>::sse_decode(deserializer);
+        let mut var_reject = <String>::sse_decode(deserializer);
         return crate::api::FfiStrings {
             add_photo: var_addPhoto,
             body_hint: var_bodyHint,
             camera_error: var_cameraError,
-            close: var_close,
             connected: var_connected,
             copied: var_copied,
             copy: var_copy,
@@ -2203,7 +2328,6 @@ impl SseDecode for crate::api::FfiStrings {
             new_memo: var_newMemo,
             no_devices: var_noDevices,
             opening: var_opening,
-            pair_added: var_pairAdded,
             photo_camera: var_photoCamera,
             photo_gallery: var_photoGallery,
             photo_missing: var_photoMissing,
@@ -2212,7 +2336,6 @@ impl SseDecode for crate::api::FfiStrings {
             save: var_save,
             scan_hint: var_scanHint,
             scan_qr: var_scanQr,
-            scan_result: var_scanResult,
             sync_devices: var_syncDevices,
             sync_now: var_syncNow,
             sync_starting: var_syncStarting,
@@ -2248,6 +2371,17 @@ impl SseDecode for crate::api::FfiStrings {
             reset_vault_confirm: var_resetVaultConfirm,
             reset_vault_hint: var_resetVaultHint,
             security_section: var_securitySection,
+            allow: var_allow,
+            device_id: var_deviceId,
+            pair_cancel_wait: var_pairCancelWait,
+            pair_connected: var_pairConnected,
+            pair_request: var_pairRequest,
+            pair_request_hint: var_pairRequestHint,
+            pair_verification: var_pairVerification,
+            pair_verify: var_pairVerify,
+            pair_waiting: var_pairWaiting,
+            pair_waiting_hint: var_pairWaitingHint,
+            reject: var_reject,
         };
     }
 }
@@ -2309,6 +2443,18 @@ impl SseDecode for Vec<crate::api::FfiMemo> {
         let mut ans_ = vec![];
         for idx_ in 0..len_ {
             ans_.push(<crate::api::FfiMemo>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::FfiPendingDevice> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::FfiPendingDevice>::sse_decode(deserializer));
         }
         return ans_;
     }
@@ -2417,30 +2563,33 @@ fn pde_ffi_dispatcher_primary_impl(
         27 => wire__crate__api__memo_upsert_impl(port, ptr, rust_vec_len, data_len),
         28 => wire__crate__api__memos_in_group_impl(port, ptr, rust_vec_len, data_len),
         29 => wire__crate__api__mobile_strings_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__pairing_decode_impl(port, ptr, rust_vec_len, data_len),
-        31 => wire__crate__api__set_language_impl(port, ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__settings_load_impl(port, ptr, rust_vec_len, data_len),
-        33 => wire__crate__api__settings_save_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__api__set_language_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__settings_load_impl(port, ptr, rust_vec_len, data_len),
+        32 => wire__crate__api__settings_save_impl(port, ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__sync_approve_device_impl(port, ptr, rust_vec_len, data_len),
         34 => wire__crate__api__sync_devices_impl(port, ptr, rust_vec_len, data_len),
         35 => wire__crate__api__sync_ensure_folder_impl(port, ptr, rust_vec_len, data_len),
         36 => wire__crate__api__sync_pair_with_impl(port, ptr, rust_vec_len, data_len),
         37 => wire__crate__api__sync_pairing_code_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__sync_rebuild_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__sync_running_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__sync_start_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__sync_stop_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__sync_unpair_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__update_check_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__vault_change_password_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__api__vault_close_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__api__vault_exists_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__vault_has_recovery_code_impl(port, ptr, rust_vec_len, data_len),
-        48 => wire__crate__api__vault_issue_recovery_code_impl(port, ptr, rust_vec_len, data_len),
-        49 => wire__crate__api__vault_key_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__api__vault_open_impl(port, ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__vault_open_with_key_impl(port, ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__vault_reset_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__vault_reset_password_with_recovery_impl(
+        38 => wire__crate__api__sync_pending_devices_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__sync_rebuild_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__sync_reject_device_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__sync_running_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__sync_start_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__sync_stop_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__sync_unpair_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__sync_verification_code_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__update_check_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__vault_change_password_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__api__vault_close_impl(port, ptr, rust_vec_len, data_len),
+        49 => wire__crate__api__vault_exists_impl(port, ptr, rust_vec_len, data_len),
+        50 => wire__crate__api__vault_has_recovery_code_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__vault_issue_recovery_code_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__vault_key_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__vault_open_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__vault_open_with_key_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__vault_reset_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__vault_reset_password_with_recovery_impl(
             port,
             ptr,
             rust_vec_len,
@@ -2530,6 +2679,25 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::FfiMemo> for crate::api::FfiM
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::FfiPendingDevice {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.name.into_into_dart().into_dart(),
+            self.verification_code.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::FfiPendingDevice {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::FfiPendingDevice>
+    for crate::api::FfiPendingDevice
+{
+    fn into_into_dart(self) -> crate::api::FfiPendingDevice {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::FfiRelease {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -2590,7 +2758,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.add_photo.into_into_dart().into_dart(),
             self.body_hint.into_into_dart().into_dart(),
             self.camera_error.into_into_dart().into_dart(),
-            self.close.into_into_dart().into_dart(),
             self.connected.into_into_dart().into_dart(),
             self.copied.into_into_dart().into_dart(),
             self.copy.into_into_dart().into_dart(),
@@ -2638,7 +2805,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.new_memo.into_into_dart().into_dart(),
             self.no_devices.into_into_dart().into_dart(),
             self.opening.into_into_dart().into_dart(),
-            self.pair_added.into_into_dart().into_dart(),
             self.photo_camera.into_into_dart().into_dart(),
             self.photo_gallery.into_into_dart().into_dart(),
             self.photo_missing.into_into_dart().into_dart(),
@@ -2647,7 +2813,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.save.into_into_dart().into_dart(),
             self.scan_hint.into_into_dart().into_dart(),
             self.scan_qr.into_into_dart().into_dart(),
-            self.scan_result.into_into_dart().into_dart(),
             self.sync_devices.into_into_dart().into_dart(),
             self.sync_now.into_into_dart().into_dart(),
             self.sync_starting.into_into_dart().into_dart(),
@@ -2683,6 +2848,17 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.reset_vault_confirm.into_into_dart().into_dart(),
             self.reset_vault_hint.into_into_dart().into_dart(),
             self.security_section.into_into_dart().into_dart(),
+            self.allow.into_into_dart().into_dart(),
+            self.device_id.into_into_dart().into_dart(),
+            self.pair_cancel_wait.into_into_dart().into_dart(),
+            self.pair_connected.into_into_dart().into_dart(),
+            self.pair_request.into_into_dart().into_dart(),
+            self.pair_request_hint.into_into_dart().into_dart(),
+            self.pair_verification.into_into_dart().into_dart(),
+            self.pair_verify.into_into_dart().into_dart(),
+            self.pair_waiting.into_into_dart().into_dart(),
+            self.pair_waiting_hint.into_into_dart().into_dart(),
+            self.reject.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -2756,6 +2932,15 @@ impl SseEncode for crate::api::FfiMemo {
     }
 }
 
+impl SseEncode for crate::api::FfiPendingDevice {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
+        <String>::sse_encode(self.name, serializer);
+        <String>::sse_encode(self.verification_code, serializer);
+    }
+}
+
 impl SseEncode for crate::api::FfiRelease {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -2790,7 +2975,6 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.add_photo, serializer);
         <String>::sse_encode(self.body_hint, serializer);
         <String>::sse_encode(self.camera_error, serializer);
-        <String>::sse_encode(self.close, serializer);
         <String>::sse_encode(self.connected, serializer);
         <String>::sse_encode(self.copied, serializer);
         <String>::sse_encode(self.copy, serializer);
@@ -2838,7 +3022,6 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.new_memo, serializer);
         <String>::sse_encode(self.no_devices, serializer);
         <String>::sse_encode(self.opening, serializer);
-        <String>::sse_encode(self.pair_added, serializer);
         <String>::sse_encode(self.photo_camera, serializer);
         <String>::sse_encode(self.photo_gallery, serializer);
         <String>::sse_encode(self.photo_missing, serializer);
@@ -2847,7 +3030,6 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.save, serializer);
         <String>::sse_encode(self.scan_hint, serializer);
         <String>::sse_encode(self.scan_qr, serializer);
-        <String>::sse_encode(self.scan_result, serializer);
         <String>::sse_encode(self.sync_devices, serializer);
         <String>::sse_encode(self.sync_now, serializer);
         <String>::sse_encode(self.sync_starting, serializer);
@@ -2883,6 +3065,17 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.reset_vault_confirm, serializer);
         <String>::sse_encode(self.reset_vault_hint, serializer);
         <String>::sse_encode(self.security_section, serializer);
+        <String>::sse_encode(self.allow, serializer);
+        <String>::sse_encode(self.device_id, serializer);
+        <String>::sse_encode(self.pair_cancel_wait, serializer);
+        <String>::sse_encode(self.pair_connected, serializer);
+        <String>::sse_encode(self.pair_request, serializer);
+        <String>::sse_encode(self.pair_request_hint, serializer);
+        <String>::sse_encode(self.pair_verification, serializer);
+        <String>::sse_encode(self.pair_verify, serializer);
+        <String>::sse_encode(self.pair_waiting, serializer);
+        <String>::sse_encode(self.pair_waiting_hint, serializer);
+        <String>::sse_encode(self.reject, serializer);
     }
 }
 
@@ -2936,6 +3129,16 @@ impl SseEncode for Vec<crate::api::FfiMemo> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::FfiMemo>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::FfiPendingDevice> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::FfiPendingDevice>::sse_encode(item, serializer);
         }
     }
 }

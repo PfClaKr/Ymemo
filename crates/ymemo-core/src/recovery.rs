@@ -19,7 +19,10 @@ use rand::{rngs::OsRng, RngCore};
 use ymemo_i18n::t;
 
 /// Characters a code is built from. 32 of them, so a random byte maps without bias.
-const ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+///
+/// Shared with [`crate::pairing`]: a pairing verification code is read aloud or compared
+/// across two screens, and the same "no I/1, L/1, O/0, U" rule is what makes that possible.
+pub(crate) const ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 /// Characters per dash-separated group.
 const GROUP: usize = 4;
 /// Number of groups; `GROUPS * GROUP * 5` bits of entropy.

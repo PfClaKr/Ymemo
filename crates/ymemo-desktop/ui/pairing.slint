@@ -5,6 +5,10 @@ import { Palette, TabButton } from "theme.slint";
 // Device pairing panel.
 //  - Default: a 6-digit code on the same network (ours shown, theirs entered).
 //  - Fallback: QR or a pasted device id, for devices on different networks.
+//
+// The fallback path only ever does *this* device's half: registering a peer starts dialling
+// it, and nothing syncs until that device allows the request. `waiting-code` is what says so
+// — the same eight characters the other device shows on its approval window.
 // One other device currently sharing this vault.
 export struct SharedDeviceRow {
     id: string,        // syncthing device id, also the unshare handle
@@ -19,6 +23,8 @@ export component PairingPanel inherits VerticalLayout {
     in property <string> message;          // result of a manual registration
     in property <string> lan-code;         // this device's current 6-digit code
     in property <string> lan-message;      // result of a LAN connection
+    // Verification code while a registered peer has not answered yet; empty when not waiting.
+    in property <string> waiting-code;
     in property <[SharedDeviceRow]> devices;  // devices sharing the vault
     in property <color> ink: #5c5c25;
     callback add-peer(string);
@@ -134,6 +140,40 @@ export component PairingPanel inherits VerticalLayout {
                 font-size: 11px;
                 color: root.ink;
                 wrap: word-wrap;
+            }
+
+            // Waiting to be let in by the device whose code was just entered.
+            if root.waiting-code != "": VerticalLayout {
+                spacing: 4px;
+                Rectangle { height: 1px; background: root.ink; opacity: 0.25; }
+                Text {
+                    text: Strings.ui_pair_waiting;
+                    font-size: 11px;
+                    font-weight: 700;
+                    color: root.ink;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: Strings.ui_pair_verification;
+                    font-size: 10px;
+                    color: root.ink;
+                    opacity: 0.8;
+                }
+                Text {
+                    text: root.waiting-code;
+                    font-size: 22px;
+                    font-weight: 800;
+                    letter-spacing: 3px;
+                    color: root.ink;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: Strings.ui_pair_waiting_hint;
+                    font-size: 10px;
+                    color: root.ink;
+                    opacity: 0.8;
+                    wrap: word-wrap;
+                }
             }
         }
 

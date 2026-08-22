@@ -7,13 +7,14 @@
 //! Transport (Syncthing) runs as the same bundled child process as on the desktop; see the
 //! "Transport" section near the bottom for what mobile does differently.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Mutex;
 
 use anyhow::{anyhow, Result};
 use ymemo_core::{
     lan_pair, now_millis,
-    pairing::PairingCode,
+    pairing::{self, PairingCode},
     sync::{Syncthing, VAULT_FOLDER_ID},
     vault::Vault,
     Attachment, Group, Memo, Store,
@@ -138,7 +139,6 @@ pub struct FfiStrings {
     pub add_photo: String,
     pub body_hint: String,
     pub camera_error: String,
-    pub close: String,
     pub connected: String,
     pub copied: String,
     pub copy: String,
@@ -186,7 +186,6 @@ pub struct FfiStrings {
     pub new_memo: String,
     pub no_devices: String,
     pub opening: String,
-    pub pair_added: String,
     pub photo_camera: String,
     pub photo_gallery: String,
     pub photo_missing: String,
@@ -195,7 +194,6 @@ pub struct FfiStrings {
     pub save: String,
     pub scan_hint: String,
     pub scan_qr: String,
-    pub scan_result: String,
     pub sync_devices: String,
     pub sync_now: String,
     pub sync_starting: String,
@@ -234,6 +232,19 @@ pub struct FfiStrings {
     pub reset_vault_confirm: String,
     pub reset_vault_hint: String,
     pub security_section: String,
+
+    // Incoming and outgoing pairing requests.
+    pub allow: String,
+    pub device_id: String,
+    pub pair_cancel_wait: String,
+    pub pair_connected: String,
+    pub pair_request: String,
+    pub pair_request_hint: String,
+    pub pair_verification: String,
+    pub pair_verify: String,
+    pub pair_waiting: String,
+    pub pair_waiting_hint: String,
+    pub reject: String,
 }
 
 /// Collects the mobile strings for the current language.
@@ -242,7 +253,6 @@ pub fn mobile_strings() -> FfiStrings {
         add_photo: t!("mobile.add_photo"),
         body_hint: t!("mobile.body_hint"),
         camera_error: t!("mobile.camera_error"),
-        close: t!("mobile.close"),
         connected: t!("mobile.connected"),
         copied: t!("mobile.copied"),
         copy: t!("mobile.copy"),
@@ -290,7 +300,6 @@ pub fn mobile_strings() -> FfiStrings {
         new_memo: t!("mobile.new_memo"),
         no_devices: t!("mobile.no_devices"),
         opening: t!("mobile.opening"),
-        pair_added: t!("mobile.pair_added"),
         photo_camera: t!("mobile.photo_camera"),
         photo_gallery: t!("mobile.photo_gallery"),
         photo_missing: t!("mobile.photo_missing"),
@@ -299,7 +308,6 @@ pub fn mobile_strings() -> FfiStrings {
         save: t!("mobile.save"),
         scan_hint: t!("mobile.scan_hint"),
         scan_qr: t!("mobile.scan_qr"),
-        scan_result: t!("mobile.scan_result"),
         sync_devices: t!("mobile.sync_devices"),
         sync_now: t!("mobile.sync_now"),
         sync_starting: t!("mobile.sync_starting"),
@@ -336,6 +344,18 @@ pub fn mobile_strings() -> FfiStrings {
         reset_vault_confirm: t!("mobile.reset_vault_confirm"),
         reset_vault_hint: t!("mobile.reset_vault_hint"),
         security_section: t!("mobile.security_section"),
+
+        allow: t!("mobile.allow"),
+        device_id: t!("mobile.device_id"),
+        pair_cancel_wait: t!("mobile.pair_cancel_wait"),
+        pair_connected: t!("mobile.pair_connected"),
+        pair_request: t!("mobile.pair_request"),
+        pair_request_hint: t!("mobile.pair_request_hint"),
+        pair_verification: t!("mobile.pair_verification"),
+        pair_verify: t!("mobile.pair_verify"),
+        pair_waiting: t!("mobile.pair_waiting"),
+        pair_waiting_hint: t!("mobile.pair_waiting_hint"),
+        reject: t!("mobile.reject"),
     }
 }
 
@@ -662,11 +682,6 @@ pub fn sync_rebuild() -> Result<()> {
     with_vault(|v| v.rebuild())
 }
 
-/// Validates a scanned pairing code and extracts the device id, without pairing.
-pub fn pairing_decode(code: String) -> Result<String> {
-    Ok(PairingCode::decode(&code)?.syncthing_device_id)
-}
-
 // ===========================================================================
 // Transport (Syncthing)
 // ===========================================================================
@@ -764,11 +779,14 @@ pub fn sync_pairing_code() -> Result<String> {
 
 /// Pairs with a scanned or typed code: registers the peer and shares the vault with it.
 ///
-/// This is **one half of pairing**. The other device has to do the same with our code, or
-/// syncthing will never connect the two.
-pub fn sync_pair_with(code: String) -> Result<()> {
+/// Returns the peer's device id, which the screen then waits on: this side is now dialling a
+/// device that has never heard of it, so nothing syncs until the **other** device allows the
+/// request in (`sync_pending_devices` there). It no longer has to be given this device's code
+/// by hand — that was the second scan nobody remembered to do.
+pub fn sync_pair_with(code: String) -> Result<String> {
     let peer = PairingCode::decode(&code)?.syncthing_device_id;
-    with_sync(|st| st.share_folder_with(VAULT_FOLDER_ID, &peer))
+    with_sync(|st| st.share_folder_with(VAULT_FOLDER_ID, &peer))?;
+    Ok(peer)
 }
 
 /// Devices this vault is shared with, ourselves excluded.
@@ -786,6 +804,88 @@ pub fn sync_devices() -> Result<Vec<FfiSharedDevice>> {
 /// unpairs too.
 pub fn sync_unpair(device_id: String) -> Result<()> {
     with_sync(|st| st.unshare_folder_with(VAULT_FOLDER_ID, &device_id))
+}
+
+// ===========================================================================
+// Incoming pairing requests
+// ===========================================================================
+//
+// The half of pairing that used to be missing. A device that scans this one's code adds it
+// and starts dialling; Syncthing here refuses the unknown caller and files it as a pending
+// device, which is what turns up in `sync_pending_devices`. Allowing one is the same
+// `share_folder_with` the scan side already did, in the other direction.
+
+/// Requests refused during this run of the app.
+///
+/// Syncthing does not remember a refusal — the caller keeps retrying and is filed again —
+/// so the answer is kept here instead. Deliberately in memory and deliberately **not** in
+/// the `Syncthing` handle: mobile stops the daemon every time the app is backgrounded, and
+/// a refusal that expired on the walk back to the app would be no refusal at all. Starting
+/// the app again clears it, so a mis-tapped "reject" is never permanent.
+static REJECTED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+fn rejected_lock() -> Result<std::sync::MutexGuard<'static, Option<HashSet<String>>>> {
+    REJECTED.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))
+}
+
+/// A device asking to be let in.
+pub struct FfiPendingDevice {
+    /// Syncthing device id; the handle for approving or rejecting.
+    pub id: String,
+    /// The name it announced. **It chose this itself**, so the UI must show it as a hint
+    /// next to the id and never in place of one.
+    pub name: String,
+    /// The eight characters the other device is showing on its own screen right now. The
+    /// user comparing the two is what makes an approval safe; see `ymemo_core::pairing`.
+    pub verification_code: String,
+}
+
+/// Requests waiting for an answer, oldest first, minus the ones already rejected.
+pub fn sync_pending_devices() -> Result<Vec<FfiPendingDevice>> {
+    let rejected = rejected_lock()?.clone().unwrap_or_default();
+    with_sync(|st| {
+        let my_id = st.device_id()?;
+        Ok(st
+            .pending_devices()?
+            .into_iter()
+            .filter(|d| !rejected.contains(&d.id))
+            .map(|d| FfiPendingDevice {
+                verification_code: pairing::verification_code(&my_id, &d.id),
+                id: d.id,
+                name: d.name,
+            })
+            .collect())
+    })
+}
+
+/// Allows a device in: shares the vault with it, completing the link.
+///
+/// Syncthing drops the pending entry as soon as the device is in the config, so there is
+/// nothing to clear afterwards.
+pub fn sync_approve_device(device_id: String) -> Result<()> {
+    // An id that was rejected and then approved must not stay filtered out of the list.
+    if let Some(set) = rejected_lock()?.as_mut() {
+        set.remove(&device_id);
+    }
+    with_sync(|st| st.share_folder_with(VAULT_FOLDER_ID, &device_id))
+}
+
+/// Turns a device away and stops asking about it for the rest of this run.
+pub fn sync_reject_device(device_id: String) -> Result<()> {
+    rejected_lock()?.get_or_insert_with(HashSet::new).insert(device_id.clone());
+    // Best effort: the local answer is what actually silences the prompt, and a daemon that
+    // has already gone away has no list to clear.
+    let _ = with_sync(|st| st.dismiss_pending_device(&device_id));
+    Ok(())
+}
+
+/// The verification code to show while waiting for `peer_device_id` to allow this device in.
+///
+/// The same eight characters the other side sees on its approval prompt, derived from the
+/// two device ids alone.
+pub fn sync_verification_code(peer_device_id: String) -> Result<String> {
+    let peer = PairingCode::decode(&peer_device_id)?.syncthing_device_id;
+    with_sync(|st| Ok(pairing::verification_code(&st.device_id()?, &peer)))
 }
 
 // ===========================================================================
@@ -977,13 +1077,21 @@ mod tests {
         std::fs::remove_dir_all(&base).ok();
     }
 
+    /// Rejecting is the local answer, so it must not depend on the daemon being up.
+    ///
+    /// It runs with no daemon here, which is exactly the case the "best effort" dismissal
+    /// exists for: an app that was backgrounded between the prompt and the tap still has to
+    /// record the refusal, or the request would come straight back.
     #[test]
-    fn pairing_decode_works() {
-        assert_eq!(
-            pairing_decode("YMEMO1:ABC-DEF-1234".into()).unwrap(),
-            "ABC-DEF-1234"
-        );
-        assert!(pairing_decode("!!".into()).is_err());
+    fn rejecting_works_without_a_running_daemon() {
+        let id = format!("TESTDEV-{}", uuid_like());
+        sync_reject_device(id.clone()).unwrap();
+        assert!(rejected_lock().unwrap().as_ref().is_some_and(|s| s.contains(&id)));
+
+        // Approving the same device has to lift the refusal, or a change of mind would leave
+        // it filtered out of the list forever.
+        let _ = sync_approve_device(id.clone());
+        assert!(!rejected_lock().unwrap().as_ref().is_some_and(|s| s.contains(&id)));
     }
 
     fn uuid_like() -> String {
