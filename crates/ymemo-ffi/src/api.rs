@@ -95,6 +95,8 @@ pub struct FfiGroup {
     pub id: String,
     pub name: String,
     pub parent_id: String,
+    /// Palette key, the same set memos use; the core never turns it into a real color.
+    pub color: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -105,6 +107,7 @@ impl From<Group> for FfiGroup {
             id: g.id,
             name: g.name,
             parent_id: g.parent_id,
+            color: g.color,
             created_at: g.created_at,
             updated_at: g.updated_at,
         }
@@ -200,6 +203,37 @@ pub struct FfiStrings {
     pub title_hint: String,
     pub unlock: String,
     pub unpair: String,
+
+    // Colors, and the master password / recovery code screens. The `msg.*` ones are shared
+    // word for word with the desktop, which raises them from Rust.
+    pub color: String,
+    pub change_password: String,
+    pub confirm_password: String,
+    pub create_vault: String,
+    pub current_password: String,
+    pub forgot_password: String,
+    pub issue_recovery: String,
+    pub new_password: String,
+    pub new_vault_hint: String,
+    pub no_recovery: String,
+    pub password_changed: String,
+    pub password_hint: String,
+    pub password_mismatch: String,
+    pub recovery_absent: String,
+    pub recovery_ack: String,
+    pub recovery_code: String,
+    pub recovery_hint: String,
+    pub recovery_issued: String,
+    pub recovery_present: String,
+    pub recovery_prompt: String,
+    pub recovery_warning: String,
+    pub reissue_recovery: String,
+    pub reset_done: String,
+    pub reset_password: String,
+    pub reset_vault: String,
+    pub reset_vault_confirm: String,
+    pub reset_vault_hint: String,
+    pub security_section: String,
 }
 
 /// Collects the mobile strings for the current language.
@@ -273,6 +307,35 @@ pub fn mobile_strings() -> FfiStrings {
         title_hint: t!("mobile.title_hint"),
         unlock: t!("mobile.unlock"),
         unpair: t!("mobile.unpair"),
+
+        color: t!("mobile.color"),
+        change_password: t!("mobile.change_password"),
+        confirm_password: t!("mobile.confirm_password"),
+        create_vault: t!("mobile.create_vault"),
+        current_password: t!("mobile.current_password"),
+        forgot_password: t!("mobile.forgot_password"),
+        issue_recovery: t!("mobile.issue_recovery"),
+        new_password: t!("mobile.new_password"),
+        new_vault_hint: t!("mobile.new_vault_hint"),
+        no_recovery: t!("mobile.no_recovery"),
+        password_changed: t!("msg.password_changed"),
+        password_hint: t!("mobile.password_hint"),
+        password_mismatch: t!("mobile.password_mismatch"),
+        recovery_absent: t!("mobile.recovery_absent"),
+        recovery_ack: t!("mobile.recovery_ack"),
+        recovery_code: t!("mobile.recovery_code"),
+        recovery_hint: t!("mobile.recovery_hint"),
+        recovery_issued: t!("msg.recovery_issued"),
+        recovery_present: t!("mobile.recovery_present"),
+        recovery_prompt: t!("mobile.recovery_prompt"),
+        recovery_warning: t!("mobile.recovery_warning"),
+        reissue_recovery: t!("mobile.reissue_recovery"),
+        reset_done: t!("msg.reset_done"),
+        reset_password: t!("mobile.reset_password"),
+        reset_vault: t!("mobile.reset_vault"),
+        reset_vault_confirm: t!("mobile.reset_vault_confirm"),
+        reset_vault_hint: t!("mobile.reset_vault_hint"),
+        security_section: t!("mobile.security_section"),
     }
 }
 
@@ -287,6 +350,83 @@ pub fn vault_open(vault_dir: String, cache_db_path: String, password: String) ->
 
 /// Closes the vault (log out).
 pub fn vault_close() -> Result<()> {
+    *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = None;
+    Ok(())
+}
+
+// ===========================================================================
+// Master password and recovery code
+// ===========================================================================
+//
+// The core does all of this by rewriting `vault.json`'s wrapper alone — no log and no blob
+// is touched — so every call here is two Argon2id runs at worst and nothing to show progress
+// for. See `ymemo_core::vault` for why that is safe.
+
+/// Whether `vault_dir` already holds a vault.
+///
+/// The lock screen asks before anything is unlocked, to tell "set a password" from "enter
+/// the password" — and to know that the vault it just created is the one to show a recovery
+/// code for.
+pub fn vault_exists(vault_dir: String) -> bool {
+    Path::new(&vault_dir).join("vault.json").exists()
+}
+
+/// Whether the vault at `vault_dir` has a recovery code, without opening it.
+pub fn vault_has_recovery_code(vault_dir: String) -> bool {
+    ymemo_core::vault::recovery_code_exists(&vault_dir)
+}
+
+/// Replaces the master password of the open vault, after checking the current one.
+pub fn vault_change_password(current: String, new_password: String) -> Result<()> {
+    with_vault(|v| v.change_password(current.as_bytes(), new_password.as_bytes()))
+}
+
+/// Issues a fresh recovery code, retiring any earlier one, and returns it.
+///
+/// **The only time the code is readable.** Only its Argon2id wrapper is stored, so a code
+/// that is not written down is gone.
+pub fn vault_issue_recovery_code() -> Result<String> {
+    with_vault(|v| v.issue_recovery_code())
+}
+
+/// Sets a new master password from the recovery code, for a vault nobody can unlock.
+///
+/// Takes the directory rather than an open vault, because the whole point is that it cannot
+/// be opened. Unlock with the new password afterwards; the recovery code stays valid.
+pub fn vault_reset_password_with_recovery(
+    vault_dir: String,
+    code: String,
+    new_password: String,
+) -> Result<()> {
+    ymemo_core::vault::reset_password_with_recovery(&vault_dir, &code, new_password.as_bytes())
+}
+
+/// Deletes this device's vault and its cache: the way out of a forgotten password when there
+/// is no recovery code either.
+///
+/// **Unsharing comes first and is not optional.** Syncthing propagates deletions, so emptying
+/// a folder it still carries would delete the memos on every paired device too. If the folder
+/// cannot be released, nothing is deleted at all. The daemon keeps running: it is still this
+/// device's identity, and the vault created next registers a folder under the same id.
+pub fn vault_reset(vault_dir: String, cache_db_path: String) -> Result<()> {
+    // Scoped so the sync lock is released before the vault lock is taken; the two are
+    // reached from different Dart threads and one consistent order is what keeps that safe.
+    {
+        let guard = sync_lock()?;
+        if let Some(st) = guard.as_ref() {
+            // Wrapped so the message says *nothing was deleted*: a bare REST error here
+            // reads like the wipe half-happened, which is the one thing it never does.
+            st.remove_folder(VAULT_FOLDER_ID)
+                .map_err(|_| anyhow!(t!("msg.unshare_before_reset")))?;
+        }
+    }
+
+    ymemo_core::vault::wipe(&vault_dir)?;
+    // The cache is a plaintext copy of everything the vault held, so it goes with it.
+    let db = Path::new(&cache_db_path);
+    if db.exists() {
+        std::fs::remove_file(db)?;
+    }
     *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = None;
     Ok(())
 }
@@ -480,6 +620,20 @@ pub fn group_rename(id: String, name: String) -> Result<()> {
     })
 }
 
+/// Sets a group's palette key. Folders carry a color just like memos and sync it the same
+/// way, so the two UIs agree on what a folder looks like.
+pub fn group_set_color(id: String, color: String) -> Result<()> {
+    with_vault(|v| {
+        let mut group = v
+            .store()
+            .get_group(&id)?
+            .ok_or_else(|| anyhow!(t!("core.group_not_found", id = id)))?;
+        group.color = color;
+        group.updated_at = now_millis();
+        v.upsert_group(&group)
+    })
+}
+
 /// Moves a group under another; moving it into its own subtree is rejected.
 pub fn group_move(id: String, parent_id: String) -> Result<()> {
     with_vault(|v| {
@@ -577,6 +731,18 @@ pub fn sync_start(binary_path: String, home_dir: String, vault_dir: String) -> R
     let id = st.device_id()?;
     *guard = Some(st);
     Ok(PairingCode::new(&id).encode())
+}
+
+/// Re-registers the vault directory with the running daemon.
+///
+/// [`sync_start`] does this on its first run and then short-circuits, so a vault created
+/// after [`vault_reset`] — which removes the folder on purpose — would sit there unshared
+/// until the app was next restarted. Doing nothing when the daemon is down is correct: the
+/// next `sync_start` registers it anyway.
+pub fn sync_ensure_folder(vault_dir: String) -> Result<()> {
+    let guard = sync_lock()?;
+    let Some(st) = guard.as_ref() else { return Ok(()) };
+    st.ensure_folder(VAULT_FOLDER_ID, "Ymemo Vault", Path::new(&vault_dir))
 }
 
 /// Stops the daemon. Safe to call when it is not running.
