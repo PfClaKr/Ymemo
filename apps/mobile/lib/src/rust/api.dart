@@ -145,6 +145,22 @@ Future<void> attachmentSetWidth(
     RustLib.instance.api
         .crateApiAttachmentSetWidth(id: id, widthEmMilli: widthEmMilli);
 
+/// Sets where the photo sits on the note and how wide it is, in one write.
+///
+/// The position is a fraction of the note (per-mille) rather than pixels, so a photo dropped
+/// two thirds of the way down a phone screen is two thirds of the way down a desktop sticky
+/// too. Both are clamped by the core.
+Future<void> attachmentSetLayout(
+        {required String id,
+        required PlatformInt64 xPermille,
+        required PlatformInt64 yPermille,
+        required PlatformInt64 widthEmMilli}) =>
+    RustLib.instance.api.crateApiAttachmentSetLayout(
+        id: id,
+        xPermille: xPermille,
+        yPermille: yPermille,
+        widthEmMilli: widthEmMilli);
+
 /// Detaches a photo; the blob file stays (no GC).
 Future<void> attachmentRemove({required String id}) =>
     RustLib.instance.api.crateApiAttachmentRemove(id: id);
@@ -342,6 +358,10 @@ class FfiAttachment {
 
   /// Display width in 1/1000 em; pixels = value / 1000 * the platform's base font px.
   final PlatformInt64 widthEmMilli;
+
+  /// Top-left corner on the note, in per-mille of the note area (0..=1000 across and down).
+  final PlatformInt64 xPermille;
+  final PlatformInt64 yPermille;
   final PlatformInt64 createdAt;
 
   const FfiAttachment({
@@ -353,6 +373,8 @@ class FfiAttachment {
     required this.widthPx,
     required this.heightPx,
     required this.widthEmMilli,
+    required this.xPermille,
+    required this.yPermille,
     required this.createdAt,
   });
 
@@ -366,6 +388,8 @@ class FfiAttachment {
       widthPx.hashCode ^
       heightPx.hashCode ^
       widthEmMilli.hashCode ^
+      xPermille.hashCode ^
+      yPermille.hashCode ^
       createdAt.hashCode;
 
   @override
@@ -381,6 +405,8 @@ class FfiAttachment {
           widthPx == other.widthPx &&
           heightPx == other.heightPx &&
           widthEmMilli == other.widthEmMilli &&
+          xPermille == other.xPermille &&
+          yPermille == other.yPermille &&
           createdAt == other.createdAt;
 }
 

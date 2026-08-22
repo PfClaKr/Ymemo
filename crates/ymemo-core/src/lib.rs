@@ -36,6 +36,15 @@ pub const DEFAULT_WIDTH_EM_MILLI: i64 = 20_000;
 pub const MIN_WIDTH_EM_MILLI: i64 = 4_000;
 pub const MAX_WIDTH_EM_MILLI: i64 = 80_000;
 
+/// How far each further photo on the same memo is offset from the previous one, in
+/// per-mille of the note area. Without it every photo would land on the same spot and the
+/// one underneath would be unreachable.
+pub const PLACE_CASCADE_PERMILLE: i64 = 60;
+/// Where the first photo lands, in per-mille of the note area.
+pub const PLACE_ORIGIN_PERMILLE: i64 = 40;
+/// After this many steps the cascade starts over, so it cannot walk off the note.
+const PLACE_CASCADE_STEPS: i64 = 6;
+
 /// A single memo. Photos hang off it as separate [`Attachment`]s.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Memo {
@@ -94,6 +103,15 @@ pub struct Attachment {
     pub height_px: i64,
     /// Display width in 1/1000 em; keep it inside [`clamp_width_em_milli`].
     pub width_em_milli: i64,
+    /// Where the photo's top-left corner sits **inside the note**, in per-mille of the note
+    /// area (0..=1000 across and down).
+    ///
+    /// A fraction, not em: the note is a phone screen on one device and a 260px sticky on
+    /// the next, so a photo pinned two thirds of the way down stays two thirds of the way
+    /// down instead of falling off the short one. The width stays in em, because a photo's
+    /// size is about how much of the *text* it is worth, not how much of the window.
+    pub x_permille: i64,
+    pub y_permille: i64,
     pub created_at: i64,
 }
 
@@ -109,8 +127,24 @@ impl Attachment {
             width_px: 0,
             height_px: 0,
             width_em_milli: DEFAULT_WIDTH_EM_MILLI,
+            x_permille: PLACE_ORIGIN_PERMILLE,
+            y_permille: PLACE_ORIGIN_PERMILLE,
             created_at: now_millis(),
         }
+    }
+
+    /// Top-left corner in logical px for a note area of `canvas_w` x `canvas_h` px.
+    ///
+    /// Clamped so the photo always ends up at least partly on the note, however small the
+    /// window is or whatever another device stored.
+    pub fn display_pos(&self, canvas_w: f64, canvas_h: f64, base_font_px: f64) -> (f64, f64) {
+        let (w, h) = self.display_size(base_font_px);
+        let x = clamp_permille(self.x_permille) as f64 / 1000.0 * canvas_w;
+        let y = clamp_permille(self.y_permille) as f64 / 1000.0 * canvas_h;
+        (
+            x.min((canvas_w - w).max(0.0)),
+            y.min((canvas_h - h).max(0.0)),
+        )
     }
 
     /// Display size in logical px for this platform, where `base_font_px` is the UI's body
@@ -129,6 +163,18 @@ impl Attachment {
 /// Clamps a display width, so a bad value from another device or version cannot break the UI.
 pub fn clamp_width_em_milli(v: i64) -> i64 {
     v.clamp(MIN_WIDTH_EM_MILLI, MAX_WIDTH_EM_MILLI)
+}
+
+/// Clamps a position fraction to 0..=1000, for the same reason.
+pub fn clamp_permille(v: i64) -> i64 {
+    v.clamp(0, 1000)
+}
+
+/// Where the `n`-th photo of a memo should land, so photos do not pile up on one spot.
+pub fn cascade_permille(n: usize) -> (i64, i64) {
+    let step = (n as i64) % PLACE_CASCADE_STEPS;
+    let off = PLACE_ORIGIN_PERMILLE + step * PLACE_CASCADE_PERMILLE;
+    (clamp_permille(off), clamp_permille(off))
 }
 
 /// A folder of memos; `parent_id` nests them.
@@ -225,6 +271,8 @@ impl Store {
                 width_px       INTEGER NOT NULL DEFAULT 0,
                 height_px      INTEGER NOT NULL DEFAULT 0,
                 width_em_milli INTEGER NOT NULL DEFAULT 20000,
+                x_permille     INTEGER NOT NULL DEFAULT 40,
+                y_permille     INTEGER NOT NULL DEFAULT 40,
                 created_at     INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS attachments_memo ON attachments(memo_id);
@@ -241,6 +289,16 @@ impl Store {
             ("memos", "opacity", "ALTER TABLE memos ADD COLUMN opacity INTEGER NOT NULL DEFAULT 100"),
             ("memos", "group_id", "ALTER TABLE memos ADD COLUMN group_id TEXT NOT NULL DEFAULT ''"),
             ("groups", "color", "ALTER TABLE groups ADD COLUMN color TEXT NOT NULL DEFAULT 'yellow'"),
+            (
+                "attachments",
+                "x_permille",
+                "ALTER TABLE attachments ADD COLUMN x_permille INTEGER NOT NULL DEFAULT 40",
+            ),
+            (
+                "attachments",
+                "y_permille",
+                "ALTER TABLE attachments ADD COLUMN y_permille INTEGER NOT NULL DEFAULT 40",
+            ),
         ] {
             let exists = self
                 .conn
@@ -293,11 +351,13 @@ impl Store {
     pub fn upsert_attachment(&self, a: &Attachment) -> Result<()> {
         self.conn.execute(
             "INSERT INTO attachments
-                 (id, memo_id, hash, name, mime, width_px, height_px, width_em_milli, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 (id, memo_id, hash, name, mime, width_px, height_px, width_em_milli,
+                  x_permille, y_permille, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
              ON CONFLICT(id) DO UPDATE SET
                  memo_id = ?2, hash = ?3, name = ?4, mime = ?5,
-                 width_px = ?6, height_px = ?7, width_em_milli = ?8",
+                 width_px = ?6, height_px = ?7, width_em_milli = ?8,
+                 x_permille = ?9, y_permille = ?10",
             params![
                 a.id,
                 a.memo_id,
@@ -307,6 +367,8 @@ impl Store {
                 a.width_px,
                 a.height_px,
                 clamp_width_em_milli(a.width_em_milli),
+                clamp_permille(a.x_permille),
+                clamp_permille(a.y_permille),
                 a.created_at
             ],
         )?;
@@ -316,7 +378,8 @@ impl Store {
     /// Attachments of one memo, in the order they were added.
     pub fn attachments_of(&self, memo_id: &str) -> Result<Vec<Attachment>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, memo_id, hash, name, mime, width_px, height_px, width_em_milli, created_at
+            "SELECT id, memo_id, hash, name, mime, width_px, height_px, width_em_milli,
+                    x_permille, y_permille, created_at
              FROM attachments WHERE memo_id = ?1 ORDER BY created_at",
         )?;
         let rows = stmt.query_map([memo_id], row_to_attachment)?;
@@ -326,7 +389,8 @@ impl Store {
     /// Looks up a single attachment.
     pub fn get_attachment(&self, id: &str) -> Result<Option<Attachment>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, memo_id, hash, name, mime, width_px, height_px, width_em_milli, created_at
+            "SELECT id, memo_id, hash, name, mime, width_px, height_px, width_em_milli,
+                    x_permille, y_permille, created_at
              FROM attachments WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map([id], row_to_attachment)?;
@@ -456,7 +520,9 @@ fn row_to_attachment(row: &rusqlite::Row) -> rusqlite::Result<Attachment> {
         width_px: row.get(5)?,
         height_px: row.get(6)?,
         width_em_milli: row.get(7)?,
-        created_at: row.get(8)?,
+        x_permille: row.get(8)?,
+        y_permille: row.get(9)?,
+        created_at: row.get(10)?,
     })
 }
 

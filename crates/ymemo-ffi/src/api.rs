@@ -72,6 +72,9 @@ pub struct FfiAttachment {
     pub height_px: i64,
     /// Display width in 1/1000 em; pixels = value / 1000 * the platform's base font px.
     pub width_em_milli: i64,
+    /// Top-left corner on the note, in per-mille of the note area (0..=1000 across and down).
+    pub x_permille: i64,
+    pub y_permille: i64,
     pub created_at: i64,
 }
 
@@ -86,6 +89,8 @@ impl From<Attachment> for FfiAttachment {
             width_px: a.width_px,
             height_px: a.height_px,
             width_em_milli: a.width_em_milli,
+            x_permille: a.x_permille,
+            y_permille: a.y_permille,
             created_at: a.created_at,
         }
     }
@@ -563,6 +568,20 @@ pub fn attachment_has_blob(hash: String) -> Result<bool> {
 /// Sets the display width in 1/1000 em; other devices see the same proportion.
 pub fn attachment_set_width(id: String, width_em_milli: i64) -> Result<()> {
     with_vault(|v| v.set_attachment_width(&id, width_em_milli))
+}
+
+/// Sets where the photo sits on the note and how wide it is, in one write.
+///
+/// The position is a fraction of the note (per-mille) rather than pixels, so a photo dropped
+/// two thirds of the way down a phone screen is two thirds of the way down a desktop sticky
+/// too. Both are clamped by the core.
+pub fn attachment_set_layout(
+    id: String,
+    x_permille: i64,
+    y_permille: i64,
+    width_em_milli: i64,
+) -> Result<()> {
+    with_vault(|v| v.set_attachment_layout(&id, x_permille, y_permille, width_em_milli))
 }
 
 /// Detaches a photo; the blob file stays (no GC).
@@ -1069,6 +1088,12 @@ mod tests {
 
         attachment_set_width(a.id.clone(), 6_000).unwrap();
         assert_eq!(attachment_list(memo_id.clone()).unwrap()[0].width_em_milli, 6_000);
+
+        // Moving and resizing at once is one call, and comes back on the next list.
+        attachment_set_layout(a.id.clone(), 250, 750, 12_000).unwrap();
+        let placed = &attachment_list(memo_id.clone()).unwrap()[0];
+        assert_eq!((placed.x_permille, placed.y_permille), (250, 750));
+        assert_eq!(placed.width_em_milli, 12_000);
 
         attachment_remove(a.id).unwrap();
         assert!(attachment_list(memo_id).unwrap().is_empty());
