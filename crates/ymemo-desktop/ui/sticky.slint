@@ -10,15 +10,225 @@ import { Palette } from "theme.slint";
 // ---------------------------------------------------------------------------
 /// One photo on a sticky, filled in by Rust.
 ///
-/// The core syncs the display size in em; Rust converts it against this window's body font,
-/// so the values arriving here are already pixels.
+/// Sizes arrive in pixels: the core syncs a width in em, and Rust converts it against this
+/// window's body font. The position arrives as a **fraction of the note** instead, and is
+/// turned into pixels here, so resizing the window keeps a photo on the same part of the
+/// note without a round trip through Rust.
 export struct PhotoRow {
     id: string,
     image: image,
     width-px: length,
     height-px: length,
+    x-frac: float,
+    y-frac: float,
     // Not synced to this device yet, or undecodable.
     missing: bool,
+}
+
+// ---------------------------------------------------------------------------
+// One photo lying on the note: drag it anywhere, pull its corner to resize, ✕ to detach.
+//
+// It floats over the text rather than taking a column of its own, so a note is a note with
+// pictures on it and not a note stapled to a gallery. Nothing here is committed until the
+// pointer is released — a drag would otherwise leave one log entry per mouse move.
+// ---------------------------------------------------------------------------
+component PhotoItem inherits Rectangle {
+    in property <PhotoRow> photo;
+    in property <length> canvas-w;
+    in property <length> canvas-h;
+    in property <string> color-key;
+    // x and y as a fraction of the note, and the width in px.
+    callback place(float, float, length);
+    callback remove();
+    // Raised while a pointer is down on this photo, so a merge landing mid-drag does not
+    // replace the model underneath and drop the drag.
+    callback busy(bool);
+
+    // Smallest a photo may be pulled, and how big the corner that resizes instead of moves
+    // is. Below the one the handles would cover the whole picture; below the other the
+    // corner would be too small to hit.
+    private property <length> min-w: 44px;
+    private property <length> grip: 18px;
+    // Live offsets while a pointer is down, folded into the stored geometry on release.
+    private property <length> dx: 0px;
+    private property <length> dy: 0px;
+    private property <length> dw: 0px;
+    // Absolute pointer position when the drag began. Deltas are measured against this rather
+    // than against the touch area, whose own coordinates travel with the photo and would
+    // feed the drag back into itself.
+    private property <length> grab-x: 0px;
+    private property <length> grab-y: 0px;
+    private property <bool> dragging: false;
+    private property <bool> resizing: false;
+    // Whether the pointer is on the corner rather than the picture; decides both the cursor
+    // and what the next press will do.
+    private property <bool> on-grip: move-ta.mouse-x > root.width - root.grip
+        && move-ta.mouse-y > root.height - root.grip;
+    private property <bool> active: root.dragging || move-ta.has-hover || close-ta.has-hover;
+
+    private property <length> w: Math.min(Math.max(root.photo.width-px + root.dw, root.min-w),
+        Math.max(root.canvas-w, root.min-w));
+    // Keep the original proportions; the width is the only size the core syncs.
+    private property <length> h: root.photo.height-px <= 0px || root.photo.width-px <= 0px
+        ? root.w
+        : root.w * (root.photo.height-px / root.photo.width-px);
+
+    // Never fully off the note: a photo whose corner cannot be reached cannot be brought back.
+    x: Math.min(Math.max(root.photo.x-frac * root.canvas-w + root.dx, 0px),
+        Math.max(root.canvas-w - root.w, 0px));
+    y: Math.min(Math.max(root.photo.y-frac * root.canvas-h + root.dy, 0px),
+        Math.max(root.canvas-h - root.h, 0px));
+    width: root.w;
+    height: root.h;
+    // The note sizes itself from its text alone. Without this the photos would push it wider
+    // and taller, and a note size that depends on the photos that depend on the note size is
+    // the binding loop Slint refuses to resolve.
+    preferred-width: 0px;
+    preferred-height: 0px;
+
+    function begin(ax: length, ay: length, grip: bool) {
+        root.grab-x = ax;
+        root.grab-y = ay;
+        root.resizing = grip;
+        root.dragging = true;
+        root.busy(true);
+    }
+    function commit() {
+        root.dragging = false;
+        root.busy(false);
+        // Read the clamped geometry back, so what is stored is where the photo actually is
+        // and not where the pointer went.
+        root.place(root.x / Math.max(root.canvas-w, 1px), root.y / Math.max(root.canvas-h, 1px),
+            root.w);
+        root.dx = 0px;
+        root.dy = 0px;
+        root.dw = 0px;
+    }
+
+    // A frame in the note's own ink, so a pale photo does not bleed into the paper.
+    border-width: root.active ? 2px : 1px;
+    border-color: root.active
+        ? Palette.ink(root.color-key)
+        : Palette.ink(root.color-key).with-alpha(0.35);
+    background: Palette.bar(root.color-key);
+    clip: true;
+
+    if !root.photo.missing: Image {
+        width: 100%;
+        height: 100%;
+        source: root.photo.image;
+        image-fit: contain;
+    }
+    if root.photo.missing: Text {
+        width: 100%;
+        height: 100%;
+        text: Strings.ui_sticky_photo_missing;
+        font-size: 10px;
+        color: Palette.ink(root.color-key);
+        wrap: word-wrap;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    // One touch area for the whole photo, splitting move from resize by where the press
+    // landed. Handles with touch areas of their own would have to appear before they can be
+    // pressed, and something that only exists once you are already on it is not a handle.
+    move-ta := TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: root.on-grip ? MouseCursor.nwse-resize : MouseCursor.move;
+        pointer-event(ev) => {
+            if (ev.kind == PointerEventKind.down) {
+                root.begin(self.absolute-position.x + self.mouse-x,
+                           self.absolute-position.y + self.mouse-y,
+                           root.on-grip);
+            }
+            if (ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel) {
+                root.commit();
+            }
+        }
+        moved => {
+            if (root.resizing) {
+                // Width only; the height follows the original aspect ratio.
+                root.dw = self.absolute-position.x + self.mouse-x - root.grab-x;
+            } else {
+                root.dx = self.absolute-position.x + self.mouse-x - root.grab-x;
+                root.dy = self.absolute-position.y + self.mouse-y - root.grab-y;
+            }
+        }
+    }
+
+    // Detach. Disabled until the photo is under the pointer, so the first move onto this
+    // corner reaches the area below and reveals the button instead of pressing an invisible
+    // one; from then on this sits on top and keeps the photo active by itself.
+    close-ta := TouchArea {
+        x: parent.width - self.width - 3px;
+        y: 3px;
+        width: 18px;
+        height: 18px;
+        enabled: root.active;
+        clicked => { root.remove(); }
+    }
+
+    // ---- Furniture, painted only while the photo is under the pointer so the picture is
+    // not permanently covered by its own controls. Plain shapes: the areas above do the
+    // hit-testing. ----
+    if root.active: Rectangle {
+        x: close-ta.x;
+        y: close-ta.y;
+        width: close-ta.width;
+        height: close-ta.height;
+        border-radius: self.width / 2;
+        background: close-ta.has-hover ? #d64541 : #000000a8;
+        Text {
+            width: 100%;
+            height: 100%;
+            text: "✕";
+            font-size: 11px;
+            font-weight: 700;
+            color: #ffffff;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    if root.active: Rectangle {
+        x: parent.width - self.width;
+        y: parent.height - self.height;
+        width: root.grip;
+        height: root.grip;
+        background: root.on-grip ? Palette.ink(root.color-key) : #000000a8;
+        Text {
+            width: 100%;
+            height: 100%;
+            text: "⇲";
+            font-size: 11px;
+            color: #ffffff;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// One button on the sticky's title bar: a glyph in the bar's own ink, which stays legible
+// on every pastel where an emoji falling back to a monochrome default would not.
+component BarButton inherits TouchArea {
+    in property <string> glyph;
+    in property <string> color-key;
+    in property <length> glyph-size: 13px;
+    in property <float> rest-opacity: 0.6;
+
+    width: 26px;
+    Text {
+        width: 100%;
+        height: 100%;
+        text: root.glyph;
+        font-size: root.glyph-size;
+        font-weight: 700;
+        color: Palette.ink(root.color-key);
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        opacity: root.has-hover ? 1 : root.rest-opacity;
+    }
 }
 
 export component StickyWindow inherits Window {
@@ -39,12 +249,17 @@ export component StickyWindow inherits Window {
     in-out property <float> sticky-opacity: 100;
     in property <bool> collapsed: false;
     in property <[PhotoRow]> photos: [];
+    // True while a photo is being dragged or resized. Rust reads it before pushing a merged
+    // photo list in, the way `dirty` protects text the user is still typing.
+    out property <bool> photo-busy: false;
     callback edited(string);
     // Attach a photo; Rust opens the file dialog.
     callback add-photo();
     callback show-history();
-    // Resize a photo by a delta in em, which the core syncs to mobile too.
-    callback resize-photo(string, float);
+    // Move and resize in one go: x and y as a fraction of the note, width in px.
+    callback place-photo(string, float, float, length);
+    // Detach a photo. The blob stays; only this memo stops showing it.
+    callback remove-photo(string);
     callback close-requested();
     callback new-memo();
     callback set-color(string);
@@ -67,6 +282,12 @@ export component StickyWindow inherits Window {
     private property <bool> drag-manual: false;
 
     public function focus-body() { body.focus(); }
+
+    // Folding hides everything but the title, so anything open below it has to fold away too
+    // — a colour panel left standing would be all that is left of the note.
+    changed collapsed => {
+        if (self.collapsed) { self.show-palette = false; }
+    }
 
     Rectangle {
         background: Palette.bg(root.sticky-color);
@@ -120,40 +341,51 @@ export component StickyWindow inherits Window {
                         overflow: elide;
                         horizontal-stretch: 1;
                     }
-                    photo-ta := TouchArea {
+                    // Folded, the window is one bar tall and everything these buttons open —
+                    // the file dialog, the history window, the colour panel — either lands on
+                    // a note that is not there or reopens it behind the user's back. Only the
+                    // unfold (double-click) and the close stay.
+                    if !root.collapsed: photo-ta := TouchArea {
                         width: 26px;
-                        Text {
-                            width: 100%;
-                            height: 100%;
-                            text: "📎";
-                            font-size: 13px;
-                            // Same reason as the colour chip below: without this the glyph
-                            // falls back to the default text colour and disappears.
-                            color: Palette.ink(root.sticky-color);
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                            opacity: photo-ta.has-hover ? 1 : 0.7;
+                        // Drawn, not 📎: an emoji needs an emoji font, and where there is
+                        // none the glyph falls back to the default text colour and is all
+                        // but invisible on these pastel bars — the same reason the colour
+                        // chip below is a shape rather than a character.
+                        Rectangle {
+                            width: 16px;
+                            height: 13px;
+                            border-width: 1.5px;
+                            border-color: Palette.ink(root.sticky-color);
+                            clip: true;
+                            opacity: photo-ta.has-hover ? 1 : 0.75;
+                            Rectangle {
+                                x: 2.5px;
+                                y: 2px;
+                                width: 4px;
+                                height: 4px;
+                                border-radius: 2px;
+                                background: Palette.ink(root.sticky-color);
+                            }
+                            Path {
+                                x: 1.5px;
+                                y: 4px;
+                                width: 13px;
+                                height: 7px;
+                                viewbox-width: 12;
+                                viewbox-height: 6;
+                                commands: "M 0 6 L 4 1 L 6.5 3.5 L 8.5 2 L 12 6 Z";
+                                fill: Palette.ink(root.sticky-color);
+                            }
                         }
                         clicked => { root.add-photo(); }
                     }
-                    history-ta := TouchArea {
-                        width: 26px;
-                        Text {
-                            width: 100%;
-                            height: 100%;
-                            // A glyph, not an emoji: emoji inherit the default text colour
-                            // and vanish on these pastel bars.
-                            text: "⟲";
-                            font-size: 15px;
-                            font-weight: 700;
-                            color: Palette.ink(root.sticky-color);
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                            opacity: history-ta.has-hover ? 1 : 0.6;
-                        }
+                    if !root.collapsed: BarButton {
+                        glyph: "⟲";
+                        color-key: root.sticky-color;
+                        glyph-size: 15px;
                         clicked => { root.show-history(); }
                     }
-                    palette-ta := TouchArea {
+                    if !root.collapsed: palette-ta := TouchArea {
                         width: 26px;
                         // A chip of the memo's own colour, not an emoji: an emoji that falls
                         // back to a monochrome glyph is drawn in the default text colour,
@@ -171,33 +403,33 @@ export component StickyWindow inherits Window {
                         }
                         clicked => { root.show-palette = !root.show-palette; }
                     }
-                    plus-ta := TouchArea {
-                        width: 26px;
-                        Text {
-                            width: 100%;
-                            height: 100%;
-                            text: "＋";
-                            font-size: 14px;
-                            font-weight: 700;
-                            color: Palette.ink(root.sticky-color);
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                            opacity: plus-ta.has-hover ? 1 : 0.55;
-                        }
+                    if !root.collapsed: BarButton {
+                        glyph: "＋";
+                        color-key: root.sticky-color;
+                        glyph-size: 14px;
+                        rest-opacity: 0.55;
                         clicked => { root.new-memo(); }
                     }
+                    // Close: the one button that must never be hunted for. The ink alone
+                    // disappeared into the pastel bar, so it sits on a chip of its own —
+                    // dark at rest, red under the pointer, white glyph on both.
                     close-ta := TouchArea {
                         width: 26px;
-                        Text {
-                            width: 100%;
-                            height: 100%;
-                            text: "✕";
-                            font-size: 13px;
-                            font-weight: 700;
-                            color: Palette.ink(root.sticky-color);
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                            opacity: close-ta.has-hover ? 1 : 0.55;
+                        Rectangle {
+                            width: 20px;
+                            height: 20px;
+                            border-radius: 10px;
+                            background: close-ta.has-hover ? #d64541 : Palette.ink(root.sticky-color);
+                            Text {
+                                width: 100%;
+                                height: 100%;
+                                text: "✕";
+                                font-size: 12px;
+                                font-weight: 700;
+                                color: #ffffff;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
                         }
                         clicked => { root.close-requested(); }
                     }
@@ -206,7 +438,7 @@ export component StickyWindow inherits Window {
 
             // ---- Color and opacity panel. It stays open after a pick, since the two are
             // usually adjusted together. ----
-            if root.show-palette: Rectangle {
+            if root.show-palette && !root.collapsed: Rectangle {
                 height: 72px;
                 background: Palette.bar(root.sticky-color).darker(0.06);
                 VerticalLayout {
@@ -258,85 +490,36 @@ export component StickyWindow inherits Window {
                 }
             }
 
-            // ---- Body; invisible while folded, as the window is only the title bar tall ----
-            body := TextEdit {
+            // ---- The note: text with the photos lying on top of it. One surface, not two
+            // panes — a photo is placed where the writing leaves room for it, and the note
+            // keeps every pixel of the window the photos are not covering. ----
+            note := Rectangle {
                 visible: !root.collapsed;
-                // Five or so lines the photos below cannot take. A photo asks for its
-                // display height outright, and on a default-sized sticky that used to leave
-                // the note zero pixels tall: the text was still there, and still saved, but
-                // there was nowhere to read or type it. Now the photo area gives way first
-                // and scrolls inside whatever is left.
-                //
-                // A fraction of the window would read better than a fixed height, but
-                // `root.height` is a size the layout is still deciding — Slint calls that a
-                // binding loop and warns it may panic.
-                //
+                vertical-stretch: 1;
                 // Zero while folded, or this minimum would stop the window from shrinking to
                 // the title bar.
                 min-height: root.collapsed ? 0px : 96px;
-                vertical-stretch: 1;
-                font-size: 13px;
-                wrap: word-wrap;
-                text <=> root.memo-text;
-                edited => { root.edited(self.text); }
-            }
+                clip: true;
 
-            // ---- Photos. Stickies are small, so this takes space only when there are any;
-            // the size chosen here is in em and reaches mobile through the core. ----
-            if !root.collapsed && root.photos.length > 0: Flickable {
-                // A ceiling, not a share of the window: deriving this from `root.height`
-                // reads a size the layout is still deciding, and Slint calls that a binding
-                // loop. The note's own min-height is what actually holds the space open.
-                max-height: 240px;
-                viewport-height: photo-box.preferred-height;
-                photo-box := VerticalLayout {
-                    padding: 6px;
-                    spacing: 6px;
-                    for photo in root.photos: VerticalLayout {
-                        spacing: 2px;
-                        if photo.missing: Text {
-                            text: Strings.ui_sticky_photo_missing;
-                            font-size: 11px;
-                            color: Palette.ink(root.sticky-color);
-                            wrap: word-wrap;
-                        }
-                        if !photo.missing: Image {
-                            source: photo.image;
-                            width: photo.width-px;
-                            height: photo.height-px;
-                            image-fit: contain;
-                        }
-                        HorizontalLayout {
-                            spacing: 4px;
-                            minus-btn := Rectangle {
-                                width: 22px;
-                                height: 18px;
-                                background: Palette.bar(root.sticky-color);
-                                Text {
-                                    text: "−";
-                                    font-size: 12px;
-                                    color: Palette.ink(root.sticky-color);
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                                TouchArea { clicked => { root.resize-photo(photo.id, -4); } }
-                            }
-                            plus-btn := Rectangle {
-                                width: 22px;
-                                height: 18px;
-                                background: Palette.bar(root.sticky-color);
-                                Text {
-                                    text: "＋";
-                                    font-size: 12px;
-                                    color: Palette.ink(root.sticky-color);
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                                TouchArea { clicked => { root.resize-photo(photo.id, 4); } }
-                            }
-                            Rectangle { horizontal-stretch: 1; }
-                        }
-                    }
+                body := TextEdit {
+                    width: 100%;
+                    height: 100%;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                    text <=> root.memo-text;
+                    edited => { root.edited(self.text); }
+                }
+
+                // Declared after the text, so a photo is picked up by a click on it rather
+                // than placing the caret underneath.
+                for photo in root.photos: PhotoItem {
+                    photo: photo;
+                    canvas-w: note.width;
+                    canvas-h: note.height;
+                    color-key: root.sticky-color;
+                    place(fx, fy, w) => { root.place-photo(photo.id, fx, fy, w); }
+                    remove => { root.remove-photo(photo.id); }
+                    busy(b) => { root.photo-busy = b; }
                 }
             }
         }

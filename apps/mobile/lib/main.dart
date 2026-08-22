@@ -9,6 +9,7 @@
 
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:math' show max;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -1019,6 +1020,10 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   late String _color = widget.color;
   List<FfiAttachment> _photos = [];
 
+  /// Which photo shows its move/resize/detach handles. There is no hovering on a phone, so
+  /// a photo has to be tapped before its controls appear; tapping the text puts them away.
+  String? _selectedPhoto;
+
   /// Writes the new palette key straight through and repaints.
   ///
   /// Not batched into `_save` with the text: the color *is* what the screen looks like, and a
@@ -1078,7 +1083,14 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       widthPx: size?.width.toInt() ?? 0,
       heightPx: size?.height.toInt() ?? 0,
     );
-    await _reloadPhotos();
+    final added = await attachmentList(memoId: widget.id);
+    if (!mounted) return;
+    // Select the new one: it has just landed somewhere on the note and moving it is the
+    // next thing anyone does.
+    setState(() {
+      _photos = added;
+      if (added.isNotEmpty) _selectedPhoto = added.last.id;
+    });
   }
 
   /// Original pixel size, or null when decoding fails; the core then assumes 1:1.
@@ -1202,23 +1214,47 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                 textInputAction: TextInputAction.next,
               ),
               const SizedBox(height: 12),
+              // The note itself: text underneath, photos lying on top of it wherever they
+              // were dropped. One surface rather than a column of text followed by a column
+              // of pictures — the same arrangement as the desktop sticky, and the position
+              // each photo is given here travels to it.
               Expanded(
-                child: ListView(
-                  children: [
-                    TextField(
-                      controller: _body,
-                      decoration: InputDecoration(hintText: widget.strings.bodyHint),
-                      maxLines: null,
-                      minLines: 4,
-                    ),
-                    for (final photo in _photos)
-                      AttachmentView(
-                        key: ValueKey(photo.id),
-                        strings: widget.strings,
-                        attachment: photo,
-                        onChanged: _reloadPhotos,
-                      ),
-                  ],
+                child: LayoutBuilder(
+                  builder: (context, box) {
+                    final canvas = Size(box.maxWidth, box.maxHeight);
+                    final baseFont = DefaultTextStyle.of(context).style.fontSize ?? 14.0;
+                    return Stack(
+                      children: [
+                        Positioned.fill(
+                          child: TextField(
+                            controller: _body,
+                            decoration: InputDecoration(
+                              hintText: widget.strings.bodyHint,
+                              border: InputBorder.none,
+                            ),
+                            maxLines: null,
+                            expands: true,
+                            textAlignVertical: TextAlignVertical.top,
+                            // Writing puts the photo handles away; they would otherwise sit
+                            // over the line being typed.
+                            onTap: () => setState(() => _selectedPhoto = null),
+                          ),
+                        ),
+                        for (final photo in _photos)
+                          NotePhoto(
+                            key: ValueKey(photo.id),
+                            strings: widget.strings,
+                            attachment: photo,
+                            canvas: canvas,
+                            baseFont: baseFont,
+                            ink: ink,
+                            selected: _selectedPhoto == photo.id,
+                            onSelect: () => setState(() => _selectedPhoto = photo.id),
+                            onChanged: _reloadPhotos,
+                          ),
+                      ],
+                    );
+                  },
                 ),
               ),
             ],
@@ -1884,31 +1920,54 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 }
 
-/// One attached photo: display, resize, detach.
+/// One photo lying on the note: drag it anywhere, pull its corner to resize, ✕ to detach.
 ///
-/// The display size syncs in **em**, multiples of the font size. Shrinking it here shrinks it
-/// by the same factor on the desktop, where the pixels are computed from that platform's own
-/// base font.
-class AttachmentView extends StatefulWidget {
-  const AttachmentView({
+/// Nothing is written until the finger lifts — a drag would otherwise leave one entry in the
+/// change log per frame. Both numbers that get written are platform-independent: the width
+/// in **em**, multiples of the body font, and the position as a **fraction of the note**. A
+/// photo half way down a phone screen is half way down the desktop sticky as well.
+class NotePhoto extends StatefulWidget {
+  const NotePhoto({
     super.key,
     required this.strings,
     required this.attachment,
+    required this.canvas,
+    required this.baseFont,
+    required this.ink,
+    required this.selected,
+    required this.onSelect,
     required this.onChanged,
   });
 
   final FfiStrings strings;
   final FfiAttachment attachment;
+
+  /// Size of the note the photo lies on; positions are a fraction of it.
+  final Size canvas;
+
+  /// This platform's body font size, which the stored width in em is measured against.
+  final double baseFont;
+  final Color ink;
+  final bool selected;
+  final VoidCallback onSelect;
   final Future<void> Function() onChanged;
 
   @override
-  State<AttachmentView> createState() => _AttachmentViewState();
+  State<NotePhoto> createState() => _NotePhotoState();
 }
 
-class _AttachmentViewState extends State<AttachmentView> {
+class _NotePhotoState extends State<NotePhoto> {
+  /// Smallest a photo may be pulled; below this the handles cover the picture.
+  static const double _minW = 44;
+  static const double _handle = 30;
+
   Uint8List? _bytes;
   bool _missing = false;
-  late double _widthEm = widget.attachment.widthEmMilli / 1000.0;
+
+  /// Live drag offsets, folded into the stored geometry when the finger lifts.
+  double _dx = 0;
+  double _dy = 0;
+  double _dw = 0;
 
   @override
   void initState() {
@@ -1926,65 +1985,139 @@ class _AttachmentViewState extends State<AttachmentView> {
     if (mounted) setState(() => _bytes = bytes);
   }
 
-  @override
-  Widget build(BuildContext context) {
-    // This platform's body font size is what em is measured against.
-    final baseFont = DefaultTextStyle.of(context).style.fontSize ?? 14.0;
-    final width = _widthEm * baseFont;
+  double get _w {
+    final stored = widget.attachment.widthEmMilli / 1000.0 * widget.baseFont;
+    return (stored + _dw).clamp(_minW, max(widget.canvas.width, _minW));
+  }
+
+  double get _h {
     final a = widget.attachment;
     final ratio = (a.widthPx > 0 && a.heightPx > 0) ? a.heightPx / a.widthPx : 1.0;
+    return _w * ratio;
+  }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  // Never fully off the note: a photo whose corner cannot be reached cannot be brought back.
+  double get _x => (widget.attachment.xPermille / 1000.0 * widget.canvas.width + _dx)
+      .clamp(0.0, max(widget.canvas.width - _w, 0.0));
+  double get _y => (widget.attachment.yPermille / 1000.0 * widget.canvas.height + _dy)
+      .clamp(0.0, max(widget.canvas.height - _h, 0.0));
+
+  /// Stores where the photo ended up. The clamped geometry is what is read back, so what is
+  /// saved is where the photo actually is and not where the finger went.
+  Future<void> _commit() async {
+    await attachmentSetLayout(
+      id: widget.attachment.id,
+      xPermille: (_x / max(widget.canvas.width, 1) * 1000).round(),
+      yPermille: (_y / max(widget.canvas.height, 1) * 1000).round(),
+      widthEmMilli: (_w / widget.baseFont * 1000).round(),
+    );
+    // Cleared without a setState of their own: reloading rebuilds this widget with the
+    // stored values the offsets have just been folded into, and clearing them separately
+    // would show the old position for one frame.
+    _dx = 0;
+    _dy = 0;
+    _dw = 0;
+    await widget.onChanged();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = widget.selected;
+    return Positioned(
+      left: _x,
+      top: _y,
+      width: _w,
+      height: _h,
+      child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          if (_missing)
-            Text(widget.strings.photoMissing, style: Theme.of(context).textTheme.bodySmall)
-          else if (_bytes == null)
-            const SizedBox(height: 48, child: Center(child: CircularProgressIndicator()))
-          else
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.memory(
-                _bytes!,
-                width: width,
-                height: width * ratio,
-                fit: BoxFit.cover,
-              ),
-            ),
-          Row(
-            children: [
-              Text(widget.strings.photoSize, style: Theme.of(context).textTheme.bodySmall),
-              Expanded(
-                child: Slider(
-                  // The core's own range (4-80em); it clamps anything outside anyway.
-                  min: 4,
-                  max: 80,
-                  value: _widthEm.clamp(4, 80),
-                  onChanged: (v) => setState(() => _widthEm = v),
-                  // Written once on release, not throughout the drag; one slide would
-                  // otherwise leave dozens of changes in the log.
-                  onChangeEnd: (v) async {
-                    await attachmentSetWidth(id: a.id, widthEmMilli: (v * 1000).round());
-                    await widget.onChanged();
-                  },
+          GestureDetector(
+            onTap: widget.onSelect,
+            onPanStart: (_) => widget.onSelect(),
+            onPanUpdate: (d) => setState(() {
+              _dx += d.delta.dx;
+              _dy += d.delta.dy;
+            }),
+            onPanEnd: (_) => _commit(),
+            child: Container(
+              width: _w,
+              height: _h,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: selected ? widget.ink : widget.ink.withValues(alpha: 0.35),
+                  width: selected ? 2 : 1,
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.delete_outline),
-                tooltip: widget.strings.photoRemove,
-                onPressed: () async {
-                  await attachmentRemove(id: a.id);
-                  await widget.onChanged();
-                },
-              ),
-            ],
+              clipBehavior: Clip.antiAlias,
+              child: _picture(),
+            ),
           ),
+          if (selected) ..._furniture(),
         ],
       ),
     );
   }
+
+  Widget _picture() {
+    if (_missing) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Text(
+            widget.strings.photoMissing,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+      );
+    }
+    if (_bytes == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return Image.memory(_bytes!, fit: BoxFit.cover);
+  }
+
+  /// Detach and resize, shown only on the selected photo so the picture is not permanently
+  /// covered by its own controls. They hang half outside the frame, where a fingertip
+  /// reaches them without hiding what it is about to change.
+  List<Widget> _furniture() => [
+        Positioned(
+          right: -_handle / 3,
+          top: -_handle / 3,
+          child: Semantics(
+            label: widget.strings.photoRemove,
+            button: true,
+            child: GestureDetector(
+              onTap: () async {
+                await attachmentRemove(id: widget.attachment.id);
+                await widget.onChanged();
+              },
+              child: _chip(const Color(0xFFD64541), Icons.close),
+            ),
+          ),
+        ),
+        Positioned(
+          right: -_handle / 3,
+          bottom: -_handle / 3,
+          child: Semantics(
+            label: widget.strings.photoSize,
+            child: GestureDetector(
+              // Width only; the height follows the original aspect ratio.
+              onPanUpdate: (d) => setState(() => _dw += d.delta.dx),
+              onPanEnd: (_) => _commit(),
+              child: _chip(widget.ink, Icons.open_in_full),
+            ),
+          ),
+        ),
+      ];
+
+  Widget _chip(Color background, IconData icon) => Container(
+        width: _handle,
+        height: _handle,
+        decoration: BoxDecoration(color: background, shape: BoxShape.circle),
+        child: Icon(icon, size: 16, color: Colors.white),
+      );
 }
 
 /// Asks for a folder name, pre-filled when renaming. Null when the user backs out.

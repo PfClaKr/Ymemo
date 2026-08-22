@@ -67,13 +67,19 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
                             entry.window.set_created_at(
                                 crate::sticky::format_created_at(m.created_at).into(),
                             );
-                            // Another device may have added or resized a photo. The vault
-                            // is passed straight in: it is already borrowed here, and going
-                            // back through `ctx` for a second borrow is what used to kill
-                            // the app on the first merge after a sticky was opened.
-                            entry.window.set_photos(slint::ModelRc::new(slint::VecModel::from(
-                                crate::sticky::photo_rows(v, id),
-                            )));
+                            // Another device may have added, moved or resized a photo. The
+                            // vault is passed straight in: it is already borrowed here, and
+                            // going back through `ctx` for a second borrow is what used to
+                            // kill the app on the first merge after a sticky was opened.
+                            //
+                            // Not while a photo is under the pointer, though: replacing the
+                            // model rebuilds the items and the drag in progress would be
+                            // dropped halfway — the same reason `dirty` protects the text.
+                            if !entry.window.get_photo_busy() {
+                                entry.window.set_photos(slint::ModelRc::new(
+                                    slint::VecModel::from(crate::sticky::photo_rows(v, id)),
+                                ));
+                            }
                             entry.window.window().request_redraw();
                         }
                         // Deleted elsewhere: just hide it; removal happens on close.

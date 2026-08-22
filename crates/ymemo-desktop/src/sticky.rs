@@ -179,6 +179,10 @@ pub(crate) fn photo_rows(v: &Vault, memo_id: &str) -> Vec<PhotoRow> {
                 image: image.unwrap_or_default(),
                 width_px: w as f32,
                 height_px: h as f32,
+                // A fraction, not a pixel offset: the note is whatever size the window is
+                // right now, and Slint reapplies these on every resize without asking again.
+                x_frac: ymemo_core::clamp_permille(a.x_permille) as f32 / 1000.0,
+                y_frac: ymemo_core::clamp_permille(a.y_permille) as f32 / 1000.0,
             }
         })
         .collect()
@@ -352,19 +356,43 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
-    // Resize a photo. The value is in em, so mobile sees the same proportion.
+    // Move and resize in one write, once the pointer is released. The width crosses as
+    // pixels and is stored in em, so mobile shows the same proportion of a line of text; the
+    // position crosses as a fraction and is stored as one, so it lands on the same part of a
+    // phone screen as of this sticky.
     {
         let ctx = ctx.clone();
         let id = memo.id.clone();
-        window.on_resize_photo(move |photo_id, delta_em| {
+        window.on_place_photo(move |photo_id, x_frac, y_frac, width_px| {
             touch(&ctx);
             {
                 let mut guard = ctx.vault.borrow_mut();
                 let Some(v) = guard.as_mut() else { return };
-                let Ok(Some(a)) = v.store().get_attachment(photo_id.as_str()) else { return };
-                let next = a.width_em_milli + (delta_em * 1000.0) as i64;
-                if let Err(e) = v.set_attachment_width(photo_id.as_str(), next) {
-                    eprintln!("could not resize the photo: {e}");
+                let em_milli = (width_px as f64 / BODY_FONT_PX * 1000.0).round() as i64;
+                if let Err(e) = v.set_attachment_layout(
+                    photo_id.as_str(),
+                    (x_frac as f64 * 1000.0).round() as i64,
+                    (y_frac as f64 * 1000.0).round() as i64,
+                    em_milli,
+                ) {
+                    eprintln!("could not move the photo: {e}");
+                }
+            }
+            refresh_photos(&ctx, &id);
+        });
+    }
+
+    // Detach a photo. The blob file stays — another device may still be showing it.
+    {
+        let ctx = ctx.clone();
+        let id = memo.id.clone();
+        window.on_remove_photo(move |photo_id| {
+            touch(&ctx);
+            {
+                let mut guard = ctx.vault.borrow_mut();
+                let Some(v) = guard.as_mut() else { return };
+                if let Err(e) = v.detach(photo_id.as_str()) {
+                    eprintln!("could not remove the photo: {e}");
                 }
             }
             refresh_photos(&ctx, &id);

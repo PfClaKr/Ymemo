@@ -45,7 +45,7 @@ use crate::blob::BlobStore;
 use crate::changelog::ChangeLog;
 use crate::history::{Entity, Revision, RevisionKind};
 use crate::crypto::{generate_salt, MasterKey, Salt, SALT_LEN};
-use crate::{clamp_width_em_milli, Attachment, Group, Memo, Store};
+use crate::{clamp_permille, clamp_width_em_milli, Attachment, Group, Memo, Store};
 
 const HEADER_FILE: &str = "vault.json";
 const LOGS_DIR: &str = "logs";
@@ -270,6 +270,12 @@ impl Vault {
         a.mime = mime.to_string();
         a.width_px = width_px;
         a.height_px = height_px;
+        // Offset from the photos already on this memo, so the new one is not dropped exactly
+        // on top of the last and left unreachable.
+        let placed = self.store.attachments_of(memo_id).map(|l| l.len()).unwrap_or(0);
+        let (x, y) = crate::cascade_permille(placed);
+        a.x_permille = x;
+        a.y_permille = y;
         self.upsert_attachment(&a)?;
         Ok(a)
     }
@@ -293,6 +299,8 @@ impl Vault {
             "width_em_milli",
             clamp_width_em_milli(a.width_em_milli),
         )?;
+        put_i64_if_changed(&mut self.doc, &obj, "x_permille", clamp_permille(a.x_permille))?;
+        put_i64_if_changed(&mut self.doc, &obj, "y_permille", clamp_permille(a.y_permille))?;
         put_i64_if_changed(&mut self.doc, &obj, "created_at", a.created_at)?;
 
         self.append_local_change()?;
@@ -304,6 +312,24 @@ impl Vault {
         let Some(mut a) = self.store.get_attachment(id)? else {
             bail!(t!("core.attachment_not_found", id = id));
         };
+        a.width_em_milli = clamp_width_em_milli(width_em_milli);
+        self.upsert_attachment(&a)
+    }
+
+    /// Sets position and size together — one write, because dragging a photo's corner moves
+    /// and resizes it at once and two writes would leave two revisions in the history.
+    pub fn set_attachment_layout(
+        &mut self,
+        id: &str,
+        x_permille: i64,
+        y_permille: i64,
+        width_em_milli: i64,
+    ) -> Result<()> {
+        let Some(mut a) = self.store.get_attachment(id)? else {
+            bail!(t!("core.attachment_not_found", id = id));
+        };
+        a.x_permille = clamp_permille(x_permille);
+        a.y_permille = clamp_permille(y_permille);
         a.width_em_milli = clamp_width_em_milli(width_em_milli);
         self.upsert_attachment(&a)
     }
@@ -594,6 +620,20 @@ impl Vault {
                     &obj,
                     "width_em_milli",
                     crate::DEFAULT_WIDTH_EM_MILLI,
+                )),
+                // Missing on records written before photos could be placed; those fall back
+                // to the default corner rather than to 0,0 flush against the edge.
+                x_permille: clamp_permille(get_i64_or(
+                    &self.doc,
+                    &obj,
+                    "x_permille",
+                    crate::PLACE_ORIGIN_PERMILLE,
+                )),
+                y_permille: clamp_permille(get_i64_or(
+                    &self.doc,
+                    &obj,
+                    "y_permille",
+                    crate::PLACE_ORIGIN_PERMILLE,
                 )),
                 created_at: get_i64_or(&self.doc, &obj, "created_at", 0),
             };
@@ -1028,6 +1068,61 @@ mod tests {
         // Same 8em, different base fonts: different pixels, same ratio.
         assert_eq!(got.display_size(16.0), (128.0, 64.0));
         assert_eq!(got.display_size(20.0), (160.0, 80.0));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Where a photo was dropped on the note carries to the other device too, and as a
+    /// fraction of the note it lands on the same part of a phone screen and a small sticky.
+    #[test]
+    fn photo_placement_syncs_between_devices() {
+        let dir = temp_dir();
+        let mut phone = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let memo = Memo::new("photo", "");
+        phone.upsert(&memo).unwrap();
+        let a = phone.attach(&memo.id, b"jpeg", "p.jpg", "image/jpeg", 1000, 500).unwrap();
+
+        // Drag it to the middle and shrink it, in one write.
+        phone.set_attachment_layout(&a.id, 500, 250, 10_000).unwrap();
+
+        let desktop = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let got = desktop.store().get_attachment(&a.id).unwrap().unwrap();
+        assert_eq!((got.x_permille, got.y_permille), (500, 250));
+        assert_eq!(got.width_em_milli, 10_000);
+
+        // Half across, a quarter down, on either canvas.
+        assert_eq!(got.display_pos(800.0, 600.0, 16.0), (400.0, 150.0));
+        assert_eq!(got.display_pos(400.0, 1000.0, 16.0), (200.0, 250.0));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A photo dropped on a note narrower than itself is pulled back on, not left hanging
+    /// off the right edge where its resize handle cannot be reached.
+    #[test]
+    fn photo_placement_stays_on_a_small_note() {
+        let mut a = crate::Attachment::new("m", "h");
+        a.width_px = 100;
+        a.height_px = 100;
+        a.width_em_milli = 20_000; // 20em = 320px at a 16px font
+        a.x_permille = 900;
+        a.y_permille = 900;
+        assert_eq!(a.display_pos(400.0, 400.0, 16.0), (80.0, 80.0));
+        // Narrower than the photo: flush left rather than off the edge.
+        assert_eq!(a.display_pos(200.0, 200.0, 16.0), (0.0, 0.0));
+    }
+
+    /// Two photos on one memo do not land on the same spot, or the lower one could not be
+    /// picked up again.
+    #[test]
+    fn photos_cascade_instead_of_stacking() {
+        let dir = temp_dir();
+        let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let memo = Memo::new("photos", "");
+        v.upsert(&memo).unwrap();
+        let a = v.attach(&memo.id, b"one", "1.jpg", "image/jpeg", 10, 10).unwrap();
+        let b = v.attach(&memo.id, b"two", "2.jpg", "image/jpeg", 10, 10).unwrap();
+        assert_ne!((a.x_permille, a.y_permille), (b.x_permille, b.y_permille));
 
         fs::remove_dir_all(&dir).ok();
     }
