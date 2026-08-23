@@ -2,10 +2,13 @@
 name: ymemo_mobile
 description: Local-first encrypted memo app (mobile).
 publish_to: "none"
-# Keep in step with the workspace version in the root Cargo.toml: the release tag
-# is checked against that one, and an APK reporting a different number is a support
-# question waiting to happen. The +N is Android's versionCode and must only grow.
-version: 0.9.1+2
+# Local builds only. Release APKs take their version from the tag instead
+# (`--build-name`/`--build-number` in release.yml), because this line drifted behind the
+# workspace once already and shipped two releases that Android saw as the same versionCode
+# and so refused to install over each other. Keep it roughly in step with the workspace
+# version in the root Cargo.toml anyway, so a local build does not report a number nobody
+# released; the +N is Android's versionCode and must only ever grow.
+version: 0.9.3+903
 
 environment:
   # PopScope.onPopInvokedWithResult needs Flutter 3.24 (Dart 3.5) or newer.

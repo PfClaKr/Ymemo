@@ -267,6 +267,18 @@ jobs:
       #   ANDROID_KEYSTORE_PASSWORD : its password
       #   ANDROID_KEY_ALIAS         : the key alias inside it
       #   ANDROID_KEY_PASSWORD      : that key's password (defaults to the store password)
+      #
+      # Version: taken from the tag, never from pubspec.yaml. **Android decides what is an
+      # update by comparing versionCode, an integer** — a name it never reads. pubspec's
+      # `version:` was left behind at 0.9.1+2 while the workspace moved on, so v0.9.2 and
+      # v0.9.3 both shipped versionCode 2002 and neither could update the other. Deriving it
+      # here means the number cannot drift from the release again, and the job that checks
+      # the tag against Cargo.toml already guarantees the two agree.
+      #
+      #   code = major*10000 + minor*100 + patch, so 0.9.3 -> 903 and every later release is
+      #   a larger number. `--split-per-abi` then adds 1000 * Flutter's ABI index on top
+      #   (v7a 1, arm64 2, x86_64 4), which stays constant per ABI and so does not disturb
+      #   the ordering a device sees.
       - name: Build the apk
         working-directory: apps/mobile
         env:
@@ -282,13 +294,34 @@ jobs:
           else
             echo "::warning::no android keystore secrets; the apks are signed with the debug key and cannot update an existing install"
           fi
-          flutter pub get
-          flutter build apk --release --split-per-abi
-          rm -f "$RUNNER_TEMP/ymemo.jks"
           version="${GITHUB_REF_NAME#v}"
+          IFS=. read -r major minor patch <<< "$version"
+          # A tag like v1.0.0-rc1 would otherwise make the arithmetic fail rather than round.
+          patch="${patch%%[!0-9]*}"
+          code=$(( major * 10000 + minor * 100 + patch ))
+          echo "version $version -> versionCode $code (before the per-abi offset)"
+          flutter pub get
+          flutter build apk --release --split-per-abi \
+            --build-name="$version" --build-number="$code"
+          rm -f "$RUNNER_TEMP/ymemo.jks"
           for abi in arm64-v8a armeabi-v7a x86_64; do
             mv "build/app/outputs/flutter-apk/app-$abi-release.apk" \
               "$GITHUB_WORKSPACE/ymemo-$version-android-$abi.apk"
+          done
+      # Cheap insurance against the flags above silently not taking: a versionCode of 2 (the
+      # pubspec default) would ship an APK that no existing install accepts as an update, and
+      # nothing else in the pipeline would notice.
+      - name: Check the apks carry the tag's version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          aapt2="$(ls -d "$ANDROID_HOME"/build-tools/*/ | tail -1)aapt2"
+          for apk in ymemo-*-android-*.apk; do
+            line="$("$aapt2" dump badging "$apk" | head -1)"
+            echo "$apk: $line"
+            case "$line" in
+              *"versionName='$version'"*) ;;
+              *) echo "::error::$apk is not versionName $version"; exit 1 ;;
+            esac
           done
       - uses: actions/upload-artifact@v4
         with:
