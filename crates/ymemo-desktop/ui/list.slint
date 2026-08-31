@@ -1,6 +1,6 @@
 import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox } from "std-widgets.slint";
 import { Strings } from "@i18n";
-import { Palette } from "theme.slint";
+import { Palette, IconButton, Glyph } from "theme.slint";
 import { PairingPanel, SharedDeviceRow } from "pairing.slint";
 
 
@@ -23,9 +23,14 @@ export struct ListRow {
 // ---------------------------------------------------------------------------
 export component ListWindow inherits Window {
     title: "Ymemo";
-    // Five header buttons squeeze the title below this width.
+    // Five header buttons squeeze the title below this width. It is a minimum and not only
+    // a preference because a Window whose root is a layout takes the layout's natural size
+    // and ignores `preferred-width` — which left an empty list 141px wide, with its own
+    // "no memos yet" line wrapped over four lines.
     preferred-width: 340px;
     preferred-height: 420px;
+    min-width: 320px;
+    min-height: 260px;
     background: #2e2b27;
 
     in property <[ListRow]> rows;
@@ -76,6 +81,9 @@ export component ListWindow inherits Window {
 
     // Row height; drag distance is converted to rows with it, so it must stay fixed.
     private property <length> row-h: 34px;
+    // Whether the heading is currently standing in for a toolbar button's name.
+    private property <bool> tip-showing: b-lock.hovering || b-gear.hovering || b-link.hovering
+        || b-folder.hovering || b-plus.hovering;
 
     // Commits the name being edited and leaves edit mode.
     function commit-edit() {
@@ -90,33 +98,46 @@ export component ListWindow inherits Window {
         spacing: 8px;
 
         HorizontalLayout {
-            spacing: 6px;
+            spacing: 4px;
+            // The heading doubles as the toolbar's label: point at a button and its name
+            // takes the title's place. Cheaper than a tooltip and always in the same spot.
             Text {
-                text: "Ymemo 📝";
-                font-size: 16px;
-                font-weight: 700;
-                color: #f0ead6;
+                text: b-lock.hovering ? Strings.ui_list_tip_lock
+                    : b-gear.hovering ? Strings.ui_list_tip_settings
+                    : b-link.hovering ? Strings.ui_list_tip_sync
+                    : b-folder.hovering ? Strings.ui_list_tip_new_group
+                    : b-plus.hovering ? Strings.ui_list_tip_new_memo
+                    : Strings.ui_list_heading;
+                font-size: root.tip-showing ? 12px : 16px;
+                font-weight: root.tip-showing ? 400 : 700;
+                color: root.tip-showing ? #cfc8b6 : #f0ead6;
+                overflow: elide;
                 horizontal-stretch: 1;
                 vertical-alignment: center;
             }
-            Button {
-                text: "🔒";
+            b-lock := IconButton {
+                icon: "lock";
+                label: Strings.ui_list_tip_lock;
                 clicked => { root.commit-edit(); root.lock-now(); }
             }
-            Button {
-                text: "⚙";
+            b-gear := IconButton {
+                icon: "gear";
+                label: Strings.ui_list_tip_settings;
                 clicked => { root.commit-edit(); root.open-settings(); }
             }
-            Button {
-                text: "🔗";
+            b-link := IconButton {
+                icon: "link";
+                label: Strings.ui_list_tip_sync;
                 clicked => { root.show-sync = !root.show-sync; }
             }
-            Button {
-                text: "📁";
+            b-folder := IconButton {
+                icon: "folder";
+                label: Strings.ui_list_tip_new_group;
                 clicked => { root.commit-edit(); root.new-group(); }
             }
-            Button {
-                text: "＋";
+            b-plus := IconButton {
+                icon: "plus";
+                label: Strings.ui_list_tip_new_memo;
                 clicked => { root.commit-edit(); root.new-memo(); }
             }
         }
@@ -239,19 +260,24 @@ export component ListWindow inherits Window {
                     spacing: 6px;
 
                     // Groups show a disclosure marker, memos a color accent.
-                    if row.is-group: Text {
+                    if row.is-group: Rectangle {
                         width: 14px;
-                        text: row.child-count == 0 ? "" : (row.expanded ? "▾" : "▸");
-                        font-size: 10px;
-                        color: #b0a99a;
-                        vertical-alignment: center;
-                        horizontal-alignment: center;
+                        Glyph {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: 11px;
+                            height: 11px;
+                            name: row.child-count == 0 ? ""
+                                : row.expanded ? "chevron-down" : "chevron-right";
+                            stroke: #b0a99a;
+                            stroke-width: 1.5px;
+                        }
                     }
-                    if row.is-group: Text {
-                        text: "📁";
-                        font-size: 13px;
-                        color: Palette.swatch(row.color);
-                        vertical-alignment: center;
+                    if row.is-group: Glyph {
+                        width: 15px;
+                        height: 15px;
+                        name: "folder";
+                        stroke: Palette.swatch(row.color);
                     }
                     // Colour accent, and the way in to changing it. Folders carry a colour
                     // too now, so the same strip serves both.
@@ -320,12 +346,13 @@ export component ListWindow inherits Window {
                     if root.coloring-id != row.id: Rectangle {
                         width: 20px;
                         opacity: ta.has-hover || hist-ta.has-hover ? 1 : 0;
-                        Text {
-                            text: "⟲";
-                            font-size: 14px;
-                            color: #b0a99a;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
+                        Glyph {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: 14px;
+                            height: 14px;
+                            name: "history";
+                            stroke: #b0a99a;
                         }
                         hist-ta := TouchArea {
                             mouse-cursor: pointer;
@@ -345,13 +372,13 @@ export component ListWindow inherits Window {
                     }
                     del-ta := TouchArea {
                         width: 28px;
-                        Text {
-                            width: 100%;
-                            height: 100%;
-                            text: "🗑";
-                            font-size: 13px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
+                        Glyph {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: 15px;
+                            height: 15px;
+                            name: "trash";
+                            stroke: del-ta.has-hover ? #e8a0a0 : #b0a99a;
                             opacity: del-ta.has-hover ? 1 : 0.4;
                         }
                         clicked => { root.commit-edit(); root.delete-row(row.id, row.is-group); }

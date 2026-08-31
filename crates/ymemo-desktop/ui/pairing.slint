@@ -193,12 +193,17 @@ export component PairingPanel inherits VerticalLayout {
         }
         for dev in root.devices: HorizontalLayout {
             spacing: 6px;
-            // Connection dot.
-            Text {
-                text: dev.connected ? "●" : "○";
-                font-size: 11px;
-                color: dev.connected ? #6fae6f : root.ink;
-                vertical-alignment: center;
+            // Connection dot: filled while the device is reachable, an outline while it is
+            // not. A shape rather than ●/○, so it cannot depend on the font the platform
+            // happens to fall back to.
+            Rectangle {
+                width: 9px;
+                height: 9px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 5px;
+                background: dev.connected ? #6fae6f : #0000;
+                border-width: dev.connected ? 0px : 1.5px;
+                border-color: root.ink;
             }
             Text {
                 text: dev.name;

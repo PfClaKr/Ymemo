@@ -31,11 +31,18 @@ const BODY_FONT_PX: f64 = 13.0;
 /// Debounce between an edit and the autosave.
 pub(crate) const SAVE_DEBOUNCE: Duration = Duration::from_millis(800);
 /// Title bar height, i.e. the collapsed window height; must match app.slint.
-pub(crate) const BAR_HEIGHT: f32 = 28.0;
+pub(crate) const BAR_HEIGHT: f32 = 24.0;
 /// Snap distance in logical px; within it, edges stick to the screen or another sticky.
 pub(crate) const SNAP_DIST: f32 = 12.0;
 /// How often sticky positions are polled for snapping.
 pub(crate) const SNAP_INTERVAL: Duration = Duration::from_millis(90);
+/// The size a sticky opens at (logical px); **must match the preferred size in
+/// `ui/sticky.slint`**, which is what the window is actually given.
+pub(crate) const DEFAULT_SIZE: (f32, f32) = (200.0, 120.0);
+/// Height of the colour and opacity panel; **must match the one in `ui/sticky.slint`**.
+/// A sticky opens small enough that the panel would take most of the note, so the window
+/// makes room for it and gives it back on close.
+const PALETTE_HEIGHT: f32 = 62.0;
 
 /// Body text for the window; an older memo with only a title promotes it to the body.
 pub(crate) fn sticky_text(memo: &Memo) -> String {
@@ -592,6 +599,22 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
+    // The colour panel is taller than the note it would otherwise squeeze; grow by exactly
+    // its height and take the same amount back, so a window the user has resized keeps the
+    // size they chose.
+    {
+        let weak = window.as_weak();
+        window.on_palette_toggled(move |open| {
+            let Some(w) = weak.upgrade() else { return };
+            let sw = w.window();
+            let scale = sw.scale_factor();
+            let size = sw.size();
+            let (lw, lh) = (size.width as f32 / scale, size.height as f32 / scale);
+            let want = if open { lh + PALETTE_HEIGHT } else { (lh - PALETTE_HEIGHT).max(BAR_HEIGHT) };
+            sw.set_size(LogicalSize::new(lw, want));
+        });
+    }
+
     // Double-clicking the title bar folds the window to a thin bar and back.
     {
         let weak = window.as_weak();
@@ -604,7 +627,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
             let logical_w = size.width as f32 / scale;
             if w.get_collapsed() {
                 w.set_collapsed(false);
-                let h = expanded_height.get().max(120.0);
+                let h = expanded_height.get().max(DEFAULT_SIZE.1);
                 sw.set_size(LogicalSize::new(logical_w, h));
             } else {
                 expanded_height.set(size.height as f32 / scale);
@@ -615,6 +638,8 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     }
 
     present(&window);
+    // A note opens at its first line, whatever the widget's scroll offset happened to be.
+    window.invoke_body_to_top();
     if focus {
         window.invoke_focus_body();
     }

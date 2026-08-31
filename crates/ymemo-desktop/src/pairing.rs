@@ -46,15 +46,24 @@ struct Waiting {
 /// Smallest window (logical px) that fits the pairing panel without scrolling.
 pub(crate) const PAIRING_MIN_SIZE: (f32, f32) = (360.0, 520.0);
 
-/// Grows the window to fit the pairing panel and shrinks it back on close, restoring the
-/// size from `saved` so a user-chosen size survives.
-pub(crate) fn resize_for_pairing(win: &slint::Window, open: bool, saved: &Cell<Option<(f32, f32)>>) {
+/// Grows the window to at least `min` while a panel is open and shrinks it back on close,
+/// restoring the size from `saved` so a user-chosen size survives.
+///
+/// Slint sizes a window once, when it is first shown, and a panel that appears later is
+/// simply clipped by whatever height that was — which is how the recovery code ended up cut
+/// off halfway through. Every panel taller than the window it opens in goes through here.
+pub(crate) fn grow_for_panel(
+    win: &slint::Window,
+    open: bool,
+    min: (f32, f32),
+    saved: &Cell<Option<(f32, f32)>>,
+) {
     let scale = win.scale_factor();
     let size = win.size();
     let cur = (size.width as f32 / scale, size.height as f32 / scale);
     if open {
         saved.set(Some(cur));
-        let want = (cur.0.max(PAIRING_MIN_SIZE.0), cur.1.max(PAIRING_MIN_SIZE.1));
+        let want = (cur.0.max(min.0), cur.1.max(min.1));
         if want != cur {
             win.set_size(LogicalSize::new(want.0, want.1));
         }
@@ -476,7 +485,7 @@ pub(crate) fn wire(
         let weak = lock.as_weak();
         lock.on_sync_toggled(move |open| {
             if let Some(w) = weak.upgrade() {
-                resize_for_pairing(w.window(), open, &saved);
+                grow_for_panel(w.window(), open, PAIRING_MIN_SIZE, &saved);
             }
         });
     }
@@ -485,7 +494,7 @@ pub(crate) fn wire(
         let weak = list.as_weak();
         list.on_sync_toggled(move |open| {
             if let Some(w) = weak.upgrade() {
-                resize_for_pairing(w.window(), open, &saved);
+                grow_for_panel(w.window(), open, PAIRING_MIN_SIZE, &saved);
             }
         });
     }

@@ -2,13 +2,25 @@
 // Palette keys ("yellow"/"pink"/"green"/"blue"/"purple") become real colors only here; the
 // core stores and syncs the key string alone.
 export global Palette {
-    // Body background, translucent so it reads as a desktop widget.
+    // The paper a note is written on: a near-white tint of its colour, barely translucent
+    // so it still reads as a desktop widget. Pale on purpose — the writing has to stay
+    // legible at the small default size, and the colour is carried by the title bar and
+    // the border, where it is seen even while the note is folded.
     pure public function bg(key: string) -> color {
-        return key == "pink" ? #ffd6e6f2
-             : key == "green" ? #d2f0c8f2
-             : key == "blue" ? #cfe6fff2
-             : key == "purple" ? #e6d6f5f2
-             : #fff9b1f2; // yellow (default)
+        return key == "pink" ? #fff2f7f7
+             : key == "green" ? #f2fceff7
+             : key == "blue" ? #eff7fff7
+             : key == "purple" ? #f8f2fdf7
+             : #fffce3f7; // yellow (default)
+    }
+    // The line around the note, a shade past the title bar so the paper has a real edge
+    // against whatever is behind it.
+    pure public function edge(key: string) -> color {
+        return key == "pink" ? #ef94b6
+             : key == "green" ? #83c96f
+             : key == "blue" ? #71ade4
+             : key == "purple" ? #ab83d8
+             : #e2c74e; // yellow
     }
     // Title bar: opaque and darker than the body.
     pure public function bar(key: string) -> color {
@@ -63,6 +75,94 @@ export component TabButton inherits Rectangle {
         vertical-alignment: center;
     }
     TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Window furniture drawn as paths rather than typed as emoji.
+//
+// Every pictograph the UI draws comes from here, and none of them from a font. Emoji need an
+// emoji font, and a Linux install without one — the common case, since `fonts-noto-cjk` covers
+// Korean but not emoji — draws them as an empty box; the arrows and dingbats are no safer, as
+// `⟲` and `✕` are in no Windows UI font and left the history button blank and the close button
+// a featureless dot there. A path is the same on every machine, scales with the display
+// instead of blurring the way a bitmap at 150% would, takes the surrounding ink for free, and
+// stays sharp under the software renderer.
+//
+// Anything new that would have been an emoji belongs in `commands` below, not in a string —
+// least of all a translated one, which would make every translator carry the glyph too.
+// ---------------------------------------------------------------------------
+export component Glyph inherits Path {
+    in property <string> name;
+
+    viewbox-width: 16;
+    viewbox-height: 16;
+    stroke-width: 1.4px;
+    // Outlines only: a filled shape at 16px turns into a blob, and the stroke picks up the
+    // button's ink for free.
+    commands: root.name == "lock"
+            ? "M 4.5 7.5 L 11.5 7.5 L 11.5 13.5 L 4.5 13.5 Z M 6 7.5 L 6 5.2 C 6 2.9 10 2.9 10 5.2 L 10 7.5"
+        : root.name == "link"
+            ? "M 7 5.5 L 5.5 5.5 C 3.4 5.5 3.4 10.5 5.5 10.5 L 7 10.5 M 9 5.5 L 10.5 5.5 C 12.6 5.5 12.6 10.5 10.5 10.5 L 9 10.5 M 5.8 8 L 10.2 8"
+        : root.name == "folder"
+            ? "M 2.5 12.8 L 2.5 4.2 L 6.4 4.2 L 7.9 6 L 13.5 6 L 13.5 12.8 Z"
+        : root.name == "gear"
+            ? "M 8 2.6 L 8 4.4 M 8 11.6 L 8 13.4 M 2.6 8 L 4.4 8 M 11.6 8 L 13.4 8 M 4.2 4.2 L 5.5 5.5 M 10.5 10.5 L 11.8 11.8 M 11.8 4.2 L 10.5 5.5 M 5.5 10.5 L 4.2 11.8 M 8 5.3 C 9.5 5.3 10.7 6.5 10.7 8 C 10.7 9.5 9.5 10.7 8 10.7 C 6.5 10.7 5.3 9.5 5.3 8 C 5.3 6.5 6.5 5.3 8 5.3 Z"
+        : root.name == "plus"
+            ? "M 8 3.4 L 8 12.6 M 3.4 8 L 12.6 8"
+        : root.name == "trash"
+            ? "M 3.4 4.8 L 12.6 4.8 M 6.2 4.8 L 6.2 3.2 L 9.8 3.2 L 9.8 4.8 M 4.7 4.8 L 5.4 13.2 L 10.6 13.2 L 11.3 4.8 M 7 7 L 7.3 11 M 9 7 L 8.7 11"
+        : root.name == "close"
+            ? "M 4.6 4.6 L 11.4 11.4 M 11.4 4.6 L 4.6 11.4"
+        : root.name == "history"
+            ? "M 3.4 6.4 L 3.4 3.2 M 3.4 6.4 L 6.6 6.4 M 3.7 6.6 C 5.0 4.4 7.6 3.3 10.0 4.1 C 12.5 4.9 13.9 7.6 13.1 10.1 C 12.3 12.6 9.6 13.9 7.2 13.1 C 5.8 12.7 4.7 11.6 4.2 10.3"
+        : root.name == "resize"
+            ? "M 12.6 6.4 L 12.6 12.6 L 6.4 12.6 M 12.6 9.6 L 9.6 12.6"
+        : root.name == "chevron-down"
+            ? "M 4.4 6.4 L 8 10 L 11.6 6.4"
+        : root.name == "chevron-right"
+            ? "M 6.4 4.4 L 10 8 L 6.4 11.6"
+            : "";
+}
+
+// A header button: the glyph above on a chip that lights up under the pointer.
+//
+// `hovering` is how the window puts the name of what it does on screen — these icons replaced
+// emoji, and a row of five silent pictograms is worse than the boxes it replaced. There is no
+// tooltip of its own here on purpose: it would be drawn inside the header row and every later
+// sibling in the window's layout paints over it.
+export component IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <color> ink: #e8e2d2;
+    in property <bool> enabled: true;
+    out property <bool> hovering: ta.has-hover;
+    callback clicked();
+
+    width: 30px;
+    height: 26px;
+    border-radius: 5px;
+    background: !root.enabled ? #ffffff08
+        : ta.has-hover ? #ffffff33
+        : #ffffff14;
+    opacity: root.enabled ? 1.0 : 0.4;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+
+    Glyph {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        name: root.icon;
+        stroke: root.ink;
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
 }

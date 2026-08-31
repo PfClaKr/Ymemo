@@ -177,6 +177,9 @@ pub(crate) fn refresh_after_restore(ctx: &Ctx, entity: ymemo_core::history::Enti
     if entity == ymemo_core::history::Entity::Memo {
         if let (Ok(Some(memo)), Some(entry)) = (v.store().get(id), ctx.stickies.borrow().get(id)) {
             entry.window.set_memo_text(crate::sticky::sticky_text(&memo).into());
+            // A restored version is a different note; show it from its first line rather
+            // than at whatever offset the previous one had been left at.
+            entry.window.invoke_body_to_top();
             entry.window.set_memo_title(memo.title.into());
             entry.window.set_sticky_color(memo.color.into());
             entry.window.set_sticky_opacity(memo.opacity as f32);

@@ -1,6 +1,7 @@
 import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox } from "std-widgets.slint";
 import { Strings } from "@i18n";
 import { PairingPanel, SharedDeviceRow } from "pairing.slint";
+import { IconButton } from "theme.slint";
 
 // ---------------------------------------------------------------------------
 // Lock window: the master password prompt, hidden once unlocked.
@@ -9,7 +10,13 @@ export component LockWindow inherits Window {
     title: Strings.ui_lock_title;
     preferred-width: 320px;
     preferred-height: 300px;
-    min-height: 200px;
+    // A minimum rather than only a preference: a Window whose root is a layout is sized by
+    // the layout, not by `preferred-width`, and the password prompt on its own is narrow
+    // enough to wrap every line of the screen around it.
+    min-width: 300px;
+    // Tall enough for the first-run choice screen, hint line included; the panels that need
+    // more than this say so through `recovery-shown` below.
+    min-height: 250px;
     background: #2e2b27;
 
     in property <string> lock-message;
@@ -46,6 +53,11 @@ export component LockWindow inherits Window {
     // Fires as the pairing panel opens and closes; Rust grows the window to fit it and
     // shrinks it back.
     callback sync-toggled(bool);
+    // Fires as a panel taller than the password prompt opens and closes; Rust grows the
+    // window for it. A window that stayed at the prompt's height cut a freshly issued
+    // recovery code off halfway through — on the one screen in the app whose whole job is
+    // to be read and copied down.
+    callback needs-room(bool);
 
     // in-out so Rust can close it when the vault arrives.
     in-out property <bool> show-sync: false;
@@ -60,6 +72,10 @@ export component LockWindow inherits Window {
         root.recovering = false;
         root.reset-armed = false;
     }
+    // The two panels that do not fit the prompt's height: a new recovery code, and the
+    // "forgot the password" panel with its code, its two fields and the wipe behind them.
+    private property <bool> tall-panel: root.new-recovery-code != "" || root.recovering;
+    changed tall-panel => { root.needs-room(self.tall-panel); }
     // Contents of the password field. The LineEdit sits inside a conditional block and
     // cannot be reached by id, so it is two-way bound here and cleared by Rust on lock.
     private property <string> password-text;
@@ -72,15 +88,16 @@ export component LockWindow inherits Window {
         HorizontalLayout {
             spacing: 6px;
             Text {
-                text: "Ymemo 🔒";
+                text: Strings.ui_list_heading;
                 font-size: 16px;
                 font-weight: 700;
                 color: #f0ead6;
                 horizontal-stretch: 1;
                 vertical-alignment: center;
             }
-            Button {
-                text: "🔗";
+            IconButton {
+                icon: "link";
+                label: Strings.ui_list_tip_sync;
                 clicked => { root.show-sync = !root.show-sync; }
             }
         }
@@ -107,7 +124,7 @@ export component LockWindow inherits Window {
 
         if !root.show-sync: VerticalLayout {
             spacing: 8px;
-            Text {
+            if root.new-recovery-code == "": Text {
                 text: root.lock-message;
                 font-size: 12px;
                 color: #e79a9a;
@@ -115,7 +132,7 @@ export component LockWindow inherits Window {
             }
 
             // Existing vault: unlock with the master password.
-            if root.vault-exists && !root.recovering: VerticalLayout {
+            if root.vault-exists && !root.recovering && root.new-recovery-code == "": VerticalLayout {
                 spacing: 6px;
                 HorizontalLayout {
                     spacing: 6px;

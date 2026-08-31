@@ -18,13 +18,17 @@ const stickyColors = ['yellow', 'pink', 'green', 'blue', 'purple'];
 /// vault written by a newer version still draws.
 const defaultColor = 'yellow';
 
-/// Body background: the sticky itself, and the editor screen.
+/// The paper a note is written on: the sticky itself, and the editor screen.
+///
+/// Near-white on purpose, as on the desktop: a full screen of poster paint behind a screen
+/// of text is far harder to read than a page with a colored bar over it, and the color is
+/// carried by [paletteBar] and [paletteSwatch] instead.
 Color paletteBg(String key) => switch (key) {
-      'pink' => const Color(0xFFFFD6E6),
-      'green' => const Color(0xFFD2F0C8),
-      'blue' => const Color(0xFFCFE6FF),
-      'purple' => const Color(0xFFE6D6F5),
-      _ => const Color(0xFFFFF9B1),
+      'pink' => const Color(0xFFFFF2F7),
+      'green' => const Color(0xFFF2FCEF),
+      'blue' => const Color(0xFFEFF7FF),
+      'purple' => const Color(0xFFF8F2FD),
+      _ => const Color(0xFFFFFCE3),
     };
 
 /// Title bar: opaque and darker than the body.
@@ -56,11 +60,12 @@ Color paletteSwatch(String key) => switch (key) {
 
 /// Background for one row of the memo list.
 ///
-/// [paletteBg] undiluted turns a scrolling list into five bands of poster paint, so the row
-/// gets a fraction of it over the surface color — enough to tell two colors apart at a
-/// glance, faint enough to read black text on.
+/// Mixed from [paletteSwatch] rather than [paletteBg]: the paper is near-white by design, and
+/// a wash of near-white over the surface leaves five rows that all look the same. A thin
+/// pour of the saturated accent is enough to tell two colors apart at a glance and still
+/// faint enough to read black text on.
 Color paletteRow(String key, Color surface) =>
-    Color.alphaBlend(paletteBg(key).withValues(alpha: 0.42), surface);
+    Color.alphaBlend(paletteSwatch(key).withValues(alpha: 0.16), surface);
 
 /// The palette as a row of tappable circles, with the current one ringed.
 ///

@@ -259,6 +259,73 @@ mod tests {
         assert!(missing.is_empty(), "keys missing from the catalog: {missing:#?}");
     }
 
+    /// Nothing the UI draws may be a pictograph from a font.
+    ///
+    /// Emoji need an emoji font, which a Linux install commonly does not have, and the
+    /// arrows and dingbats are no safer: `⟲` and `✕` are in no Windows UI font, which left
+    /// every sticky there with a blank history button and a close button that was a
+    /// featureless dot. Icons are drawn instead — `Glyph` in the desktop's `theme.slint`,
+    /// Material's bundled icon font on the phone — and this keeps the next one from arriving
+    /// as a character in a string, where a translator would have to carry it too.
+    #[test]
+    fn no_font_dependent_glyphs_in_the_ui() {
+        /// Arrows, misc technical, geometric shapes, dingbats, emoji and fullwidth forms.
+        fn pictograph(c: char) -> bool {
+            matches!(c as u32,
+                0x2190..=0x21FF | 0x2300..=0x23FF | 0x25A0..=0x25FF | 0x2600..=0x27BF
+                | 0x27F0..=0x27FF | 0x2900..=0x297F | 0x2B00..=0x2BFF
+                | 0x1F300..=0x1FAFF | 0xFF01..=0xFFEF)
+        }
+
+        let mut bad = Vec::new();
+        for lang in [Lang::Ko, Lang::En] {
+            for key in keys() {
+                let value = raw(lang, key).unwrap_or_default();
+                let glyphs: String = value.chars().filter(|c| pictograph(*c)).collect();
+                if !glyphs.is_empty() {
+                    bad.push(format!("{}/{key}: {glyphs}", lang.code()));
+                }
+            }
+        }
+
+        // The `.slint` sources too: a glyph typed straight into a `Text` never passes
+        // through the catalog. Comments are where the fixed ones are described, so only
+        // string literals count.
+        let ui = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("workspace root")
+            .join("crates/ymemo-desktop/ui");
+        let mut files = Vec::new();
+        collect_ext(&ui, "slint", &mut files);
+        assert!(!files.is_empty(), "no .slint files scanned — wrong path");
+        for path in &files {
+            let text = std::fs::read_to_string(path).unwrap_or_default();
+            for (n, line) in text.lines().enumerate() {
+                let code = line.split("//").next().unwrap_or("");
+                for literal in code.split('"').skip(1).step_by(2) {
+                    let glyphs: String = literal.chars().filter(|c| pictograph(*c)).collect();
+                    if !glyphs.is_empty() {
+                        bad.push(format!("{}:{}: {glyphs}", path.display(), n + 1));
+                    }
+                }
+            }
+        }
+        assert!(bad.is_empty(), "draw these instead of typing them: {bad:#?}");
+    }
+
+    fn collect_ext(dir: &std::path::Path, ext: &str, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_ext(&path, ext, out);
+            } else if path.extension().is_some_and(|e| e == ext) {
+                out.push(path);
+            }
+        }
+    }
+
     fn collect_rs(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else { return };
         for entry in entries.flatten() {
