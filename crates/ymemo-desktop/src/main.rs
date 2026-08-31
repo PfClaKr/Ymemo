@@ -59,6 +59,11 @@ use pairing::qr_image;
 use state::{touch, AppUi, Ctx, APP};
 use sticky::{close_sticky, new_memo, open_sticky, snap_tick, SNAP_INTERVAL};
 use sync::{start_merge_timer, start_syncthing, SYNC_FOLDER_ID};
+
+/// Smallest window (logical px) for the two lock-screen panels that outgrow the password
+/// prompt: a freshly issued recovery code — the code itself, what it is for, and the button
+/// that says it has been written down — and the "forgot the password" panel behind it.
+const RECOVERY_MIN_SIZE: (f32, f32) = (340.0, 400.0);
 use window::present;
 
 /// How often idleness is checked; fine-grained enough against a setting in minutes.
@@ -91,12 +96,19 @@ fn select_renderer() {
 }
 
 /// Platform data directory, e.g. ~/.local/share/ymemo on Linux, %APPDATA%\ymemo\Ymemo\data
-/// on Windows.
+/// on Windows — or whatever `YMEMO_DATA_DIR` names.
 ///
 /// Only the path; nothing is created. `--quit` and `--purge` run before the directory should
 /// exist, and creating it on the way to deleting it is how `--purge` used to report success
 /// on a machine that had nothing left to delete.
+///
+/// The override exists because on Windows the default is not a path but a known folder id,
+/// so there is otherwise no way to run a build against anything but the one real vault on
+/// the machine. It also gives a portable install somewhere to put its data.
 fn data_dir() -> std::path::PathBuf {
+    if let Some(dir) = std::env::var_os("YMEMO_DATA_DIR").filter(|v| !v.is_empty()) {
+        return std::path::PathBuf::from(dir);
+    }
     match directories::ProjectDirs::from("dev", "ymemo", "Ymemo") {
         Some(dirs) => dirs.data_dir().to_path_buf(),
         // Last resort for a machine with no home directory at all.
@@ -377,6 +389,17 @@ fn main() -> Result<()> {
                     }
                 }
                 Err(e) => lock.set_lock_message(SharedString::from(format!("{e}"))),
+            }
+        });
+    }
+
+    // ---- Make the window tall enough for the panels that outgrow the prompt. ----
+    {
+        let saved = Rc::new(Cell::new(None));
+        let weak = lock.as_weak();
+        lock.on_needs_room(move |open| {
+            if let Some(w) = weak.upgrade() {
+                pairing::grow_for_panel(w.window(), open, RECOVERY_MIN_SIZE, &saved);
             }
         });
     }

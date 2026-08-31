@@ -109,7 +109,9 @@ ymemo --purge
 ```
 
 Choosing a master password on first run creates the vault. App data lives in the platform
-data directory (`~/.local/share/Ymemo` on Linux), and only the encrypted `vault/` is synced.
+data directory (`~/.local/share/ymemo` on Linux, `%APPDATA%\ymemo\Ymemo\data` on Windows),
+and only the encrypted `vault/` is synced. Set `YMEMO_DATA_DIR` to put it somewhere else —
+a portable install, or trying out a build without opening the vault you actually use.
 
 During development the `syncthing` on your PATH is used as-is; releases ship it renamed to
 `ymemo-sync` inside the installer (see below).

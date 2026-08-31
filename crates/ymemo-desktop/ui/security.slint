@@ -1,4 +1,4 @@
-import { LineEdit, Button } from "std-widgets.slint";
+import { LineEdit, Button, ScrollView } from "std-widgets.slint";
 import { Strings } from "@i18n";
 
 // ---------------------------------------------------------------------------
@@ -32,6 +32,10 @@ export component SecurityWindow inherits Window {
     preferred-width: 400px;
     preferred-height: 480px;
     min-width: 340px;
+    // See settings.slint: a Window whose root is a layout takes that layout's size, and the
+    // wrapping hints measure themselves against no width while it is being decided. This
+    // window opened 1472px tall, with the close button below the bottom of the screen.
+    min-height: 460px;
     background: #2e2b27;
 
     // Whether a recovery code was ever issued for this vault.
@@ -71,41 +75,52 @@ export component SecurityWindow inherits Window {
             color: #f0ead6;
         }
 
-        // ---- Master password ----
-        Section {
-            label: Strings.ui_security_change_password;
-            hint: Strings.ui_security_password_hint;
-            LineEdit {
-                placeholder-text: Strings.ui_security_current_password;
-                input-type: InputType.password;
-                text <=> root.current-pw;
-            }
-            LineEdit {
-                placeholder-text: Strings.ui_security_new_password;
-                input-type: InputType.password;
-                text <=> root.new-pw;
-            }
-            LineEdit {
-                placeholder-text: Strings.ui_security_confirm_password;
-                input-type: InputType.password;
-                text <=> root.confirm-pw;
-                accepted => {
-                    if (root.can-change) { root.change-password(root.current-pw, root.new-pw); }
-                }
-            }
-            if root.confirm-pw != "" && root.new-pw != root.confirm-pw: Text {
-                text: Strings.ui_security_mismatch;
-                font-size: 10px;
-                color: #e79a9a;
-            }
-            HorizontalLayout {
-                alignment: start;
-                Button {
-                    text: Strings.ui_security_change_button;
-                    primary: true;
-                    enabled: root.can-change;
-                    clicked => { root.change-password(root.current-pw, root.new-pw); }
-                }
+        // Scrolls, and gives its content an explicit width so the wrapping hints inside can
+        // measure themselves; the close button below stays put.
+        scroll := ScrollView {
+            vertical-stretch: 1;
+            viewport-width: self.visible-width;
+            viewport-height: content.preferred-height;
+
+            content := VerticalLayout {
+                width: scroll.visible-width;
+                spacing: 14px;
+
+                // ---- Master password ----
+                Section {
+                    label: Strings.ui_security_change_password;
+                    hint: Strings.ui_security_password_hint;
+                    LineEdit {
+                        placeholder-text: Strings.ui_security_current_password;
+                        input-type: InputType.password;
+                        text <=> root.current-pw;
+                    }
+                    LineEdit {
+                        placeholder-text: Strings.ui_security_new_password;
+                        input-type: InputType.password;
+                        text <=> root.new-pw;
+                    }
+                    LineEdit {
+                        placeholder-text: Strings.ui_security_confirm_password;
+                        input-type: InputType.password;
+                        text <=> root.confirm-pw;
+                        accepted => {
+                            if (root.can-change) { root.change-password(root.current-pw, root.new-pw); }
+                        }
+                    }
+                    if root.confirm-pw != "" && root.new-pw != root.confirm-pw: Text {
+                        text: Strings.ui_security_mismatch;
+                        font-size: 10px;
+                        color: #e79a9a;
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        Button {
+                            text: Strings.ui_security_change_button;
+                            primary: true;
+                            enabled: root.can-change;
+                            clicked => { root.change-password(root.current-pw, root.new-pw); }
+                        }
             }
         }
 
@@ -166,7 +181,8 @@ export component SecurityWindow inherits Window {
             wrap: word-wrap;
         }
 
-        Rectangle { vertical-stretch: 1; }
+            }
+        }
 
         HorizontalLayout {
             Rectangle { horizontal-stretch: 1; }

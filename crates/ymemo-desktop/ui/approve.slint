@@ -39,6 +39,10 @@ export component ApproveWindow inherits Window {
     preferred-width: 400px;
     preferred-height: 420px;
     min-width: 340px;
+    // See settings.slint: the window takes the root layout's size rather than
+    // `preferred-height`, and that came out just short — the two buttons this whole window
+    // exists to offer were cut in half by the bottom edge.
+    min-height: 380px;
     background: #2e2b27;
 
     // The request on screen. Empty `device-id` means there is nothing to answer and the

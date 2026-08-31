@@ -458,7 +458,16 @@ class _LockScreenState extends State<LockScreen> {
 
   /// The normal way in: type the password, or set one on a device with no vault yet.
   List<Widget> _passwordPanel(FfiStrings s) => [
-        const Text('Ymemo 🔒', style: TextStyle(fontSize: 24)),
+        // Material's bundled icon font, not a 🔒: an emoji is drawn by whatever the phone
+        // vendor ships, and the desktop had to stop using them for the same reason.
+        const Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text('Ymemo', style: TextStyle(fontSize: 24)),
+            SizedBox(width: 8),
+            Icon(Icons.lock_outline, size: 22),
+          ],
+        ),
         const SizedBox(height: 16),
         if (!_vaultExists)
           Padding(
@@ -1179,7 +1188,10 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       child: Scaffold(
         backgroundColor: paletteBg(_color),
         appBar: AppBar(
-          title: Text(widget.strings.newMemo),
+          // The memo's own title, as the list shows it — the bar said "New memo" over every
+          // memo ever opened, including ones written months ago. Fixed at the title it
+          // arrived with rather than following the field below it, which is right there.
+          title: Text(widget.title.isEmpty ? widget.strings.newMemo : widget.title),
           backgroundColor: paletteBar(_color),
           foregroundColor: ink,
           actions: [

@@ -1,4 +1,4 @@
-import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox } from "std-widgets.slint";
+import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox, ScrollView } from "std-widgets.slint";
 import { Strings } from "@i18n";
 import { Palette, TabButton } from "theme.slint";
 
@@ -31,6 +31,10 @@ export component SettingsWindow inherits Window {
     preferred-width: 400px;
     preferred-height: 600px;
     min-width: 340px;
+    // A Window whose root is a layout is sized by that layout, not by `preferred-height`,
+    // so this is what the window actually opens at. Everything above the buttons scrolls,
+    // so it is a comfortable height rather than a required one.
+    min-height: 520px;
     background: #2e2b27;
 
     // Rust fills these in and reads them back on save.
@@ -74,158 +78,177 @@ export component SettingsWindow inherits Window {
             color: #f0ead6;
         }
 
-        // ---- Language ----
-        SettingRow {
-            label: Strings.ui_settings_lang;
-            hint: Strings.ui_settings_lang_hint;
-            HorizontalLayout {
-                TabButton {
-                    label: Strings.ui_settings_lang_auto;
-                    active: root.lang-sel == "auto";
-                    ink: #d8d2c2;
-                    clicked => { root.lang-sel = "auto"; }
-                }
-                // Language names are **not** translated: written in their own language,
-                // they are findable even by someone stuck in a language they cannot read.
-                TabButton {
-                    label: "한국어";
-                    active: root.lang-sel == "ko";
-                    ink: #d8d2c2;
-                    clicked => { root.lang-sel = "ko"; }
-                }
-                TabButton {
-                    label: "English";
-                    active: root.lang-sel == "en";
-                    ink: #d8d2c2;
-                    clicked => { root.lang-sel = "en"; }
-                }
-            }
-        }
+        // Everything between the title and the buttons scrolls.
+        //
+        // Two things forced this. The settings are already taller than a laptop screen, and
+        // the buttons — Save among them — were the first thing to go off the bottom. And the
+        // wrapping hint under each label has no width to wrap against while the window is
+        // deciding how big to be, so each one measured itself one character per line: the
+        // window opened **3301px tall**, with everything from the colour swatches down past
+        // the bottom of the screen. Giving the content an explicit width (`visible-width`)
+        // is what lets those hints measure themselves properly.
+        scroll := ScrollView {
+            vertical-stretch: 1;
+            viewport-width: self.visible-width;
+            viewport-height: content.preferred-height;
 
-        // ---- Locking ----
-        SettingRow {
-            label: Strings.ui_settings_unlock_days;
-            hint: Strings.ui_settings_unlock_days_hint;
-            SpinBox {
-                minimum: 0;
-                maximum: 365;
-                value <=> root.unlock-days;
-            }
-        }
+            content := VerticalLayout {
+                width: scroll.visible-width;
+                spacing: 12px;
 
-        SettingRow {
-            label: Strings.ui_settings_idle_minutes;
-            hint: Strings.ui_settings_idle_minutes_hint;
-            SpinBox {
-                minimum: 0;
-                maximum: 1440;
-                value <=> root.idle-minutes;
-            }
-        }
-
-        // ---- New memo defaults ----
-        SettingRow {
-            label: Strings.ui_settings_default_color;
-            HorizontalLayout {
-                spacing: 8px;
-                alignment: start;
-                for key in ["yellow", "pink", "green", "blue", "purple"]: Rectangle {
-                    width: 22px;
-                    height: 22px;
-                    border-radius: 11px;
-                    background: Palette.swatch(key);
-                    border-width: root.default-color == key ? 3px : 1px;
-                    border-color: root.default-color == key ? #ffffff : #00000040;
-                    TouchArea {
-                        clicked => { root.default-color = key; }
+                // ---- Language ----
+                SettingRow {
+                    label: Strings.ui_settings_lang;
+                    hint: Strings.ui_settings_lang_hint;
+                    HorizontalLayout {
+                        TabButton {
+                            label: Strings.ui_settings_lang_auto;
+                            active: root.lang-sel == "auto";
+                            ink: #d8d2c2;
+                            clicked => { root.lang-sel = "auto"; }
+                        }
+                        // Language names are **not** translated: written in their own language,
+                        // they are findable even by someone stuck in a language they cannot read.
+                        TabButton {
+                            label: "한국어";
+                            active: root.lang-sel == "ko";
+                            ink: #d8d2c2;
+                            clicked => { root.lang-sel = "ko"; }
+                        }
+                        TabButton {
+                            label: "English";
+                            active: root.lang-sel == "en";
+                            ink: #d8d2c2;
+                            clicked => { root.lang-sel = "en"; }
+                        }
                     }
                 }
-            }
-        }
 
-        SettingRow {
-            label: Strings.ui_settings_default_opacity;
-            HorizontalLayout {
-                spacing: 6px;
-                Slider {
-                    horizontal-stretch: 1;
-                    minimum: 20; // matches the core's MIN_OPACITY
-                    maximum: 100;
-                    value: root.default-opacity;
-                    changed(v) => { root.default-opacity = Math.round(v); }
+                // ---- Locking ----
+                SettingRow {
+                    label: Strings.ui_settings_unlock_days;
+                    hint: Strings.ui_settings_unlock_days_hint;
+                    SpinBox {
+                        minimum: 0;
+                        maximum: 365;
+                        value <=> root.unlock-days;
+                    }
                 }
-                Text {
-                    text: root.default-opacity + "%";
+
+                SettingRow {
+                    label: Strings.ui_settings_idle_minutes;
+                    hint: Strings.ui_settings_idle_minutes_hint;
+                    SpinBox {
+                        minimum: 0;
+                        maximum: 1440;
+                        value <=> root.idle-minutes;
+                    }
+                }
+
+                // ---- New memo defaults ----
+                SettingRow {
+                    label: Strings.ui_settings_default_color;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
+                        for key in ["yellow", "pink", "green", "blue", "purple"]: Rectangle {
+                            width: 22px;
+                            height: 22px;
+                            border-radius: 11px;
+                            background: Palette.swatch(key);
+                            border-width: root.default-color == key ? 3px : 1px;
+                            border-color: root.default-color == key ? #ffffff : #00000040;
+                            TouchArea {
+                                clicked => { root.default-color = key; }
+                            }
+                        }
+                    }
+                }
+
+                SettingRow {
+                    label: Strings.ui_settings_default_opacity;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Slider {
+                            horizontal-stretch: 1;
+                            minimum: 20; // matches the core's MIN_OPACITY
+                            maximum: 100;
+                            value: root.default-opacity;
+                            changed(v) => { root.default-opacity = Math.round(v); }
+                        }
+                        Text {
+                            text: root.default-opacity + "%";
+                            font-size: 11px;
+                            color: #ece7db;
+                            vertical-alignment: center;
+                            width: 40px;
+                            horizontal-alignment: right;
+                        }
+                    }
+                }
+
+                // ---- Sync ----
+                SettingRow {
+                    label: Strings.ui_settings_merge_seconds;
+                    hint: Strings.ui_settings_merge_seconds_hint;
+                    SpinBox {
+                        minimum: 3;
+                        maximum: 3600;
+                        value <=> root.merge-seconds;
+                    }
+                }
+
+                // ---- Updates ----
+                SettingRow {
+                    label: Strings.ui_settings_update_check;
+                    hint: Strings.ui_settings_update_check_hint;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        TabButton {
+                            label: Strings.ui_settings_update_on;
+                            active: root.update-check;
+                            ink: #d8d2c2;
+                            clicked => { root.update-check = true; }
+                        }
+                        TabButton {
+                            label: Strings.ui_settings_update_off;
+                            active: !root.update-check;
+                            ink: #d8d2c2;
+                            clicked => { root.update-check = false; }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        Button {
+                            text: Strings.ui_settings_check_now;
+                            clicked => { root.check-update(); }
+                        }
+                    }
+                }
+
+                if root.update-status != "": Text {
+                    text: root.update-status;
                     font-size: 11px;
-                    color: #ece7db;
-                    vertical-alignment: center;
-                    width: 40px;
-                    horizontal-alignment: right;
+                    color: root.update-version != "" ? #e8d98a : #a8a294;
+                    wrap: word-wrap;
                 }
+
+                if root.update-version != "": HorizontalLayout {
+                    alignment: start;
+                    Button {
+                        text: Strings.ui_update_open;
+                        primary: true;
+                        clicked => { root.open-update(); }
+                    }
+                }
+
+                if root.status != "": Text {
+                    text: root.status;
+                    font-size: 11px;
+                    color: #a8d0a8;
+                    wrap: word-wrap;
+                }
+
             }
         }
-
-        // ---- Sync ----
-        SettingRow {
-            label: Strings.ui_settings_merge_seconds;
-            hint: Strings.ui_settings_merge_seconds_hint;
-            SpinBox {
-                minimum: 3;
-                maximum: 3600;
-                value <=> root.merge-seconds;
-            }
-        }
-
-        // ---- Updates ----
-        SettingRow {
-            label: Strings.ui_settings_update_check;
-            hint: Strings.ui_settings_update_check_hint;
-            HorizontalLayout {
-                spacing: 6px;
-                TabButton {
-                    label: Strings.ui_settings_update_on;
-                    active: root.update-check;
-                    ink: #d8d2c2;
-                    clicked => { root.update-check = true; }
-                }
-                TabButton {
-                    label: Strings.ui_settings_update_off;
-                    active: !root.update-check;
-                    ink: #d8d2c2;
-                    clicked => { root.update-check = false; }
-                }
-                Rectangle { horizontal-stretch: 1; }
-                Button {
-                    text: Strings.ui_settings_check_now;
-                    clicked => { root.check-update(); }
-                }
-            }
-        }
-
-        if root.update-status != "": Text {
-            text: root.update-status;
-            font-size: 11px;
-            color: root.update-version != "" ? #e8d98a : #a8a294;
-            wrap: word-wrap;
-        }
-
-        if root.update-version != "": HorizontalLayout {
-            alignment: start;
-            Button {
-                text: Strings.ui_update_open;
-                primary: true;
-                clicked => { root.open-update(); }
-            }
-        }
-
-        if root.status != "": Text {
-            text: root.status;
-            font-size: 11px;
-            color: #a8d0a8;
-            wrap: word-wrap;
-        }
-
-        Rectangle { vertical-stretch: 1; }
 
         Text {
             text: Strings.ui_settings_version + " " + root.app-version;

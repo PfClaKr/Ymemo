@@ -1,6 +1,6 @@
-import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox } from "std-widgets.slint";
+import { LineEdit, Button, ScrollView, ListView, Slider, SpinBox } from "std-widgets.slint";
 import { Strings } from "@i18n";
-import { Palette } from "theme.slint";
+import { Palette, Glyph } from "theme.slint";
 
 // ---------------------------------------------------------------------------
 // Sticky window: one frameless window per memo.
@@ -180,15 +180,14 @@ component PhotoItem inherits Rectangle {
         height: close-ta.height;
         border-radius: self.width / 2;
         background: close-ta.has-hover ? #d64541 : #000000a8;
-        Text {
-            width: 100%;
-            height: 100%;
-            text: "✕";
-            font-size: 11px;
-            font-weight: 700;
-            color: #ffffff;
-            horizontal-alignment: center;
-            vertical-alignment: center;
+        Glyph {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 11px;
+            height: 11px;
+            name: "close";
+            stroke: #ffffff;
+            stroke-width: 1.6px;
         }
     }
     if root.active: Rectangle {
@@ -197,37 +196,122 @@ component PhotoItem inherits Rectangle {
         width: root.grip;
         height: root.grip;
         background: root.on-grip ? Palette.ink(root.color-key) : #000000a8;
-        Text {
-            width: 100%;
-            height: 100%;
-            text: "⇲";
-            font-size: 11px;
-            color: #ffffff;
-            horizontal-alignment: center;
-            vertical-alignment: center;
+        Glyph {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 12px;
+            height: 12px;
+            name: "resize";
+            stroke: #ffffff;
         }
     }
 }
 
-// One button on the sticky's title bar: a glyph in the bar's own ink, which stays legible
-// on every pastel where an emoji falling back to a monochrome default would not.
+// One button on the sticky's title bar: a drawn icon in the bar's own ink.
+//
+// Drawn and not typed, for the same reason as the toolbar's: `⟲` is in no Windows UI font,
+// so the history button was an empty gap on every sticky there, and `✕` is missing too — the
+// close button was a featureless dark dot. A path has neither problem.
 component BarButton inherits TouchArea {
-    in property <string> glyph;
+    in property <string> icon;
     in property <string> color-key;
-    in property <length> glyph-size: 13px;
+    in property <length> icon-size: 14px;
     in property <float> rest-opacity: 0.6;
 
-    width: 26px;
-    Text {
-        width: 100%;
-        height: 100%;
-        text: root.glyph;
-        font-size: root.glyph-size;
-        font-weight: 700;
-        color: Palette.ink(root.color-key);
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    width: 20px;
+    Glyph {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: root.icon-size;
+        height: root.icon-size;
+        name: root.icon;
+        stroke: Palette.ink(root.color-key);
         opacity: root.has-hover ? 1 : root.rest-opacity;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The paper of a note: the text, scrolled, on nothing.
+//
+// std-widgets' `TextEdit` cannot be used here, because it paints its own opaque control
+// background — white under the software renderer, which is what Windows gets — straight over
+// the note's colour, and it reserves 12px of padding on every side, which on a sticky this
+// small is a third of the first line. This is the same Flickable-and-TextInput underneath,
+// with a transparent background and the padding a sticky wants.
+// ---------------------------------------------------------------------------
+component NotePad {
+    in property <length> font-size: 12px;
+    in property <color> ink;
+    in property <length> pad-bottom: 4px;
+    in-out property <string> text <=> input.text;
+    out property <bool> has-focus: input.has-focus;
+    callback edited(string);
+
+    public function focus-text() { input.focus(); }
+    // Put the view back at the first line. Opening a note should show its beginning, and
+    // the scroll offset outlives a text change on its own.
+    public function to-top() { scroll.viewport-y = 0px; }
+
+    forward-focus: input;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+
+    ContextMenuArea {
+        Menu {
+            MenuItem {
+                title: Strings.ui_sticky_cut;
+                activated => { input.cut(); }
+            }
+            MenuItem {
+                title: Strings.ui_sticky_copy;
+                activated => { input.copy(); }
+            }
+            MenuItem {
+                title: Strings.ui_sticky_paste;
+                activated => { input.paste(); }
+            }
+            MenuItem {
+                title: Strings.ui_sticky_select_all;
+                activated => { input.select-all(); }
+            }
+        }
+
+        scroll := ScrollView {
+            x: 7px;
+            y: 5px;
+            width: parent.width - 14px;
+            // Never negative: folding a sticky drives the note to nothing, and a scroll view
+            // asked for a negative height is a size no layout can resolve.
+            height: max(parent.height - 5px - root.pad-bottom, 0px);
+            viewport-width: self.visible-width;
+            viewport-height: max(self.visible-height, input.preferred-height);
+
+            input := TextInput {
+                single-line: false;
+                wrap: word-wrap;
+                font-size: root.font-size;
+                color: root.ink;
+                // The widget's own selection colours came from the style; set them here or a
+                // selection is invisible against the pale paper.
+                selection-background-color: root.ink.with-alpha(0.25);
+                selection-foreground-color: root.ink;
+                page-height: scroll.visible-height;
+                edited => { root.edited(self.text); }
+                // Keep the caret in view: the same rule std-widgets' own text edit uses,
+                // measured against this note's line height rather than a hardcoded one.
+                cursor-position-changed(cpos) => {
+                    if (cpos.y + scroll.viewport-y < 0px) {
+                        scroll.viewport-y = min(0px,
+                            max(scroll.visible-height - self.height, -cpos.y));
+                    } else if (cpos.y + scroll.viewport-y
+                            > scroll.visible-height - root.font-size * 1.6) {
+                        scroll.viewport-y = min(0px,
+                            max(scroll.visible-height - self.height,
+                                scroll.visible-height - cpos.y - root.font-size * 1.6));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -236,10 +320,13 @@ export component StickyWindow inherits Window {
     no-frame: true;
     always-on-top: true;
     background: #0000;
-    preferred-width: 260px;
-    preferred-height: 240px;
-    min-width: 160px;
-    min-height: 28px;
+    // A sticky is a scrap of paper, not a document window: it opens the size of the note it
+    // usually holds and is pulled bigger when one outgrows it. Anything larger simply covers
+    // more desktop than it has writing to justify.
+    preferred-width: 200px;
+    preferred-height: 120px;
+    min-width: 140px;
+    min-height: 24px;
     resize-border-width: 4px;
 
     in property <string> memo-title;
@@ -265,6 +352,9 @@ export component StickyWindow inherits Window {
     callback set-color(string);
     callback set-opacity(float);
     callback toggle-collapse();
+    // Fires as the colour panel opens and closes; Rust grows the window to fit it and
+    // shrinks it back, the way the pairing panel does.
+    callback palette-toggled(bool);
     // Title bar drag: we follow the pointer ourselves rather than leaving it to the OS, so
     // snapping happens during the drag and not only on release. All arguments are logical px
     // relative to the window's top-left corner.
@@ -277,11 +367,15 @@ export component StickyWindow inherits Window {
     // Creation time, already formatted by Rust; empty until it is set.
     in property <string> created-at;
     private property <bool> show-palette: false;
+    changed show-palette => { root.palette-toggled(self.show-palette); }
     // Whether this press became a drag, and whether we are tracking it ourselves.
     private property <bool> drag-started: false;
     private property <bool> drag-manual: false;
 
-    public function focus-body() { body.focus(); }
+    public function focus-body() { body.focus-text(); }
+    // Show a note from its first line. Rust calls this when the window opens and after a
+    // merge replaces the text, neither of which should land the reader mid-note.
+    public function body-to-top() { body.to-top(); }
 
     // Folding hides everything but the title, so anything open below it has to fold away too
     // — a colour panel left standing would be all that is left of the note.
@@ -294,7 +388,7 @@ export component StickyWindow inherits Window {
         // Square corners.
         border-radius: 0px;
         border-width: 1px;
-        border-color: Palette.bar(root.sticky-color).darker(0.15);
+        border-color: Palette.edge(root.sticky-color);
         clip: true;
         // Fade the whole window, text included, so the desktop shows through.
         opacity: root.sticky-opacity / 100;
@@ -303,7 +397,7 @@ export component StickyWindow inherits Window {
             // ---- Title bar: drag handle and fold toggle ----
             Rectangle {
                 // Must match BAR_HEIGHT in sticky.rs, the folded window height.
-                height: 28px;
+                height: 24px;
                 background: Palette.bar(root.sticky-color);
 
                 bar-ta := TouchArea {
@@ -329,12 +423,12 @@ export component StickyWindow inherits Window {
                     double-clicked => { root.toggle-collapse(); }
                 }
                 HorizontalLayout {
-                    padding-left: 10px;
-                    padding-right: 6px;
-                    spacing: 2px;
+                    padding-left: 8px;
+                    padding-right: 4px;
+                    spacing: 0px;
                     Text {
                         text: root.memo-title == "" ? Strings.ui_sticky_default_title : root.memo-title;
-                        font-size: 13px;
+                        font-size: 11px;
                         font-weight: 700;
                         color: Palette.ink(root.sticky-color);
                         vertical-alignment: center;
@@ -346,7 +440,7 @@ export component StickyWindow inherits Window {
                     // a note that is not there or reopens it behind the user's back. Only the
                     // unfold (double-click) and the close stay.
                     if !root.collapsed: photo-ta := TouchArea {
-                        width: 26px;
+                        width: 20px;
                         // Drawn, not 📎: an emoji needs an emoji font, and where there is
                         // none the glyph falls back to the default text colour and is all
                         // but invisible on these pastel bars — the same reason the colour
@@ -380,22 +474,21 @@ export component StickyWindow inherits Window {
                         clicked => { root.add-photo(); }
                     }
                     if !root.collapsed: BarButton {
-                        glyph: "⟲";
+                        icon: "history";
                         color-key: root.sticky-color;
-                        glyph-size: 15px;
                         clicked => { root.show-history(); }
                     }
                     if !root.collapsed: palette-ta := TouchArea {
-                        width: 26px;
+                        width: 20px;
                         // A chip of the memo's own colour, not an emoji: an emoji that falls
                         // back to a monochrome glyph is drawn in the default text colour,
                         // which on these pastel bars is all but invisible. A filled circle
                         // with the title bar's ink around it reads at any colour, and says
                         // what it will change at the same time.
                         Rectangle {
-                            width: 15px;
-                            height: 15px;
-                            border-radius: 8px;
+                            width: 13px;
+                            height: 13px;
+                            border-radius: 7px;
                             background: Palette.swatch(root.sticky-color);
                             border-width: 1.5px;
                             border-color: Palette.ink(root.sticky-color);
@@ -404,9 +497,8 @@ export component StickyWindow inherits Window {
                         clicked => { root.show-palette = !root.show-palette; }
                     }
                     if !root.collapsed: BarButton {
-                        glyph: "＋";
+                        icon: "plus";
                         color-key: root.sticky-color;
-                        glyph-size: 14px;
                         rest-opacity: 0.55;
                         clicked => { root.new-memo(); }
                     }
@@ -414,21 +506,20 @@ export component StickyWindow inherits Window {
                     // disappeared into the pastel bar, so it sits on a chip of its own —
                     // dark at rest, red under the pointer, white glyph on both.
                     close-ta := TouchArea {
-                        width: 26px;
+                        width: 22px;
                         Rectangle {
-                            width: 20px;
-                            height: 20px;
-                            border-radius: 10px;
+                            width: 17px;
+                            height: 17px;
+                            border-radius: 9px;
                             background: close-ta.has-hover ? #d64541 : Palette.ink(root.sticky-color);
-                            Text {
-                                width: 100%;
-                                height: 100%;
-                                text: "✕";
-                                font-size: 12px;
-                                font-weight: 700;
-                                color: #ffffff;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
+                            Glyph {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: 11px;
+                                height: 11px;
+                                name: "close";
+                                stroke: #ffffff;
+                                stroke-width: 1.6px;
                             }
                         }
                         clicked => { root.close-requested(); }
@@ -439,19 +530,20 @@ export component StickyWindow inherits Window {
             // ---- Color and opacity panel. It stays open after a pick, since the two are
             // usually adjusted together. ----
             if root.show-palette && !root.collapsed: Rectangle {
-                height: 72px;
+                // Must match PALETTE_HEIGHT in sticky.rs, which makes room for it.
+                height: 62px;
                 background: Palette.bar(root.sticky-color).darker(0.06);
                 VerticalLayout {
-                    padding: 6px;
-                    spacing: 4px;
+                    padding: 5px;
+                    spacing: 3px;
 
                     HorizontalLayout {
-                        spacing: 8px;
+                        spacing: 7px;
                         alignment: center;
                         for key in ["yellow", "pink", "green", "blue", "purple"]: Rectangle {
-                            width: 22px;
-                            height: 22px;
-                            border-radius: 11px;
+                            width: 19px;
+                            height: 19px;
+                            border-radius: 10px;
                             background: Palette.swatch(key);
                             border-width: root.sticky-color == key ? 3px : 1px;
                             border-color: root.sticky-color == key ? #ffffff : #00000040;
@@ -498,14 +590,18 @@ export component StickyWindow inherits Window {
                 vertical-stretch: 1;
                 // Zero while folded, or this minimum would stop the window from shrinking to
                 // the title bar.
-                min-height: root.collapsed ? 0px : 96px;
+                min-height: root.collapsed ? 0px : 56px;
                 clip: true;
 
-                body := TextEdit {
+                body := NotePad {
                     width: 100%;
                     height: 100%;
+                    // Must match BODY_FONT_PX in sticky.rs, which sizes the photos.
                     font-size: 13px;
-                    wrap: word-wrap;
+                    ink: #2b2b22;
+                    // Room along the bottom edge for the date, so the last line of a full
+                    // note is not written underneath it.
+                    pad-bottom: root.created-at == "" ? 4px : 14px;
                     text <=> root.memo-text;
                     edited => { root.edited(self.text); }
                 }
@@ -529,11 +625,14 @@ export component StickyWindow inherits Window {
         // faint enough to read straight past. ----
         if !root.collapsed && root.created-at != "": Text {
             text: root.created-at;
-            font-size: 9px;
+            font-size: 8px;
             color: Palette.ink(root.sticky-color);
-            opacity: 0.45;
+            // Fades out of the way while the note is being written in, and comes back once
+            // the caret leaves. On a sticky this small it is the corner the last line wants.
+            opacity: body.has-focus ? 0.0 : 0.5;
+            animate opacity { duration: 150ms; }
             x: parent.width - self.width - 7px;
-            y: parent.height - self.height - 4px;
+            y: parent.height - self.height - 3px;
         }
     }
 }
