@@ -32,6 +32,17 @@ pub const MIN_OPACITY: i64 = 20;
 
 /// Default display width of a photo, in 1/1000 em (20em = 20 characters wide).
 pub const DEFAULT_WIDTH_EM_MILLI: i64 = 20_000;
+
+/// Longest a vault name may be. It is a heading, not a document: past this it stops being
+/// readable in the one line the window has for it, and a value arriving from another device
+/// is not this device's to trust.
+pub const VAULT_NAME_MAX: usize = 40;
+
+/// Trims a vault name and cuts it to [`VAULT_NAME_MAX`] **characters**, not bytes, so a
+/// Korean name is not cut through the middle of a syllable.
+pub fn clamp_vault_name(name: &str) -> String {
+    name.trim().chars().take(VAULT_NAME_MAX).collect()
+}
 /// Display-width bounds in 1/1000 em: too small is invisible, too large overflows.
 pub const MIN_WIDTH_EM_MILLI: i64 = 4_000;
 pub const MAX_WIDTH_EM_MILLI: i64 = 80_000;

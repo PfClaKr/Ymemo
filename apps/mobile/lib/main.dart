@@ -643,6 +643,10 @@ class _MemoListScreenState extends State<MemoListScreen> {
   Timer? _merge;
   FfiRelease? _update;
 
+  /// What the vault is called, empty until it is named. It comes out of the synced document,
+  /// so renaming it here renames it on every paired device.
+  String _vaultName = '';
+
   bool get _atRoot => widget.groupId.isEmpty;
 
   @override
@@ -677,12 +681,27 @@ class _MemoListScreenState extends State<MemoListScreen> {
     // folder was deleted elsewhere — to the top level rather than leaving it unreachable.
     final folders = await groupChildren(parentId: widget.groupId);
     final memos = await memosInGroup(groupId: widget.groupId);
+    // Re-read on every reload rather than once: a merge can bring a rename from another
+    // device, and the heading is where that shows up.
+    final name = _atRoot ? await vaultName() : '';
     if (mounted) {
       setState(() {
         _folders = folders;
         _memos = memos;
+        _vaultName = name;
       });
     }
+  }
+
+  /// Renames the vault, on every device that shares it.
+  Future<void> _renameVault() async {
+    final s = widget.strings;
+    final name =
+        await _askForName(context, s, s.renameVault, _vaultName, label: s.vaultName);
+    if (name == null) return;
+    // The core trims it and cuts it to length, so show back what was actually stored.
+    final stored = await vaultSetName(name: name);
+    if (mounted) setState(() => _vaultName = stored);
   }
 
   /// Asks for a name and creates a folder inside the one on screen.
@@ -897,7 +916,20 @@ class _MemoListScreenState extends State<MemoListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_atRoot ? widget.strings.listTitle : widget.groupName),
+        // At the top level the title is the vault's name and tapping it renames it; inside a
+        // folder it is the folder's, which is renamed from the folder's own menu.
+        title: _atRoot
+            ? InkWell(
+                onTap: _renameVault,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: Text(
+                    _vaultName.isEmpty ? widget.strings.listTitle : _vaultName,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              )
+            : Text(widget.groupName),
         actions: [
           IconButton(
             icon: const Icon(Icons.create_new_folder_outlined),
@@ -2222,8 +2254,11 @@ Future<String?> _askForName(
   BuildContext context,
   FfiStrings strings,
   String title,
-  String initial,
-) {
+  String initial, {
+  /// What the field is for. Folders are what this dialog was written for, so that stays the
+  /// default; the vault's own name goes through it too and must not be labelled a folder.
+  String? label,
+}) {
   final controller = TextEditingController(text: initial);
   return showDialog<String>(
     context: context,
@@ -2232,7 +2267,7 @@ Future<String?> _askForName(
       content: TextField(
         controller: controller,
         autofocus: true,
-        decoration: InputDecoration(labelText: strings.folderName),
+        decoration: InputDecoration(labelText: label ?? strings.folderName),
         onSubmitted: (v) => Navigator.of(context).pop(v.trim()),
       ),
       actions: [

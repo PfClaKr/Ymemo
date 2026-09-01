@@ -171,6 +171,8 @@ pub struct FfiStrings {
     pub setup_new_detail: String,
     pub setup_link_title: String,
     pub setup_link_detail: String,
+    pub rename_vault: String,
+    pub vault_name: String,
     pub update_available: String,
     pub update_check: String,
     pub update_check_hint: String,
@@ -290,6 +292,8 @@ pub fn mobile_strings() -> FfiStrings {
         setup_new_detail: t!("mobile.setup_new_detail"),
         setup_link_title: t!("mobile.setup_link_title"),
         setup_link_detail: t!("mobile.setup_link_detail"),
+        rename_vault: t!("mobile.rename_vault"),
+        vault_name: t!("mobile.vault_name"),
         update_available: t!("mobile.update_available"),
         update_check: t!("mobile.update_check"),
         update_check_hint: t!("mobile.update_check_hint"),
@@ -381,6 +385,23 @@ pub fn vault_open(vault_dir: String, cache_db_path: String, password: String) ->
     let vault = Vault::open_or_create(&vault_dir, password.as_bytes(), store)?;
     *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = Some(vault);
     Ok(())
+}
+
+/// What this vault is called, empty until it has been named.
+///
+/// The name is part of the synced document, so it is the same on every paired device and
+/// arrives on a new one with the memos.
+pub fn vault_name() -> Result<String> {
+    with_vault(|v| Ok(v.name()))
+}
+
+/// Renames the vault everywhere. Returns the name as stored — trimmed and cut to length —
+/// so the screen shows what actually synced rather than what was typed.
+pub fn vault_set_name(name: String) -> Result<String> {
+    with_vault(|v| {
+        v.set_name(&name)?;
+        Ok(v.name())
+    })
 }
 
 /// Closes the vault (log out).

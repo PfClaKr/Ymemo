@@ -68,7 +68,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => 1134779594;
+  int get rustContentHash => -1967235946;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -209,6 +209,8 @@ abstract class RustLibApi extends BaseApi {
 
   Future<Uint8List> crateApiVaultKey();
 
+  Future<String> crateApiVaultName();
+
   Future<void> crateApiVaultOpen(
       {required String vaultDir,
       required String cacheDbPath,
@@ -226,6 +228,8 @@ abstract class RustLibApi extends BaseApi {
       {required String vaultDir,
       required String code,
       required String newPassword});
+
+  Future<String> crateApiVaultSetName({required String name});
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -1541,6 +1545,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<String> crateApiVaultName() {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 54, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateApiVaultNameConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiVaultNameConstMeta => const TaskConstMeta(
+        debugName: "vault_name",
+        argNames: [],
+      );
+
+  @override
   Future<void> crateApiVaultOpen(
       {required String vaultDir,
       required String cacheDbPath,
@@ -1552,7 +1579,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(cacheDbPath, serializer);
         sse_encode_String(password, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 54, port: port_);
+            funcId: 55, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1581,7 +1608,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(cacheDbPath, serializer);
         sse_encode_list_prim_u_8_loose(key, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 55, port: port_);
+            funcId: 56, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1607,7 +1634,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(vaultDir, serializer);
         sse_encode_String(cacheDbPath, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 56, port: port_);
+            funcId: 57, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1636,7 +1663,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(code, serializer);
         sse_encode_String(newPassword, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 57, port: port_);
+            funcId: 58, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1652,6 +1679,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "vault_reset_password_with_recovery",
         argNames: ["vaultDir", "code", "newPassword"],
+      );
+
+  @override
+  Future<String> crateApiVaultSetName({required String name}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(name, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 59, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateApiVaultSetNameConstMeta,
+      argValues: [name],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiVaultSetNameConstMeta => const TaskConstMeta(
+        debugName: "vault_set_name",
+        argNames: ["name"],
       );
 
   @protected
@@ -1797,9 +1848,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FfiStrings dco_decode_ffi_strings(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 109)
+    if (arr.length != 111)
       throw Exception(
-          'unexpected arr length: expect 109 but see ${arr.length}');
+          'unexpected arr length: expect 111 but see ${arr.length}');
     return FfiStrings(
       addPhoto: dco_decode_String(arr[0]),
       bodyHint: dco_decode_String(arr[1]),
@@ -1831,85 +1882,87 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       setupNewDetail: dco_decode_String(arr[27]),
       setupLinkTitle: dco_decode_String(arr[28]),
       setupLinkDetail: dco_decode_String(arr[29]),
-      updateAvailable: dco_decode_String(arr[30]),
-      updateCheck: dco_decode_String(arr[31]),
-      updateCheckHint: dco_decode_String(arr[32]),
-      updateChecking: dco_decode_String(arr[33]),
-      updateLatest: dco_decode_String(arr[34]),
-      updateNow: dco_decode_String(arr[35]),
-      updateOpen: dco_decode_String(arr[36]),
-      updateSection: dco_decode_String(arr[37]),
-      version: dco_decode_String(arr[38]),
-      cancel: dco_decode_String(arr[39]),
-      delete: dco_decode_String(arr[40]),
-      deleteGroupHint: dco_decode_String(arr[41]),
-      emptyFolder: dco_decode_String(arr[42]),
-      folderName: dco_decode_String(arr[43]),
-      moveTo: dco_decode_String(arr[44]),
-      newGroup: dco_decode_String(arr[45]),
-      ok: dco_decode_String(arr[46]),
-      rename: dco_decode_String(arr[47]),
-      rootFolder: dco_decode_String(arr[48]),
-      listTitle: dco_decode_String(arr[49]),
-      masterPassword: dco_decode_String(arr[50]),
-      myCode: dco_decode_String(arr[51]),
-      newMemo: dco_decode_String(arr[52]),
-      noDevices: dco_decode_String(arr[53]),
-      opening: dco_decode_String(arr[54]),
-      photoCamera: dco_decode_String(arr[55]),
-      photoGallery: dco_decode_String(arr[56]),
-      photoMissing: dco_decode_String(arr[57]),
-      photoRemove: dco_decode_String(arr[58]),
-      photoSize: dco_decode_String(arr[59]),
-      save: dco_decode_String(arr[60]),
-      scanHint: dco_decode_String(arr[61]),
-      scanQr: dco_decode_String(arr[62]),
-      syncDevices: dco_decode_String(arr[63]),
-      syncNow: dco_decode_String(arr[64]),
-      syncStarting: dco_decode_String(arr[65]),
-      syncUnavailable: dco_decode_String(arr[66]),
-      titleHint: dco_decode_String(arr[67]),
-      unlock: dco_decode_String(arr[68]),
-      unpair: dco_decode_String(arr[69]),
-      color: dco_decode_String(arr[70]),
-      changePassword: dco_decode_String(arr[71]),
-      confirmPassword: dco_decode_String(arr[72]),
-      createVault: dco_decode_String(arr[73]),
-      currentPassword: dco_decode_String(arr[74]),
-      forgotPassword: dco_decode_String(arr[75]),
-      issueRecovery: dco_decode_String(arr[76]),
-      newPassword: dco_decode_String(arr[77]),
-      newVaultHint: dco_decode_String(arr[78]),
-      noRecovery: dco_decode_String(arr[79]),
-      passwordChanged: dco_decode_String(arr[80]),
-      passwordHint: dco_decode_String(arr[81]),
-      passwordMismatch: dco_decode_String(arr[82]),
-      recoveryAbsent: dco_decode_String(arr[83]),
-      recoveryAck: dco_decode_String(arr[84]),
-      recoveryCode: dco_decode_String(arr[85]),
-      recoveryHint: dco_decode_String(arr[86]),
-      recoveryIssued: dco_decode_String(arr[87]),
-      recoveryPresent: dco_decode_String(arr[88]),
-      recoveryPrompt: dco_decode_String(arr[89]),
-      recoveryWarning: dco_decode_String(arr[90]),
-      reissueRecovery: dco_decode_String(arr[91]),
-      resetDone: dco_decode_String(arr[92]),
-      resetPassword: dco_decode_String(arr[93]),
-      resetVault: dco_decode_String(arr[94]),
-      resetVaultConfirm: dco_decode_String(arr[95]),
-      resetVaultHint: dco_decode_String(arr[96]),
-      securitySection: dco_decode_String(arr[97]),
-      allow: dco_decode_String(arr[98]),
-      deviceId: dco_decode_String(arr[99]),
-      pairCancelWait: dco_decode_String(arr[100]),
-      pairConnected: dco_decode_String(arr[101]),
-      pairRequest: dco_decode_String(arr[102]),
-      pairRequestHint: dco_decode_String(arr[103]),
-      pairVerification: dco_decode_String(arr[104]),
-      pairVerify: dco_decode_String(arr[105]),
-      pairWaiting: dco_decode_String(arr[106]),
-      pairWaitingHint: dco_decode_String(arr[107]),
-      reject: dco_decode_String(arr[108]),
+      renameVault: dco_decode_String(arr[30]),
+      vaultName: dco_decode_String(arr[31]),
+      updateAvailable: dco_decode_String(arr[32]),
+      updateCheck: dco_decode_String(arr[33]),
+      updateCheckHint: dco_decode_String(arr[34]),
+      updateChecking: dco_decode_String(arr[35]),
+      updateLatest: dco_decode_String(arr[36]),
+      updateNow: dco_decode_String(arr[37]),
+      updateOpen: dco_decode_String(arr[38]),
+      updateSection: dco_decode_String(arr[39]),
+      version: dco_decode_String(arr[40]),
+      cancel: dco_decode_String(arr[41]),
+      delete: dco_decode_String(arr[42]),
+      deleteGroupHint: dco_decode_String(arr[43]),
+      emptyFolder: dco_decode_String(arr[44]),
+      folderName: dco_decode_String(arr[45]),
+      moveTo: dco_decode_String(arr[46]),
+      newGroup: dco_decode_String(arr[47]),
+      ok: dco_decode_String(arr[48]),
+      rename: dco_decode_String(arr[49]),
+      rootFolder: dco_decode_String(arr[50]),
+      listTitle: dco_decode_String(arr[51]),
+      masterPassword: dco_decode_String(arr[52]),
+      myCode: dco_decode_String(arr[53]),
+      newMemo: dco_decode_String(arr[54]),
+      noDevices: dco_decode_String(arr[55]),
+      opening: dco_decode_String(arr[56]),
+      photoCamera: dco_decode_String(arr[57]),
+      photoGallery: dco_decode_String(arr[58]),
+      photoMissing: dco_decode_String(arr[59]),
+      photoRemove: dco_decode_String(arr[60]),
+      photoSize: dco_decode_String(arr[61]),
+      save: dco_decode_String(arr[62]),
+      scanHint: dco_decode_String(arr[63]),
+      scanQr: dco_decode_String(arr[64]),
+      syncDevices: dco_decode_String(arr[65]),
+      syncNow: dco_decode_String(arr[66]),
+      syncStarting: dco_decode_String(arr[67]),
+      syncUnavailable: dco_decode_String(arr[68]),
+      titleHint: dco_decode_String(arr[69]),
+      unlock: dco_decode_String(arr[70]),
+      unpair: dco_decode_String(arr[71]),
+      color: dco_decode_String(arr[72]),
+      changePassword: dco_decode_String(arr[73]),
+      confirmPassword: dco_decode_String(arr[74]),
+      createVault: dco_decode_String(arr[75]),
+      currentPassword: dco_decode_String(arr[76]),
+      forgotPassword: dco_decode_String(arr[77]),
+      issueRecovery: dco_decode_String(arr[78]),
+      newPassword: dco_decode_String(arr[79]),
+      newVaultHint: dco_decode_String(arr[80]),
+      noRecovery: dco_decode_String(arr[81]),
+      passwordChanged: dco_decode_String(arr[82]),
+      passwordHint: dco_decode_String(arr[83]),
+      passwordMismatch: dco_decode_String(arr[84]),
+      recoveryAbsent: dco_decode_String(arr[85]),
+      recoveryAck: dco_decode_String(arr[86]),
+      recoveryCode: dco_decode_String(arr[87]),
+      recoveryHint: dco_decode_String(arr[88]),
+      recoveryIssued: dco_decode_String(arr[89]),
+      recoveryPresent: dco_decode_String(arr[90]),
+      recoveryPrompt: dco_decode_String(arr[91]),
+      recoveryWarning: dco_decode_String(arr[92]),
+      reissueRecovery: dco_decode_String(arr[93]),
+      resetDone: dco_decode_String(arr[94]),
+      resetPassword: dco_decode_String(arr[95]),
+      resetVault: dco_decode_String(arr[96]),
+      resetVaultConfirm: dco_decode_String(arr[97]),
+      resetVaultHint: dco_decode_String(arr[98]),
+      securitySection: dco_decode_String(arr[99]),
+      allow: dco_decode_String(arr[100]),
+      deviceId: dco_decode_String(arr[101]),
+      pairCancelWait: dco_decode_String(arr[102]),
+      pairConnected: dco_decode_String(arr[103]),
+      pairRequest: dco_decode_String(arr[104]),
+      pairRequestHint: dco_decode_String(arr[105]),
+      pairVerification: dco_decode_String(arr[106]),
+      pairVerify: dco_decode_String(arr[107]),
+      pairWaiting: dco_decode_String(arr[108]),
+      pairWaitingHint: dco_decode_String(arr[109]),
+      reject: dco_decode_String(arr[110]),
     );
   }
 
@@ -2182,6 +2235,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_setupNewDetail = sse_decode_String(deserializer);
     var var_setupLinkTitle = sse_decode_String(deserializer);
     var var_setupLinkDetail = sse_decode_String(deserializer);
+    var var_renameVault = sse_decode_String(deserializer);
+    var var_vaultName = sse_decode_String(deserializer);
     var var_updateAvailable = sse_decode_String(deserializer);
     var var_updateCheck = sse_decode_String(deserializer);
     var var_updateCheckHint = sse_decode_String(deserializer);
@@ -2292,6 +2347,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         setupNewDetail: var_setupNewDetail,
         setupLinkTitle: var_setupLinkTitle,
         setupLinkDetail: var_setupLinkDetail,
+        renameVault: var_renameVault,
+        vaultName: var_vaultName,
         updateAvailable: var_updateAvailable,
         updateCheck: var_updateCheck,
         updateCheckHint: var_updateCheckHint,
@@ -2656,6 +2713,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.setupNewDetail, serializer);
     sse_encode_String(self.setupLinkTitle, serializer);
     sse_encode_String(self.setupLinkDetail, serializer);
+    sse_encode_String(self.renameVault, serializer);
+    sse_encode_String(self.vaultName, serializer);
     sse_encode_String(self.updateAvailable, serializer);
     sse_encode_String(self.updateCheck, serializer);
     sse_encode_String(self.updateCheckHint, serializer);

@@ -32,6 +32,17 @@ Future<void> vaultOpen(
     RustLib.instance.api.crateApiVaultOpen(
         vaultDir: vaultDir, cacheDbPath: cacheDbPath, password: password);
 
+/// What this vault is called, empty until it has been named.
+///
+/// The name is part of the synced document, so it is the same on every paired device and
+/// arrives on a new one with the memos.
+Future<String> vaultName() => RustLib.instance.api.crateApiVaultName();
+
+/// Renames the vault everywhere. Returns the name as stored — trimmed and cut to length —
+/// so the screen shows what actually synced rather than what was typed.
+Future<String> vaultSetName({required String name}) =>
+    RustLib.instance.api.crateApiVaultSetName(name: name);
+
 /// Closes the vault (log out).
 Future<void> vaultClose() => RustLib.instance.api.crateApiVaultClose();
 
@@ -677,6 +688,8 @@ class FfiStrings {
   final String setupNewDetail;
   final String setupLinkTitle;
   final String setupLinkDetail;
+  final String renameVault;
+  final String vaultName;
   final String updateAvailable;
   final String updateCheck;
   final String updateCheckHint;
@@ -788,6 +801,8 @@ class FfiStrings {
     required this.setupNewDetail,
     required this.setupLinkTitle,
     required this.setupLinkDetail,
+    required this.renameVault,
+    required this.vaultName,
     required this.updateAvailable,
     required this.updateCheck,
     required this.updateCheckHint,
@@ -901,6 +916,8 @@ class FfiStrings {
       setupNewDetail.hashCode ^
       setupLinkTitle.hashCode ^
       setupLinkDetail.hashCode ^
+      renameVault.hashCode ^
+      vaultName.hashCode ^
       updateAvailable.hashCode ^
       updateCheck.hashCode ^
       updateCheckHint.hashCode ^
@@ -1016,6 +1033,8 @@ class FfiStrings {
           setupNewDetail == other.setupNewDetail &&
           setupLinkTitle == other.setupLinkTitle &&
           setupLinkDetail == other.setupLinkDetail &&
+          renameVault == other.renameVault &&
+          vaultName == other.vaultName &&
           updateAvailable == other.updateAvailable &&
           updateCheck == other.updateCheck &&
           updateCheckHint == other.updateCheckHint &&

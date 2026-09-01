@@ -9,7 +9,8 @@
 //!
 //! A log record is an encrypted **automerge change**. Document shape:
 //! `ROOT.memos: Map<memo_id, {title, body, created_at, updated_at}>`,
-//! `ROOT.groups: Map<group_id, {...}>`, `ROOT.attachments: Map<attachment_id, {...}>`.
+//! `ROOT.groups: Map<group_id, {...}>`, `ROOT.attachments: Map<attachment_id, {...}>`,
+//! `ROOT.name: Str` — what the vault is called, shared by every device that has it.
 //! Photo bytes stay out of the document, in `blobs/<hash>.ymblob`; an attachment only
 //! points at the hash.
 //!
@@ -505,6 +506,27 @@ impl Vault {
     /// The synced directory, i.e. the Syncthing shared folder.
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// What this vault is called, empty when it has never been named.
+    ///
+    /// The name lives in the automerge document, next to the memos, and not in `vault.json`:
+    /// the header is a synced *file*, so two devices renaming at once would leave syncthing
+    /// two versions of it to pick between, while the document merges them the way it merges
+    /// everything else. It follows a pairing for free — a device that receives the logs
+    /// receives the name in them.
+    pub fn name(&self) -> String {
+        get_str_or(&self.doc, &ROOT, "name", "")
+    }
+
+    /// Renames the vault, on every device that shares it.
+    pub fn set_name(&mut self, name: &str) -> Result<()> {
+        let name = crate::clamp_vault_name(name);
+        if self.name() == name {
+            return Ok(());
+        }
+        self.doc.put(ROOT, "name", name)?;
+        self.append_local_change()
     }
 
     /// Decrypts every `.ymlog` and parses the automerge changes.
@@ -1437,6 +1459,50 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
         fs::remove_file(&db_a).ok();
         fs::remove_file(&db_b).ok();
+    }
+
+    /// The vault's name travels in the logs, so a paired device shows the same one.
+    #[test]
+    fn vault_name_syncs_across_devices() {
+        let dir = temp_dir();
+        let db_a = std::env::temp_dir().join(format!("ymemo-a-{}.db", uuid::Uuid::new_v4()));
+        let db_b = std::env::temp_dir().join(format!("ymemo-b-{}.db", uuid::Uuid::new_v4()));
+
+        {
+            let mut a = Vault::create(&dir, b"pw", Store::open(&db_a).unwrap()).unwrap();
+            assert_eq!(a.name(), "", "a new vault has no name until one is given");
+            a.set_name("  집 메모  ").unwrap();
+            assert_eq!(a.name(), "집 메모", "surrounding space is not part of the name");
+        }
+
+        let b = Vault::open(&dir, b"pw", Store::open(&db_b).unwrap()).unwrap();
+        assert_eq!(b.name(), "집 메모");
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db_a).ok();
+        fs::remove_file(&db_b).ok();
+    }
+
+    /// A rename is a document change like any other, so it survives the cache being thrown
+    /// away and rebuilt from the logs.
+    #[test]
+    fn vault_name_survives_a_rebuild() {
+        let dir = temp_dir();
+        let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
+        let mut v = Vault::create(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+
+        v.set_name("work").unwrap();
+        v.set_name("work notes").unwrap();
+        v.rebuild().unwrap();
+        assert_eq!(v.name(), "work notes");
+
+        // Longer than a heading can hold; cut by characters, so Korean stays whole.
+        let long = "가".repeat(crate::VAULT_NAME_MAX + 20);
+        v.set_name(&long).unwrap();
+        assert_eq!(v.name().chars().count(), crate::VAULT_NAME_MAX);
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db).ok();
     }
 
     /// Folders written before they had colours must still open, at the default.

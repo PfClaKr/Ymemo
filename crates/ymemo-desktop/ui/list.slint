@@ -22,7 +22,9 @@ export struct ListRow {
 // accent shows the sticky's color.
 // ---------------------------------------------------------------------------
 export component ListWindow inherits Window {
-    title: "Ymemo";
+    // The vault's own name in the task bar too, so two vaults open side by side are told
+    // apart there as well as on screen.
+    title: root.vault-name == "" ? Strings.ui_list_heading : root.vault-name;
     // Five header buttons squeeze the title below this width. It is a minimum and not only
     // a preference because a Window whose root is a layout takes the layout's natural size
     // and ignores `preferred-width` — which left an empty list 141px wide, with its own
@@ -32,6 +34,13 @@ export component ListWindow inherits Window {
     min-width: 320px;
     min-height: 260px;
     background: #2e2b27;
+
+    // What this vault is called. Empty until it is named, and then the heading says "Ymemo".
+    // It lives in the synced document, so every paired device shows the same one.
+    in-out property <string> vault-name;
+    callback rename-vault(string);
+    // Whether the heading is being edited right now.
+    private property <bool> naming: false;
 
     in property <[ListRow]> rows;
     in property <bool> sync-available: false;
@@ -85,6 +94,12 @@ export component ListWindow inherits Window {
     private property <bool> tip-showing: b-lock.hovering || b-gear.hovering || b-link.hovering
         || b-folder.hovering || b-plus.hovering;
 
+    // Stores the vault's new name and leaves the heading's edit mode.
+    function finish-naming(name: string) {
+        root.naming = false;
+        root.rename-vault(name);
+    }
+
     // Commits the name being edited and leaves edit mode.
     function commit-edit() {
         if (root.editing-id != "") {
@@ -99,21 +114,56 @@ export component ListWindow inherits Window {
 
         HorizontalLayout {
             spacing: 4px;
-            // The heading doubles as the toolbar's label: point at a button and its name
-            // takes the title's place. Cheaper than a tooltip and always in the same spot.
-            Text {
-                text: b-lock.hovering ? Strings.ui_list_tip_lock
-                    : b-gear.hovering ? Strings.ui_list_tip_settings
-                    : b-link.hovering ? Strings.ui_list_tip_sync
-                    : b-folder.hovering ? Strings.ui_list_tip_new_group
-                    : b-plus.hovering ? Strings.ui_list_tip_new_memo
-                    : Strings.ui_list_heading;
-                font-size: root.tip-showing ? 12px : 16px;
-                font-weight: root.tip-showing ? 400 : 700;
-                color: root.tip-showing ? #cfc8b6 : #f0ead6;
-                overflow: elide;
+            // The heading is three things in one place: the vault's name, the field that
+            // renames it, and — while the pointer is on a toolbar button — that button's
+            // label. Cheaper than a tooltip and always in the same spot.
+            if root.naming: LineEdit {
                 horizontal-stretch: 1;
-                vertical-alignment: center;
+                text: root.vault-name;
+                placeholder-text: Strings.ui_list_heading;
+                // The field is created by this very `if`, so nothing has focus until it asks
+                // for it — the same way a group's name field does two hundred lines below.
+                init => { self.focus(); }
+                accepted => { root.finish-naming(self.text); }
+                // Clicking away is as much an answer as pressing return, and a heading stuck
+                // in edit mode because the pointer moved is a trap. `set_name` ignores a name
+                // that did not change, so the two paths cannot fight.
+                changed has-focus => {
+                    if (!self.has-focus) { root.finish-naming(self.text); }
+                }
+            }
+            if !root.naming: Rectangle {
+                horizontal-stretch: 1;
+                Text {
+                    width: 100%;
+                    height: 100%;
+                    text: b-lock.hovering ? Strings.ui_list_tip_lock
+                        : b-gear.hovering ? Strings.ui_list_tip_settings
+                        : b-link.hovering ? Strings.ui_list_tip_sync
+                        : b-folder.hovering ? Strings.ui_list_tip_new_group
+                        : b-plus.hovering ? Strings.ui_list_tip_new_memo
+                        : root.vault-name == "" ? Strings.ui_list_heading
+                        : root.vault-name;
+                    font-size: root.tip-showing ? 12px : 16px;
+                    font-weight: root.tip-showing ? 400 : 700;
+                    color: root.tip-showing ? #cfc8b6
+                        : name-ta.has-hover ? #ffffff
+                        : #f0ead6;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+                // Click the name to change it. Nothing marks it as editable at rest — a
+                // heading covered in affordances is worse than one you find by trying — so
+                // it lights up under the pointer and says so through the accessible label.
+                name-ta := TouchArea {
+                    mouse-cursor: text;
+                    accessible-role: button;
+                    accessible-label: Strings.ui_list_rename_vault;
+                    clicked => {
+                        root.commit-edit();
+                        root.naming = true;
+                    }
+                }
             }
             b-lock := IconButton {
                 icon: "lock";

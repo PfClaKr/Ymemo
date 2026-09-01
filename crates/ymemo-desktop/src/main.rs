@@ -581,6 +581,29 @@ fn main() -> Result<()> {
             refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
         });
     }
+    // ---- Rename the vault. The name is in the synced document, so this reaches every
+    // paired device the way a memo does. ----
+    {
+        let ctx = ctx.clone();
+        let weak = list.as_weak();
+        list.on_rename_vault(move |name| {
+            touch(&ctx);
+            let stored = {
+                let mut guard = ctx.vault.borrow_mut();
+                let Some(v) = guard.as_mut() else { return };
+                if let Err(e) = v.set_name(name.as_str()) {
+                    eprintln!("could not rename the vault: {e}");
+                    return;
+                }
+                v.name()
+            };
+            // Read back what was stored rather than what was typed: the core trims it and
+            // cuts it to length, and the heading must show the name that actually synced.
+            if let Some(list) = weak.upgrade() {
+                list.set_vault_name(SharedString::from(stored));
+            }
+        });
+    }
     {
         let ctx = ctx.clone();
         list.on_move_row(move |src, dst| {
