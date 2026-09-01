@@ -2178,9 +2178,11 @@ impl SseDecode for crate::api::FfiRelease {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_version = <String>::sse_decode(deserializer);
         let mut var_url = <String>::sse_decode(deserializer);
+        let mut var_file = <String>::sse_decode(deserializer);
         return crate::api::FfiRelease {
             version: var_version,
             url: var_url,
+            file: var_file,
         };
     }
 }
@@ -2753,6 +2755,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiRelease {
         [
             self.version.into_into_dart().into_dart(),
             self.url.into_into_dart().into_dart(),
+            self.file.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -2998,6 +3001,7 @@ impl SseEncode for crate::api::FfiRelease {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.version, serializer);
         <String>::sse_encode(self.url, serializer);
+        <String>::sse_encode(self.file, serializer);
     }
 }
 

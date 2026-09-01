@@ -1240,8 +1240,12 @@ pub fn vault_open_with_key(vault_dir: String, cache_db_path: String, key: Vec<u8
 /// A release newer than the running build.
 pub struct FfiRelease {
     pub version: String,
-    /// The release page; the app opens it and installs nothing itself.
+    /// Where the update button goes: the apk built for this device's ABI when the release
+    /// carries one, the release page otherwise. The app opens it and installs nothing itself.
     pub url: String,
+    /// File name behind [`FfiRelease::url`], empty when it is the release page. Shown so the
+    /// user can see it is the apk for their phone and not one of the other two.
+    pub file: String,
 }
 
 /// The running build's version — the same number the release tag carries, since CI checks
@@ -1255,6 +1259,10 @@ pub fn app_version() -> String {
 /// The **only** request the app makes to anyone's server, which is why it sits behind a
 /// setting; see `ymemo_core::update` for what it does and does not send.
 pub fn update_check() -> Result<Option<FfiRelease>> {
-    Ok(ymemo_core::update::check(env!("CARGO_PKG_VERSION"))?
-        .map(|r| FfiRelease { version: r.version, url: r.url }))
+    Ok(
+        ymemo_core::update::check(env!("CARGO_PKG_VERSION"))?.map(|r| {
+            let url = r.download_url().to_string();
+            FfiRelease { version: r.version, url, file: r.asset_name }
+        }),
+    )
 }

@@ -805,8 +805,8 @@ fn main() -> Result<()> {
         // The button asks regardless of the daily gap, and says what came back.
         settings_win.on_check_update(move || update::spawn_check(&ctx, true));
     }
-    settings_win.on_open_update(update::open_release_page);
-    list.on_open_update(update::open_release_page);
+    settings_win.on_open_update(update::open_download);
+    list.on_open_update(update::open_download);
 
     // Do not raise the lock window when the session already unlocked us.
     if !auto_unlocked {

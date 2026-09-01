@@ -2408,8 +2408,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           if (_update != null)
             ListTile(
-              leading: const Icon(Icons.open_in_new),
+              leading: const Icon(Icons.download),
               title: Text(s.updateOpen),
+              // The apk for this phone's ABI, named. A release carries three of them and the
+              // release page cannot tell you which is yours.
+              subtitle: _update!.file.isEmpty
+                  ? null
+                  : Text(_update!.file,
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
               onTap: () => host.openUrl(_update!.url),
             ),
 

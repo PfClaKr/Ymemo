@@ -140,7 +140,7 @@
   "mobile.update_checking": "Checking…",
   "mobile.update_latest": "This is the latest version",
   "mobile.update_now": "Check now",
-  "mobile.update_open": "Open the download page",
+  "mobile.update_open": "Download",
   "mobile.update_section": "Updates",
   "mobile.version": "Version",
   "msg.approve_failed": "Could not allow it: {error}",
@@ -303,5 +303,5 @@
   "ui.sticky_select_all": "Select all",
   "ui.sticky_window_title": "Memo",
   "ui.update_available": "New version",
-  "ui.update_open": "Open the download page"
+  "ui.update_open": "Download"
 }

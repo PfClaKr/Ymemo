@@ -536,16 +536,22 @@ class FfiPendingDevice {
 class FfiRelease {
   final String version;
 
-  /// The release page; the app opens it and installs nothing itself.
+  /// Where the update button goes: the apk built for this device's ABI when the release
+  /// carries one, the release page otherwise. The app opens it and installs nothing itself.
   final String url;
+
+  /// File name behind [`FfiRelease::url`], empty when it is the release page. Shown so the
+  /// user can see it is the apk for their phone and not one of the other two.
+  final String file;
 
   const FfiRelease({
     required this.version,
     required this.url,
+    required this.file,
   });
 
   @override
-  int get hashCode => version.hashCode ^ url.hashCode;
+  int get hashCode => version.hashCode ^ url.hashCode ^ file.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -553,7 +559,8 @@ class FfiRelease {
       other is FfiRelease &&
           runtimeType == other.runtimeType &&
           version == other.version &&
-          url == other.url;
+          url == other.url &&
+          file == other.file;
 }
 
 /// Preferences as Dart sees them. Every field has a default, so a file written by an older

@@ -140,7 +140,7 @@
   "mobile.update_checking": "확인 중…",
   "mobile.update_latest": "최신 버전입니다",
   "mobile.update_now": "지금 확인",
-  "mobile.update_open": "다운로드 페이지 열기",
+  "mobile.update_open": "내려받기",
   "mobile.update_section": "업데이트",
   "mobile.version": "버전",
   "msg.approve_failed": "허용하지 못했습니다: {error}",
@@ -303,5 +303,5 @@
   "ui.sticky_select_all": "전체 선택",
   "ui.sticky_window_title": "메모",
   "ui.update_available": "새 버전",
-  "ui.update_open": "다운로드 페이지 열기"
+  "ui.update_open": "내려받기"
 }

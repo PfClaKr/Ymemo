@@ -1756,11 +1756,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FfiRelease dco_decode_ffi_release(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return FfiRelease(
       version: dco_decode_String(arr[0]),
       url: dco_decode_String(arr[1]),
+      file: dco_decode_String(arr[2]),
     );
   }
 
@@ -2113,7 +2114,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_version = sse_decode_String(deserializer);
     var var_url = sse_decode_String(deserializer);
-    return FfiRelease(version: var_version, url: var_url);
+    var var_file = sse_decode_String(deserializer);
+    return FfiRelease(version: var_version, url: var_url, file: var_file);
   }
 
   @protected
@@ -2584,6 +2586,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.version, serializer);
     sse_encode_String(self.url, serializer);
+    sse_encode_String(self.file, serializer);
   }
 
   @protected
