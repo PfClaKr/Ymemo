@@ -1,9 +1,15 @@
 //! Update check: ask GitHub whether a newer release exists.
 //!
 //! **It only ever tells the user.** Nothing is downloaded and nothing is installed — the app
-//! points at the release page and the user decides. Installing behind someone's back would
+//! hands a link to the browser and the user decides. Installing behind someone's back would
 //! mean elevation on Windows and root on Linux, and on Linux the package manager is the right
 //! owner of that anyway.
+//!
+//! What it does do is *name the file*. A release carries a .deb, a .rpm, a Windows installer
+//! and one apk per Android ABI, and pointing at the release page left the user to work out
+//! which of the seven was theirs — a question nobody can answer for their own phone. The
+//! build knows its own operating system and architecture, so [`Release::asset_url`] is the
+//! file for the machine asking, and the page stays as the fallback.
 //!
 //! This is also the **only** request Ymemo makes to a server of anyone's, so it is worth being
 //! precise about what it costs: a GET to api.github.com carrying nothing but the request
@@ -27,12 +33,33 @@ const USER_AGENT: &str = concat!("Ymemo/", env!("CARGO_PKG_VERSION"));
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A published release, as much of it as the app shows.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Release {
     /// Version without the tag's `v`, e.g. `0.10.0`.
     pub version: String,
-    /// The release page, which is what the user is sent to.
+    /// The release page, which is where the user is sent when nothing below matched.
     pub url: String,
+    /// The one file this build should download, when the release carries it.
+    ///
+    /// A release publishes a .deb, a .rpm, a Windows installer and three Android apks, and
+    /// the page shows all of them at once. The app already knows which operating system it
+    /// is, and on Android which ABI it was compiled for, so it can name the file instead of
+    /// asking the user to recognise theirs. Empty when nothing matched — an unknown Linux
+    /// packaging, a build from source — and then [`Release::url`] is all there is.
+    pub asset_url: String,
+    /// File name of [`Release::asset_url`], so the app can say what it is about to hand over.
+    pub asset_name: String,
+}
+
+impl Release {
+    /// Where the update button should go: the file for this build, or the page.
+    pub fn download_url(&self) -> &str {
+        if self.asset_url.is_empty() {
+            &self.url
+        } else {
+            &self.asset_url
+        }
+    }
 }
 
 /// Returns the newest release when it is newer than `current`, `None` when it is not.
@@ -60,7 +87,7 @@ fn fetch_latest() -> Result<Release> {
     parse_release(&body)
 }
 
-/// Pulls the version and page out of the API response.
+/// Pulls the version, the page and this build's own file out of the API response.
 ///
 /// `/releases/latest` never returns drafts or prereleases, so anything that arrives here is
 /// meant for users.
@@ -69,7 +96,83 @@ fn parse_release(body: &serde_json::Value) -> Result<Release> {
         .as_str()
         .with_context(|| t!("core.update_check_failed"))?;
     let url = body["html_url"].as_str().unwrap_or("").to_string();
-    Ok(Release { version: tag.trim_start_matches('v').to_string(), url })
+
+    let (asset_name, asset_url) = body["assets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|a| Some((a["name"].as_str()?, a["browser_download_url"].as_str()?)))
+        .find(|(name, _)| is_for_this_build(name))
+        .map(|(name, url)| (name.to_string(), url.to_string()))
+        .unwrap_or_default();
+
+    Ok(Release {
+        version: tag.trim_start_matches('v').to_string(),
+        url,
+        asset_url,
+        asset_name,
+    })
+}
+
+/// Whether a release asset is the one this build should be updated with.
+///
+/// Matched on the name the release workflow gives it. Everything here is decided at compile
+/// time except which of the two Linux packages the machine wants, and that is the one thing
+/// the binary cannot know about itself.
+fn is_for_this_build(name: &str) -> bool {
+    if cfg!(target_os = "windows") {
+        return name.ends_with("-setup-x86_64.exe");
+    }
+    if cfg!(target_os = "android") {
+        // The library is built once per ABI, so the architecture this code was compiled for
+        // *is* the device's — no need to ask Android which apk it wants.
+        let abi = match std::env::consts::ARCH {
+            "aarch64" => "arm64-v8a",
+            "arm" => "armeabi-v7a",
+            "x86_64" => "x86_64",
+            _ => return false,
+        };
+        return name.ends_with(&format!("-android-{abi}.apk"));
+    }
+    if cfg!(target_os = "linux") {
+        return match linux_package_suffix() {
+            Some(suffix) => name.ends_with(suffix),
+            None => false,
+        };
+    }
+    false
+}
+
+/// `.deb` or `.rpm` for this machine, or `None` when it is neither — a build from source, a
+/// distribution that is not one of the two families — in which case handing over a package
+/// it cannot install would be worse than showing the page.
+fn linux_package_suffix() -> Option<&'static str> {
+    let os_release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
+    let family = |needle: &str| {
+        os_release.lines().any(|line| {
+            let Some(value) = line
+                .strip_prefix("ID=")
+                .or_else(|| line.strip_prefix("ID_LIKE="))
+            else {
+                return false;
+            };
+            value.trim_matches('"').split_whitespace().any(|id| id == needle)
+        })
+    };
+    if family("debian") || family("ubuntu") {
+        return Some(".deb");
+    }
+    if family("fedora") || family("rhel") || family("centos") {
+        return Some(".rpm");
+    }
+    // Older releases carry no usable ID_LIKE; the package databases are the fallback.
+    if std::path::Path::new("/etc/debian_version").exists() {
+        return Some(".deb");
+    }
+    if std::path::Path::new("/etc/redhat-release").exists() {
+        return Some(".rpm");
+    }
+    None
 }
 
 /// Whether `candidate` is a later version than `current`.
@@ -128,6 +231,74 @@ mod tests {
         let release = parse_release(&body).unwrap();
         assert_eq!(release.version, "0.10.0");
         assert!(release.url.ends_with("/v0.10.0"));
+    }
+
+    /// The names a real release carries, so the picker is tested against the set it will
+    /// actually see rather than one asset at a time.
+    fn release_body() -> serde_json::Value {
+        let names = [
+            "ymemo-0.10.0-1.fc44.x86_64.rpm",
+            "ymemo-0.10.0-android-arm64-v8a.apk",
+            "ymemo-0.10.0-android-armeabi-v7a.apk",
+            "ymemo-0.10.0-android-x86_64.apk",
+            "ymemo-ffi-ios.zip",
+            "ymemo-setup-x86_64.exe",
+            "ymemo_0.10.0_amd64.deb",
+        ];
+        serde_json::json!({
+            "tag_name": "v0.10.0",
+            "html_url": "https://github.com/PfClaKr/Ymemo/releases/tag/v0.10.0",
+            "assets": names.iter().map(|n| serde_json::json!({
+                "name": n,
+                "browser_download_url": format!("https://example.invalid/{n}"),
+            })).collect::<Vec<_>>(),
+        })
+    }
+
+    #[test]
+    fn picks_one_asset_and_only_one() {
+        let release = parse_release(&release_body()).unwrap();
+        let names = [
+            "ymemo-0.10.0-1.fc44.x86_64.rpm",
+            "ymemo-0.10.0-android-arm64-v8a.apk",
+            "ymemo-0.10.0-android-armeabi-v7a.apk",
+            "ymemo-0.10.0-android-x86_64.apk",
+            "ymemo-ffi-ios.zip",
+            "ymemo-setup-x86_64.exe",
+            "ymemo_0.10.0_amd64.deb",
+        ];
+        // Whatever this test is compiled for, at most one name may match — two would make
+        // the choice arbitrary, which is the thing being removed.
+        assert!(names.iter().filter(|n| is_for_this_build(n)).count() <= 1);
+
+        if release.asset_name.is_empty() {
+            // No packaging this build recognises; the page has to carry it.
+            assert_eq!(release.download_url(), release.url);
+        } else {
+            assert!(names.contains(&release.asset_name.as_str()));
+            assert_eq!(release.download_url(), release.asset_url);
+            // The ios library is a build input, never something a user installs.
+            assert_ne!(release.asset_name, "ymemo-ffi-ios.zip");
+        }
+    }
+
+    #[test]
+    fn a_release_without_assets_falls_back_to_the_page() {
+        let release = parse_release(&serde_json::json!({
+            "tag_name": "v0.10.0",
+            "html_url": "https://example.invalid/page",
+        }))
+        .unwrap();
+        assert!(release.asset_url.is_empty());
+        assert_eq!(release.download_url(), "https://example.invalid/page");
+    }
+
+    #[test]
+    fn never_offers_another_platform_its_file() {
+        // The three that are wrong for every platform this crate builds for.
+        assert!(!is_for_this_build("ymemo-ffi-ios.zip"));
+        assert!(!is_for_this_build("SOURCE_CODE.tar.gz"));
+        assert!(!is_for_this_build(""));
     }
 
     #[test]

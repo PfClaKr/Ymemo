@@ -147,10 +147,13 @@ pub(crate) fn apply_opened_vault(
     unlocked: &Rc<Cell<bool>>,
 ) {
     refresh_list(&v, &ctx.model, &ctx.collapsed.borrow());
+    let name = v.name();
     *ctx.vault.borrow_mut() = Some(v);
     unlocked.set(true);
     let _ = lock.hide();
     if let Some(list) = list_weak.upgrade() {
+        // The name comes out of the vault, so it is only knowable once one is open.
+        list.set_vault_name(SharedString::from(name));
         present(&list);
     }
 }

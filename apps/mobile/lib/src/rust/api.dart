@@ -32,6 +32,17 @@ Future<void> vaultOpen(
     RustLib.instance.api.crateApiVaultOpen(
         vaultDir: vaultDir, cacheDbPath: cacheDbPath, password: password);
 
+/// What this vault is called, empty until it has been named.
+///
+/// The name is part of the synced document, so it is the same on every paired device and
+/// arrives on a new one with the memos.
+Future<String> vaultName() => RustLib.instance.api.crateApiVaultName();
+
+/// Renames the vault everywhere. Returns the name as stored — trimmed and cut to length —
+/// so the screen shows what actually synced rather than what was typed.
+Future<String> vaultSetName({required String name}) =>
+    RustLib.instance.api.crateApiVaultSetName(name: name);
+
 /// Closes the vault (log out).
 Future<void> vaultClose() => RustLib.instance.api.crateApiVaultClose();
 
@@ -536,16 +547,22 @@ class FfiPendingDevice {
 class FfiRelease {
   final String version;
 
-  /// The release page; the app opens it and installs nothing itself.
+  /// Where the update button goes: the apk built for this device's ABI when the release
+  /// carries one, the release page otherwise. The app opens it and installs nothing itself.
   final String url;
+
+  /// File name behind [`FfiRelease::url`], empty when it is the release page. Shown so the
+  /// user can see it is the apk for their phone and not one of the other two.
+  final String file;
 
   const FfiRelease({
     required this.version,
     required this.url,
+    required this.file,
   });
 
   @override
-  int get hashCode => version.hashCode ^ url.hashCode;
+  int get hashCode => version.hashCode ^ url.hashCode ^ file.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -553,7 +570,8 @@ class FfiRelease {
       other is FfiRelease &&
           runtimeType == other.runtimeType &&
           version == other.version &&
-          url == other.url;
+          url == other.url &&
+          file == other.file;
 }
 
 /// Preferences as Dart sees them. Every field has a default, so a file written by an older
@@ -665,6 +683,13 @@ class FfiStrings {
   final String settings;
   final String unlockDays;
   final String unlockDaysHint;
+  final String setupQuestion;
+  final String setupNewTitle;
+  final String setupNewDetail;
+  final String setupLinkTitle;
+  final String setupLinkDetail;
+  final String renameVault;
+  final String vaultName;
   final String updateAvailable;
   final String updateCheck;
   final String updateCheckHint;
@@ -771,6 +796,13 @@ class FfiStrings {
     required this.settings,
     required this.unlockDays,
     required this.unlockDaysHint,
+    required this.setupQuestion,
+    required this.setupNewTitle,
+    required this.setupNewDetail,
+    required this.setupLinkTitle,
+    required this.setupLinkDetail,
+    required this.renameVault,
+    required this.vaultName,
     required this.updateAvailable,
     required this.updateCheck,
     required this.updateCheckHint,
@@ -879,6 +911,13 @@ class FfiStrings {
       settings.hashCode ^
       unlockDays.hashCode ^
       unlockDaysHint.hashCode ^
+      setupQuestion.hashCode ^
+      setupNewTitle.hashCode ^
+      setupNewDetail.hashCode ^
+      setupLinkTitle.hashCode ^
+      setupLinkDetail.hashCode ^
+      renameVault.hashCode ^
+      vaultName.hashCode ^
       updateAvailable.hashCode ^
       updateCheck.hashCode ^
       updateCheckHint.hashCode ^
@@ -989,6 +1028,13 @@ class FfiStrings {
           settings == other.settings &&
           unlockDays == other.unlockDays &&
           unlockDaysHint == other.unlockDaysHint &&
+          setupQuestion == other.setupQuestion &&
+          setupNewTitle == other.setupNewTitle &&
+          setupNewDetail == other.setupNewDetail &&
+          setupLinkTitle == other.setupLinkTitle &&
+          setupLinkDetail == other.setupLinkDetail &&
+          renameVault == other.renameVault &&
+          vaultName == other.vaultName &&
           updateAvailable == other.updateAvailable &&
           updateCheck == other.updateCheck &&
           updateCheckHint == other.updateCheckHint &&

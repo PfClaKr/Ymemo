@@ -1,7 +1,7 @@
 import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox } from "std-widgets.slint";
 import { Strings } from "@i18n";
 import { PairingPanel, SharedDeviceRow } from "pairing.slint";
-import { IconButton } from "theme.slint";
+import { IconButton, SetupChoice } from "theme.slint";
 
 // ---------------------------------------------------------------------------
 // Lock window: the master password prompt, hidden once unlocked.
@@ -72,9 +72,11 @@ export component LockWindow inherits Window {
         root.recovering = false;
         root.reset-armed = false;
     }
-    // The two panels that do not fit the prompt's height: a new recovery code, and the
-    // "forgot the password" panel with its code, its two fields and the wipe behind them.
-    private property <bool> tall-panel: root.new-recovery-code != "" || root.recovering;
+    // The panels that do not fit the password prompt's height: the first-run choice with a
+    // paragraph on each card, a new recovery code, and the "forgot the password" panel with
+    // its code, its two fields and the wipe behind them.
+    private property <bool> tall-panel: root.new-recovery-code != "" || root.recovering
+        || (!root.vault-exists && !root.creating);
     changed tall-panel => { root.needs-room(self.tall-panel); }
     // Contents of the password field. The LineEdit sits inside a conditional block and
     // cannot be reached by id, so it is two-way bound here and cleared by Rust on lock.
@@ -84,7 +86,6 @@ export component LockWindow inherits Window {
     VerticalLayout {
         padding: 16px;
         spacing: 10px;
-
         HorizontalLayout {
             spacing: 6px;
             Text {
@@ -225,35 +226,41 @@ export component LockWindow inherits Window {
                 }
             }
 
-            // First run on a new device: pick how to start.
+            // First run on a new device: the two ways in, each saying what it does.
             if !root.vault-exists && !root.creating && root.new-recovery-code == "": VerticalLayout {
-                spacing: 8px;
+                spacing: 10px;
                 Text {
                     text: Strings.ui_lock_start_question;
                     font-size: 13px;
                     color: #f0ead6;
                     wrap: word-wrap;
                 }
-                Button {
-                    text: Strings.ui_lock_create_choice;
+                SetupChoice {
+                    title: Strings.ui_lock_create_choice;
+                    detail: Strings.ui_lock_create_detail;
                     clicked => { root.creating = true; }
                 }
-                Button {
-                    text: Strings.ui_lock_connect_choice;
+                SetupChoice {
+                    title: Strings.ui_lock_connect_choice;
+                    // Without a sync daemon there is nothing to pair over, and saying so on
+                    // the card beats a button that is simply dead.
+                    detail: root.sync-available
+                        ? Strings.ui_lock_connect_detail
+                        : Strings.ui_lock_connect_unavailable;
                     enabled: root.sync-available;
                     clicked => { root.show-sync = true; }
-                }
-                Text {
-                    text: Strings.ui_lock_start_hint;
-                    font-size: 11px;
-                    color: #b8b2a2;
-                    wrap: word-wrap;
                 }
             }
 
             // New device that chose "create": set a master password.
             if !root.vault-exists && root.creating && root.new-recovery-code == "": VerticalLayout {
                 spacing: 6px;
+                Text {
+                    text: Strings.ui_lock_new_password_detail;
+                    font-size: 11px;
+                    color: #b8b2a2;
+                    wrap: word-wrap;
+                }
                 HorizontalLayout {
                     spacing: 6px;
                     npw := LineEdit {

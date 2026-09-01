@@ -166,6 +166,13 @@ pub struct FfiStrings {
     pub settings: String,
     pub unlock_days: String,
     pub unlock_days_hint: String,
+    pub setup_question: String,
+    pub setup_new_title: String,
+    pub setup_new_detail: String,
+    pub setup_link_title: String,
+    pub setup_link_detail: String,
+    pub rename_vault: String,
+    pub vault_name: String,
     pub update_available: String,
     pub update_check: String,
     pub update_check_hint: String,
@@ -280,6 +287,13 @@ pub fn mobile_strings() -> FfiStrings {
         settings: t!("mobile.settings"),
         unlock_days: t!("mobile.unlock_days"),
         unlock_days_hint: t!("mobile.unlock_days_hint"),
+        setup_question: t!("mobile.setup_question"),
+        setup_new_title: t!("mobile.setup_new_title"),
+        setup_new_detail: t!("mobile.setup_new_detail"),
+        setup_link_title: t!("mobile.setup_link_title"),
+        setup_link_detail: t!("mobile.setup_link_detail"),
+        rename_vault: t!("mobile.rename_vault"),
+        vault_name: t!("mobile.vault_name"),
         update_available: t!("mobile.update_available"),
         update_check: t!("mobile.update_check"),
         update_check_hint: t!("mobile.update_check_hint"),
@@ -371,6 +385,23 @@ pub fn vault_open(vault_dir: String, cache_db_path: String, password: String) ->
     let vault = Vault::open_or_create(&vault_dir, password.as_bytes(), store)?;
     *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = Some(vault);
     Ok(())
+}
+
+/// What this vault is called, empty until it has been named.
+///
+/// The name is part of the synced document, so it is the same on every paired device and
+/// arrives on a new one with the memos.
+pub fn vault_name() -> Result<String> {
+    with_vault(|v| Ok(v.name()))
+}
+
+/// Renames the vault everywhere. Returns the name as stored — trimmed and cut to length —
+/// so the screen shows what actually synced rather than what was typed.
+pub fn vault_set_name(name: String) -> Result<String> {
+    with_vault(|v| {
+        v.set_name(&name)?;
+        Ok(v.name())
+    })
 }
 
 /// Closes the vault (log out).
@@ -1240,8 +1271,12 @@ pub fn vault_open_with_key(vault_dir: String, cache_db_path: String, key: Vec<u8
 /// A release newer than the running build.
 pub struct FfiRelease {
     pub version: String,
-    /// The release page; the app opens it and installs nothing itself.
+    /// Where the update button goes: the apk built for this device's ABI when the release
+    /// carries one, the release page otherwise. The app opens it and installs nothing itself.
     pub url: String,
+    /// File name behind [`FfiRelease::url`], empty when it is the release page. Shown so the
+    /// user can see it is the apk for their phone and not one of the other two.
+    pub file: String,
 }
 
 /// The running build's version — the same number the release tag carries, since CI checks
@@ -1255,6 +1290,10 @@ pub fn app_version() -> String {
 /// The **only** request the app makes to anyone's server, which is why it sits behind a
 /// setting; see `ymemo_core::update` for what it does and does not send.
 pub fn update_check() -> Result<Option<FfiRelease>> {
-    Ok(ymemo_core::update::check(env!("CARGO_PKG_VERSION"))?
-        .map(|r| FfiRelease { version: r.version, url: r.url }))
+    Ok(
+        ymemo_core::update::check(env!("CARGO_PKG_VERSION"))?.map(|r| {
+            let url = r.download_url().to_string();
+            FfiRelease { version: r.version, url, file: r.asset_name }
+        }),
+    )
 }

@@ -37,7 +37,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1134779594;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1967235946;
 
 // Section: executor
 
@@ -1903,6 +1903,40 @@ fn wire__crate__api__vault_key_impl(
         },
     )
 }
+fn wire__crate__api__vault_name_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "vault_name",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::vault_name()?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__vault_open_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2059,6 +2093,41 @@ fn wire__crate__api__vault_reset_password_with_recovery_impl(
         },
     )
 }
+fn wire__crate__api__vault_set_name_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "vault_set_name",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_name = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::vault_set_name(api_name)?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
 
 // Section: dart2rust
 
@@ -2178,9 +2247,11 @@ impl SseDecode for crate::api::FfiRelease {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_version = <String>::sse_decode(deserializer);
         let mut var_url = <String>::sse_decode(deserializer);
+        let mut var_file = <String>::sse_decode(deserializer);
         return crate::api::FfiRelease {
             version: var_version,
             url: var_url,
+            file: var_file,
         };
     }
 }
@@ -2245,6 +2316,13 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_settings = <String>::sse_decode(deserializer);
         let mut var_unlockDays = <String>::sse_decode(deserializer);
         let mut var_unlockDaysHint = <String>::sse_decode(deserializer);
+        let mut var_setupQuestion = <String>::sse_decode(deserializer);
+        let mut var_setupNewTitle = <String>::sse_decode(deserializer);
+        let mut var_setupNewDetail = <String>::sse_decode(deserializer);
+        let mut var_setupLinkTitle = <String>::sse_decode(deserializer);
+        let mut var_setupLinkDetail = <String>::sse_decode(deserializer);
+        let mut var_renameVault = <String>::sse_decode(deserializer);
+        let mut var_vaultName = <String>::sse_decode(deserializer);
         let mut var_updateAvailable = <String>::sse_decode(deserializer);
         let mut var_updateCheck = <String>::sse_decode(deserializer);
         let mut var_updateCheckHint = <String>::sse_decode(deserializer);
@@ -2350,6 +2428,13 @@ impl SseDecode for crate::api::FfiStrings {
             settings: var_settings,
             unlock_days: var_unlockDays,
             unlock_days_hint: var_unlockDaysHint,
+            setup_question: var_setupQuestion,
+            setup_new_title: var_setupNewTitle,
+            setup_new_detail: var_setupNewDetail,
+            setup_link_title: var_setupLinkTitle,
+            setup_link_detail: var_setupLinkDetail,
+            rename_vault: var_renameVault,
+            vault_name: var_vaultName,
             update_available: var_updateAvailable,
             update_check: var_updateCheck,
             update_check_hint: var_updateCheckHint,
@@ -2634,15 +2719,17 @@ fn pde_ffi_dispatcher_primary_impl(
         51 => wire__crate__api__vault_has_recovery_code_impl(port, ptr, rust_vec_len, data_len),
         52 => wire__crate__api__vault_issue_recovery_code_impl(port, ptr, rust_vec_len, data_len),
         53 => wire__crate__api__vault_key_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__vault_open_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__vault_open_with_key_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__vault_reset_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__vault_reset_password_with_recovery_impl(
+        54 => wire__crate__api__vault_name_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__vault_open_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__vault_open_with_key_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__vault_reset_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__vault_reset_password_with_recovery_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
+        59 => wire__crate__api__vault_set_name_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -2753,6 +2840,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiRelease {
         [
             self.version.into_into_dart().into_dart(),
             self.url.into_into_dart().into_dart(),
+            self.file.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -2830,6 +2918,13 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.settings.into_into_dart().into_dart(),
             self.unlock_days.into_into_dart().into_dart(),
             self.unlock_days_hint.into_into_dart().into_dart(),
+            self.setup_question.into_into_dart().into_dart(),
+            self.setup_new_title.into_into_dart().into_dart(),
+            self.setup_new_detail.into_into_dart().into_dart(),
+            self.setup_link_title.into_into_dart().into_dart(),
+            self.setup_link_detail.into_into_dart().into_dart(),
+            self.rename_vault.into_into_dart().into_dart(),
+            self.vault_name.into_into_dart().into_dart(),
             self.update_available.into_into_dart().into_dart(),
             self.update_check.into_into_dart().into_dart(),
             self.update_check_hint.into_into_dart().into_dart(),
@@ -2998,6 +3093,7 @@ impl SseEncode for crate::api::FfiRelease {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.version, serializer);
         <String>::sse_encode(self.url, serializer);
+        <String>::sse_encode(self.file, serializer);
     }
 }
 
@@ -3049,6 +3145,13 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.settings, serializer);
         <String>::sse_encode(self.unlock_days, serializer);
         <String>::sse_encode(self.unlock_days_hint, serializer);
+        <String>::sse_encode(self.setup_question, serializer);
+        <String>::sse_encode(self.setup_new_title, serializer);
+        <String>::sse_encode(self.setup_new_detail, serializer);
+        <String>::sse_encode(self.setup_link_title, serializer);
+        <String>::sse_encode(self.setup_link_detail, serializer);
+        <String>::sse_encode(self.rename_vault, serializer);
+        <String>::sse_encode(self.vault_name, serializer);
         <String>::sse_encode(self.update_available, serializer);
         <String>::sse_encode(self.update_check, serializer);
         <String>::sse_encode(self.update_check_hint, serializer);

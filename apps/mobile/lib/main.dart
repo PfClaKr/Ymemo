@@ -273,6 +273,11 @@ class _LockScreenState extends State<LockScreen> {
   bool _recovering = false;
   bool _confirmingReset = false;
 
+  /// Whether the first-run screen is still on the choice rather than the password field.
+  /// Only ever true while there is no vault; pairing one in flips `_vaultExists` and the
+  /// screen becomes the unlock prompt on its own.
+  bool _choosing = true;
+
   Timer? _probe;
 
   @override
@@ -449,25 +454,46 @@ class _LockScreenState extends State<LockScreen> {
           padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + _bottomInset(context)),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            children: _recovering ? _recoveryPanel(s) : _passwordPanel(s),
+            children: _recovering
+                ? _recoveryPanel(s)
+                : (!_vaultExists && _choosing)
+                    ? _setupPanel(s)
+                    : _passwordPanel(s),
           ),
         ),
       ),
     );
   }
 
+  /// The first screen on a device with no vault: the two ways to start, each saying what
+  /// pressing it will do.
+  ///
+  /// A card rather than a button, because the choice does not undo. Creating a vault on a
+  /// device that should have been paired gives it a key of its own and the two never merge —
+  /// so that warning belongs on the choice itself, not in a footnote under both.
+  List<Widget> _setupPanel(FfiStrings s) => [
+        const _Wordmark(),
+        const SizedBox(height: 20),
+        Text(s.setupQuestion, style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 12),
+        _SetupChoice(
+          title: s.setupNewTitle,
+          detail: s.setupNewDetail,
+          onTap: () => setState(() => _choosing = false),
+        ),
+        const SizedBox(height: 10),
+        _SetupChoice(
+          title: s.setupLinkTitle,
+          detail: s.setupLinkDetail,
+          // Pairing lives behind the app bar's button on this very screen; sending the user
+          // there is the whole point of the card.
+          onTap: () => SyncButton.open(context, widget.strings, widget.sync),
+        ),
+      ];
+
   /// The normal way in: type the password, or set one on a device with no vault yet.
   List<Widget> _passwordPanel(FfiStrings s) => [
-        // Material's bundled icon font, not a 🔒: an emoji is drawn by whatever the phone
-        // vendor ships, and the desktop had to stop using them for the same reason.
-        const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text('Ymemo', style: TextStyle(fontSize: 24)),
-            SizedBox(width: 8),
-            Icon(Icons.lock_outline, size: 22),
-          ],
-        ),
+        const _Wordmark(),
         const SizedBox(height: 16),
         if (!_vaultExists)
           Padding(
@@ -617,6 +643,10 @@ class _MemoListScreenState extends State<MemoListScreen> {
   Timer? _merge;
   FfiRelease? _update;
 
+  /// What the vault is called, empty until it is named. It comes out of the synced document,
+  /// so renaming it here renames it on every paired device.
+  String _vaultName = '';
+
   bool get _atRoot => widget.groupId.isEmpty;
 
   @override
@@ -651,12 +681,27 @@ class _MemoListScreenState extends State<MemoListScreen> {
     // folder was deleted elsewhere — to the top level rather than leaving it unreachable.
     final folders = await groupChildren(parentId: widget.groupId);
     final memos = await memosInGroup(groupId: widget.groupId);
+    // Re-read on every reload rather than once: a merge can bring a rename from another
+    // device, and the heading is where that shows up.
+    final name = _atRoot ? await vaultName() : '';
     if (mounted) {
       setState(() {
         _folders = folders;
         _memos = memos;
+        _vaultName = name;
       });
     }
+  }
+
+  /// Renames the vault, on every device that shares it.
+  Future<void> _renameVault() async {
+    final s = widget.strings;
+    final name =
+        await _askForName(context, s, s.renameVault, _vaultName, label: s.vaultName);
+    if (name == null) return;
+    // The core trims it and cuts it to length, so show back what was actually stored.
+    final stored = await vaultSetName(name: name);
+    if (mounted) setState(() => _vaultName = stored);
   }
 
   /// Asks for a name and creates a folder inside the one on screen.
@@ -871,7 +916,20 @@ class _MemoListScreenState extends State<MemoListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_atRoot ? widget.strings.listTitle : widget.groupName),
+        // At the top level the title is the vault's name and tapping it renames it; inside a
+        // folder it is the folder's, which is renamed from the folder's own menu.
+        title: _atRoot
+            ? InkWell(
+                onTap: _renameVault,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: Text(
+                    _vaultName.isEmpty ? widget.strings.listTitle : _vaultName,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              )
+            : Text(widget.groupName),
         actions: [
           IconButton(
             icon: const Icon(Icons.create_new_folder_outlined),
@@ -1326,11 +1384,70 @@ class SyncButton extends StatelessWidget {
         return IconButton(
           icon: icon,
           tooltip: strings.syncDevices,
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => SyncScreen(strings: strings, sync: sync)),
-          ),
+          onPressed: () => open(context, strings, sync),
         );
       },
+    );
+  }
+
+  /// Opens the pairing screen. Shared with the first-run "connect to another device" card,
+  /// so the two cannot drift into opening different things.
+  static Future<void> open(
+      BuildContext context, FfiStrings strings, SyncController sync) {
+    return Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => SyncScreen(strings: strings, sync: sync)),
+    );
+  }
+}
+
+/// The app's name, with the padlock that says what it is for.
+///
+/// Material's bundled icon font, not a 🔒: an emoji is drawn by whatever the phone vendor
+/// ships, and the desktop had to stop using them for the same reason.
+class _Wordmark extends StatelessWidget {
+  const _Wordmark();
+
+  @override
+  Widget build(BuildContext context) => const Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text('Ymemo', style: TextStyle(fontSize: 24)),
+          SizedBox(width: 8),
+          Icon(Icons.lock_outline, size: 22),
+        ],
+      );
+}
+
+/// One of the two ways to start on a fresh install: a heading and the sentence saying what
+/// choosing it does. Mirrors `SetupChoice` in the desktop's theme.slint.
+class _SetupChoice extends StatelessWidget {
+  const _SetupChoice({required this.title, required this.detail, required this.onTap});
+
+  final String title;
+  final String detail;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 6),
+              Text(detail, style: Theme.of(context).textTheme.bodySmall),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2137,8 +2254,11 @@ Future<String?> _askForName(
   BuildContext context,
   FfiStrings strings,
   String title,
-  String initial,
-) {
+  String initial, {
+  /// What the field is for. Folders are what this dialog was written for, so that stays the
+  /// default; the vault's own name goes through it too and must not be labelled a folder.
+  String? label,
+}) {
   final controller = TextEditingController(text: initial);
   return showDialog<String>(
     context: context,
@@ -2147,7 +2267,7 @@ Future<String?> _askForName(
       content: TextField(
         controller: controller,
         autofocus: true,
-        decoration: InputDecoration(labelText: strings.folderName),
+        decoration: InputDecoration(labelText: label ?? strings.folderName),
         onSubmitted: (v) => Navigator.of(context).pop(v.trim()),
       ),
       actions: [
@@ -2408,8 +2528,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           if (_update != null)
             ListTile(
-              leading: const Icon(Icons.open_in_new),
+              leading: const Icon(Icons.download),
               title: Text(s.updateOpen),
+              // The apk for this phone's ABI, named. A release carries three of them and the
+              // release page cannot tell you which is yours.
+              subtitle: _update!.file.isEmpty
+                  ? null
+                  : Text(_update!.file,
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
               onTap: () => host.openUrl(_update!.url),
             ),
 

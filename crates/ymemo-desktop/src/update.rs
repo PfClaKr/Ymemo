@@ -1,8 +1,9 @@
 //! Telling the user a newer release exists — and nothing more than telling.
 //!
 //! The check itself is `ymemo_core::update`; this is the desktop's half: when to ask, where to
-//! show the answer, and how to hand the release page to the browser. Downloading and running
-//! an installer is deliberately not here (see the core module for why).
+//! show the answer, and how to hand the link to the browser. Downloading and running an
+//! installer is deliberately not here (see the core module for why) — but the link is the
+//! **package for this machine**, not the release page listing all seven.
 //!
 //! It runs on a worker thread. The request can take seconds or hang on a captive portal, and
 //! the UI thread has memos to draw; the answer comes back through `invoke_from_event_loop`.
@@ -44,12 +45,20 @@ pub(crate) fn spawn_check(ctx: &Ctx, announce: bool) {
         let _ = slint::invoke_from_event_loop(move || {
             match found {
                 Ok(Some(release)) => {
-                    eprintln!("update available: {} ({})", release.version, release.url);
+                    eprintln!(
+                        "update available: {} ({})",
+                        release.version,
+                        release.download_url()
+                    );
                     let text = t!("msg.update_found", version = release.version);
                     let version = SharedString::from(release.version.clone());
+                    // The file name, so settings can say what the button will fetch rather
+                    // than leaving the user to recognise it on the page.
+                    let file = SharedString::from(release.asset_name.clone());
                     PENDING.with(|p| *p.borrow_mut() = Some(release));
                     with_settings(|w| {
                         w.set_update_version(version.clone());
+                        w.set_update_file(file.clone());
                         w.set_update_status(SharedString::from(text.clone()));
                     });
                     with_list(|w| w.set_update_version(version.clone()));
@@ -74,9 +83,15 @@ pub(crate) fn spawn_check(ctx: &Ctx, announce: bool) {
     });
 }
 
-/// Opens the release page in the user's browser. Does nothing until a check has found one.
-pub(crate) fn open_release_page() {
-    let url = PENDING.with(|p| p.borrow().as_ref().map(|r| r.url.clone()).unwrap_or_default());
+/// Opens the download in the user's browser: the package for this machine when the release
+/// carries one, the release page otherwise. Does nothing until a check has found something.
+pub(crate) fn open_download() {
+    let url = PENDING.with(|p| {
+        p.borrow()
+            .as_ref()
+            .map(|r| r.download_url().to_string())
+            .unwrap_or_default()
+    });
     if url.is_empty() {
         return;
     }

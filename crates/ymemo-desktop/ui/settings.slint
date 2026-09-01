@@ -55,6 +55,9 @@ export component SettingsWindow inherits Window {
     in-out property <bool> update-check: true;
     // Version of a newer release, empty when there is none (or none known yet).
     in property <string> update-version;
+    // File name of the package for this machine, empty when the release carries none for it
+    // and the button falls back to the release page.
+    in property <string> update-file;
     // One line about the last check: in progress, up to date, or why it failed.
     in property <string> update-status;
 
@@ -231,6 +234,15 @@ export component SettingsWindow inherits Window {
                     wrap: word-wrap;
                 }
 
+                // The file the button is about to fetch. Naming it is the whole point of
+                // picking one: the release page lists seven and this says which is yours.
+                if root.update-file != "": Text {
+                    text: root.update-file;
+                    font-size: 10px;
+                    font-family: "monospace";
+                    color: #a8a294;
+                    wrap: word-wrap;
+                }
                 if root.update-version != "": HorizontalLayout {
                     alignment: start;
                     Button {

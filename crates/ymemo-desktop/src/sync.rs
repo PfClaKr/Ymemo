@@ -48,6 +48,12 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
                 // Force a repaint: the Windows software renderer does not repaint on a model
                 // change alone, which makes a successful merge look like a failed sync.
                 if let Some(w) = list_weak.upgrade() {
+                    // The vault's name is in the document too, so another device renaming it
+                    // arrives here like any other change.
+                    let name = v.name();
+                    if w.get_vault_name() != name.as_str() {
+                        w.set_vault_name(name.into());
+                    }
                     w.window().request_redraw();
                 }
                 // Push remote changes into open stickies, except ones being edited.
