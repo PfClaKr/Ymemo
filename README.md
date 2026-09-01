@@ -1,18 +1,98 @@
 # Ymemo
 
-A memo app that runs on several devices (Linux, Windows, Android) and **syncs between them
-with no server of its own**. It stores text notes and photos.
+Sticky notes for your desk and your phone. They sync directly between your own devices —
+end-to-end encrypted, with **no server of anyone's in between**, and no account to sign up for.
 
-## Design: local-first
+![Ymemo on the desktop](docs/screenshots/desktop.png)
 
-Every device holds a **complete local copy**, and syncing sits on top of that.
+- **Yours** — every device holds a complete copy, and the app works with the network off.
+- **No middleman** — devices talk to each other. There is no cloud account, and nothing to
+  cancel or be locked out of.
+- **Encrypted end to end** — anything that leaves a device is ciphertext. Your master password
+  never leaves it at all.
+- **Nothing is lost** — two devices edited at once merge into one note instead of one winning.
 
-- **Local-first** — fully usable offline; the data is on your own devices.
-- **P2P** — devices sync directly, with no central server.
-- **E2E encrypted** — anything that travels the sync path is ciphertext.
-- **CRDT** — concurrent edits on several devices merge automatically, losing nothing.
+## Getting it
 
-## Stack
+| | Download | Notes |
+|---|---|---|
+| **Windows** | `ymemo-setup-x86_64.exe` | Installer; adds the tray app and its firewall rules. |
+| **Debian / Ubuntu** | `ymemo_<version>_amd64.deb` | `sudo apt install ./ymemo_<version>_amd64.deb` |
+| **Fedora** | `ymemo-<version>-*.x86_64.rpm` | `sudo dnf install ./ymemo-<version>-*.rpm` |
+| **Android** | `ymemo-<version>-android-arm64-v8a.apk` | Most phones are `arm64-v8a`. Sideloaded, so Android asks once for permission to install it. |
+
+All of them are on the [releases page](https://github.com/PfClaKr/Ymemo/releases/latest).
+Nothing else has to be installed — the sync daemon ships inside.
+
+Once it is running, the app checks about once a day whether a newer release exists and offers
+**the one file for the machine it is on**, by name. It never downloads or installs anything on
+its own; see [what it sends](#what-leaves-your-device) below.
+
+## Starting out
+
+On first run the app asks one question, and the answer matters:
+
+<img src="docs/screenshots/setup.png" alt="The first-run screen" width="330">
+
+- **Start fresh** — your first device. Choose a master password and start writing.
+- **Connect to another device** — you already use Ymemo somewhere. This brings those memos
+  over. Choosing "start fresh" here instead would give the new device a key of its own, and
+  the two could never merge.
+
+Right after creating a vault you get a **recovery code**. It is shown once, and with the
+password it is one of only two things on earth that can open your memos — there is no reset
+link, because there is nobody to send one.
+
+Give the vault a name by clicking the heading (`Ymemo` until you do). The name travels with
+the memos, so every device you connect shows the same one.
+
+## What you can do with it
+
+- **Stickies on the desktop** — the tray icon toggles the list, and each memo opens as a small
+  frameless note. Typing saves it. Double-click the title bar to fold it away; drag it and it
+  snaps to the screen edges and to other notes.
+- **Colours and opacity** — per note, and they sync.
+- **Photos** — drop one on a note and move or resize it anywhere on the paper. The size is
+  stored in text-height multiples, so a photo shrunk on a phone is shrunk on the desktop too.
+- **Folders** — nestable, drag and drop, with colours of their own.
+- **History** — every past version of a note or folder, when it changed, which device changed
+  it and what it said at the time. Any of them can be put back.
+
+  ![Version history](docs/screenshots/history.png)
+
+- **On your phone** — the same memos, the same folders, the same photos.
+
+  <img src="docs/screenshots/mobile.png" alt="Ymemo on Android" width="620">
+
+- **Locking** — a master password, instant lock, idle auto-lock, and optionally staying
+  unlocked for a set number of days. On the phone the app can close itself the moment you
+  switch away, and stay out of the app switcher.
+- **Connecting a device** — scan the other one's QR code, or type its pairing code; the other
+  device is asked to allow it, and both screens show the same eight characters to compare. On
+  one network, a 6-digit code links them outright. Linked devices can be revoked later.
+- **Korean and English** — follows the system language, changeable in settings.
+
+## What leaves your device
+
+Your memos leave it only as ciphertext, only to the devices you have paired, and only over
+connections those devices make between themselves.
+
+The app makes exactly **one** request to a server of anyone's: a daily question to GitHub
+about whether a newer release exists. It carries no vault data, no device id and nothing that
+identifies you — but your address does reach GitHub, so it can be switched off in settings.
+
+Syncing may pass through Syncthing's public relays when two devices cannot reach each other
+directly. Relays forward encrypted bytes and cannot read them.
+
+What the encryption does and does not cover — including that the local cache on each device is
+**plaintext**, so a device someone else can read while it is unlocked has no secrets from them
+— is written out in [SECURITY.md](SECURITY.md).
+
+---
+
+## For developers
+
+### Stack
 
 | Layer | Choice | Notes |
 |---|---|---|
@@ -25,7 +105,7 @@ Every device holds a **complete local copy**, and syncing sits on top of that.
 | i18n | **own catalog** (`ymemo-i18n`) | one set of `i18n/*.json` shared by core, desktop and mobile (ko/en) |
 | Sync transport | **bundled Syncthing** | delegates discovery, NAT traversal and relaying; shipped as a binary (gomobile library on mobile) and driven over its REST API |
 
-### How syncing works
+#### How syncing works
 
 Syncthing is only the **courier for encrypted files**; everything above it is `ymemo-core`.
 
@@ -54,10 +134,14 @@ zero file-level conflicts, with the CRDT merging the contents. Photos work the s
 named by content hash and therefore immutable, and encrypted convergently, so the same photo
 attached on two devices ends up as one byte-identical file.
 
+The logs already *are* the history, so version history costs no extra storage: it is read back
+out of them rather than kept alongside. The vault's name lives in the document too, which is
+why renaming it on one device renames it on all of them.
+
 For what the encryption does and does not cover — including that **the local cache is
 plaintext** — see [SECURITY.md](SECURITY.md).
 
-## Repository layout
+### Repository layout
 
 ```
 Ymemo/
@@ -75,11 +159,11 @@ Ymemo/
 └── packaging/            # .deb / .rpm / Inno Setup scripts and icons
 ```
 
-## Build and run
+### Build and run
 
 Requires **Rust >= 1.87** (`rustup update stable`).
 
-### Linux system dependencies
+#### Linux system dependencies
 
 Slint links `fontconfig` on Linux:
 
@@ -92,7 +176,7 @@ sudo apt install libfontconfig1-dev
 
 Displaying CJK text needs fonts: `sudo apt install fonts-noto-cjk`
 
-### Commands
+#### Commands
 
 ```bash
 cargo test --workspace
@@ -116,7 +200,7 @@ a portable install, or trying out a build without opening the vault you actually
 During development the `syncthing` on your PATH is used as-is; releases ship it renamed to
 `ymemo-sync` inside the installer (see below).
 
-### Packaging
+#### Packaging
 
 syncthing is bundled inside the installer, so **users never install it separately** and it is
 removed with the app. They never have to know it is there: no GUI is opened and the process
@@ -143,37 +227,7 @@ most phones want `ymemo-<version>-android-arm64-v8a.apk`. They are still signed 
 key, so they are not for the Play Store (see `apps/mobile/README.md`). The Fedora job builds
 the desktop inside a Fedora container for library compatibility.
 
-## Features (desktop)
-
-- **Tray-resident stickies** — the tray icon toggles the list, and each memo gets a frameless
-  sticky window. The body is the editor (autosaved), double-clicking the title bar folds it,
-  and dragging a window snaps it to the screen edges and to other stickies.
-- **Appearance** — per-memo color palette and window opacity.
-- **Photos** — attach one and resize it. The display size syncs in **em (font multiples)**
-  rather than pixels, so shrinking it on a phone shrinks it proportionally on the desktop.
-- **Groups** — a nestable folder tree with drag and drop. Folders carry a colour of their
-  own, and it syncs like a memo's.
-- **History** — every past version of a memo or folder, with when it changed, which device
-  changed it and what it held at the time; any of them can be put back. It is read from the
-  change logs, which already are the history, so nothing extra is stored to keep it.
-- **Locking** — master password, instant lock from the tray, idle auto-lock, and optionally
-  staying unlocked for a set period (a device-local session key, never synced).
-- **Password and recovery** — change the master password from the settings window, and keep a
-  recovery code for the day it is forgotten. There is no other way back: nothing but the
-  password and that code can decrypt a vault, on any device. Failing both, the lock screen
-  can wipe this device and start over.
-- **Device linking** — one device scans the other's QR (or pastes its pairing code), and the
-  other is asked to allow the request; both screens show the same eight-character
-  verification code to compare first. On the same network a **6-digit code** links the two
-  outright. Linked devices can be listed and revoked.
-- **Korean and English** — detected from the system locale, changeable in settings.
-- **Update check** — asks GitHub about once a day whether a newer release exists, and says so
-  in the list window and settings. It only ever tells you: nothing is downloaded and nothing
-  is installed. This is the **only** request the app makes to anyone's server — no vault data,
-  no device id, nothing identifying travels with it — but your address does reach GitHub, so
-  it can be switched off in settings.
-
-## Roadmap
+### Roadmap
 
 - [x] **Phase 0** — workspace scaffolding, `ymemo-core` SQLite CRUD, Slint sticky windows
 - [x] **Phase 1** — Argon2id key derivation and encrypted change-log storage (RustCrypto)
@@ -183,9 +237,9 @@ the desktop inside a Fedora container for library compatibility.
 - [x] Packaging and CI — `.deb`, `.rpm` and a Windows installer from a release tag
 - [x] **Phase 4b** — photo attachments (encrypted blobs, platform-independent display size)
 - [x] Flutter mobile app, with the same bundled Syncthing and both pairing paths
-- [ ] Mobile update notice and a mobile settings screen to switch it off
+- [x] Mobile update notice and a mobile settings screen to switch it off
 - [ ] macOS support (tray, packaging)
 
-## License
+### License
 
 GPL-3.0-only
