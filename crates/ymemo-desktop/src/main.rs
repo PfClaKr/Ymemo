@@ -60,10 +60,9 @@ use state::{touch, AppUi, Ctx, APP};
 use sticky::{close_sticky, new_memo, open_sticky, snap_tick, SNAP_INTERVAL};
 use sync::{start_merge_timer, start_syncthing, SYNC_FOLDER_ID};
 
-/// Smallest window (logical px) for the two lock-screen panels that outgrow the password
-/// prompt: a freshly issued recovery code — the code itself, what it is for, and the button
-/// that says it has been written down — and the "forgot the password" panel behind it.
-const RECOVERY_MIN_SIZE: (f32, f32) = (340.0, 400.0);
+/// Smallest window (logical px) for the lock-screen panels that outgrow the password prompt:
+/// the first-run choice, a freshly issued recovery code, and the "forgot the password" panel.
+const TALL_PANEL_SIZE: (f32, f32) = (340.0, 400.0);
 use window::present;
 
 /// How often idleness is checked; fine-grained enough against a setting in minutes.
@@ -399,7 +398,7 @@ fn main() -> Result<()> {
         let weak = lock.as_weak();
         lock.on_needs_room(move |open| {
             if let Some(w) = weak.upgrade() {
-                pairing::grow_for_panel(w.window(), open, RECOVERY_MIN_SIZE, &saved);
+                pairing::grow_for_panel(w.window(), open, TALL_PANEL_SIZE, &saved);
             }
         });
     }
@@ -810,6 +809,13 @@ fn main() -> Result<()> {
 
     // Do not raise the lock window when the session already unlocked us.
     if !auto_unlocked {
+        // A device with no vault opens on the first-run choice, which is taller than the
+        // password prompt the window is sized for. `needs-room` only fires on a *change*, and
+        // this screen is already the tall one, so the very first thing a new user would see
+        // was the second card cut off by the bottom edge.
+        if !vault_exists {
+            lock.window().set_size(slint::LogicalSize::new(TALL_PANEL_SIZE.0, TALL_PANEL_SIZE.1));
+        }
         present(&lock);
     }
     slint::run_event_loop_until_quit()?;

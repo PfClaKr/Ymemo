@@ -166,3 +166,57 @@ export component IconButton inherits Rectangle {
         clicked => { root.clicked(); }
     }
 }
+
+// ---------------------------------------------------------------------------
+// One of the two ways to start, on the first run: a heading and the sentence that says what
+// pressing it will actually do.
+//
+// A card rather than a button, because the choice is not reversible in the way a button
+// implies — creating a vault on a device that should have been paired gives it a key of its
+// own, and the two never merge. The explanation has to be *on* the choice, not in a footnote
+// under both of them.
+// ---------------------------------------------------------------------------
+export component SetupChoice inherits Rectangle {
+    in property <string> title;
+    in property <string> detail;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: !root.enabled ? #ffffff14
+        : ta.has-hover ? #e8d98a
+        : #ffffff2b;
+    background: !root.enabled ? #ffffff08
+        : ta.has-hover ? #ffffff1a
+        : #ffffff0f;
+    opacity: root.enabled ? 1.0 : 0.55;
+    accessible-role: button;
+    accessible-label: root.title;
+    accessible-description: root.detail;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 4px;
+        Text {
+            text: root.title;
+            font-size: 13px;
+            font-weight: 700;
+            color: #f0ead6;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.detail;
+            font-size: 11px;
+            color: #b8b2a2;
+            wrap: word-wrap;
+        }
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}

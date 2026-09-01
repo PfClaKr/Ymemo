@@ -672,6 +672,11 @@ class FfiStrings {
   final String settings;
   final String unlockDays;
   final String unlockDaysHint;
+  final String setupQuestion;
+  final String setupNewTitle;
+  final String setupNewDetail;
+  final String setupLinkTitle;
+  final String setupLinkDetail;
   final String updateAvailable;
   final String updateCheck;
   final String updateCheckHint;
@@ -778,6 +783,11 @@ class FfiStrings {
     required this.settings,
     required this.unlockDays,
     required this.unlockDaysHint,
+    required this.setupQuestion,
+    required this.setupNewTitle,
+    required this.setupNewDetail,
+    required this.setupLinkTitle,
+    required this.setupLinkDetail,
     required this.updateAvailable,
     required this.updateCheck,
     required this.updateCheckHint,
@@ -886,6 +896,11 @@ class FfiStrings {
       settings.hashCode ^
       unlockDays.hashCode ^
       unlockDaysHint.hashCode ^
+      setupQuestion.hashCode ^
+      setupNewTitle.hashCode ^
+      setupNewDetail.hashCode ^
+      setupLinkTitle.hashCode ^
+      setupLinkDetail.hashCode ^
       updateAvailable.hashCode ^
       updateCheck.hashCode ^
       updateCheckHint.hashCode ^
@@ -996,6 +1011,11 @@ class FfiStrings {
           settings == other.settings &&
           unlockDays == other.unlockDays &&
           unlockDaysHint == other.unlockDaysHint &&
+          setupQuestion == other.setupQuestion &&
+          setupNewTitle == other.setupNewTitle &&
+          setupNewDetail == other.setupNewDetail &&
+          setupLinkTitle == other.setupLinkTitle &&
+          setupLinkDetail == other.setupLinkDetail &&
           updateAvailable == other.updateAvailable &&
           updateCheck == other.updateCheck &&
           updateCheckHint == other.updateCheckHint &&

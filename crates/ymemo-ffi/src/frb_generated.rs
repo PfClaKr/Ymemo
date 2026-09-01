@@ -2247,6 +2247,11 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_settings = <String>::sse_decode(deserializer);
         let mut var_unlockDays = <String>::sse_decode(deserializer);
         let mut var_unlockDaysHint = <String>::sse_decode(deserializer);
+        let mut var_setupQuestion = <String>::sse_decode(deserializer);
+        let mut var_setupNewTitle = <String>::sse_decode(deserializer);
+        let mut var_setupNewDetail = <String>::sse_decode(deserializer);
+        let mut var_setupLinkTitle = <String>::sse_decode(deserializer);
+        let mut var_setupLinkDetail = <String>::sse_decode(deserializer);
         let mut var_updateAvailable = <String>::sse_decode(deserializer);
         let mut var_updateCheck = <String>::sse_decode(deserializer);
         let mut var_updateCheckHint = <String>::sse_decode(deserializer);
@@ -2352,6 +2357,11 @@ impl SseDecode for crate::api::FfiStrings {
             settings: var_settings,
             unlock_days: var_unlockDays,
             unlock_days_hint: var_unlockDaysHint,
+            setup_question: var_setupQuestion,
+            setup_new_title: var_setupNewTitle,
+            setup_new_detail: var_setupNewDetail,
+            setup_link_title: var_setupLinkTitle,
+            setup_link_detail: var_setupLinkDetail,
             update_available: var_updateAvailable,
             update_check: var_updateCheck,
             update_check_hint: var_updateCheckHint,
@@ -2833,6 +2843,11 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.settings.into_into_dart().into_dart(),
             self.unlock_days.into_into_dart().into_dart(),
             self.unlock_days_hint.into_into_dart().into_dart(),
+            self.setup_question.into_into_dart().into_dart(),
+            self.setup_new_title.into_into_dart().into_dart(),
+            self.setup_new_detail.into_into_dart().into_dart(),
+            self.setup_link_title.into_into_dart().into_dart(),
+            self.setup_link_detail.into_into_dart().into_dart(),
             self.update_available.into_into_dart().into_dart(),
             self.update_check.into_into_dart().into_dart(),
             self.update_check_hint.into_into_dart().into_dart(),
@@ -3053,6 +3068,11 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.settings, serializer);
         <String>::sse_encode(self.unlock_days, serializer);
         <String>::sse_encode(self.unlock_days_hint, serializer);
+        <String>::sse_encode(self.setup_question, serializer);
+        <String>::sse_encode(self.setup_new_title, serializer);
+        <String>::sse_encode(self.setup_new_detail, serializer);
+        <String>::sse_encode(self.setup_link_title, serializer);
+        <String>::sse_encode(self.setup_link_detail, serializer);
         <String>::sse_encode(self.update_available, serializer);
         <String>::sse_encode(self.update_check, serializer);
         <String>::sse_encode(self.update_check_hint, serializer);

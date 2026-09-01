@@ -273,6 +273,11 @@ class _LockScreenState extends State<LockScreen> {
   bool _recovering = false;
   bool _confirmingReset = false;
 
+  /// Whether the first-run screen is still on the choice rather than the password field.
+  /// Only ever true while there is no vault; pairing one in flips `_vaultExists` and the
+  /// screen becomes the unlock prompt on its own.
+  bool _choosing = true;
+
   Timer? _probe;
 
   @override
@@ -449,25 +454,46 @@ class _LockScreenState extends State<LockScreen> {
           padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + _bottomInset(context)),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            children: _recovering ? _recoveryPanel(s) : _passwordPanel(s),
+            children: _recovering
+                ? _recoveryPanel(s)
+                : (!_vaultExists && _choosing)
+                    ? _setupPanel(s)
+                    : _passwordPanel(s),
           ),
         ),
       ),
     );
   }
 
+  /// The first screen on a device with no vault: the two ways to start, each saying what
+  /// pressing it will do.
+  ///
+  /// A card rather than a button, because the choice does not undo. Creating a vault on a
+  /// device that should have been paired gives it a key of its own and the two never merge —
+  /// so that warning belongs on the choice itself, not in a footnote under both.
+  List<Widget> _setupPanel(FfiStrings s) => [
+        const _Wordmark(),
+        const SizedBox(height: 20),
+        Text(s.setupQuestion, style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 12),
+        _SetupChoice(
+          title: s.setupNewTitle,
+          detail: s.setupNewDetail,
+          onTap: () => setState(() => _choosing = false),
+        ),
+        const SizedBox(height: 10),
+        _SetupChoice(
+          title: s.setupLinkTitle,
+          detail: s.setupLinkDetail,
+          // Pairing lives behind the app bar's button on this very screen; sending the user
+          // there is the whole point of the card.
+          onTap: () => SyncButton.open(context, widget.strings, widget.sync),
+        ),
+      ];
+
   /// The normal way in: type the password, or set one on a device with no vault yet.
   List<Widget> _passwordPanel(FfiStrings s) => [
-        // Material's bundled icon font, not a 🔒: an emoji is drawn by whatever the phone
-        // vendor ships, and the desktop had to stop using them for the same reason.
-        const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text('Ymemo', style: TextStyle(fontSize: 24)),
-            SizedBox(width: 8),
-            Icon(Icons.lock_outline, size: 22),
-          ],
-        ),
+        const _Wordmark(),
         const SizedBox(height: 16),
         if (!_vaultExists)
           Padding(
@@ -1326,11 +1352,70 @@ class SyncButton extends StatelessWidget {
         return IconButton(
           icon: icon,
           tooltip: strings.syncDevices,
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => SyncScreen(strings: strings, sync: sync)),
-          ),
+          onPressed: () => open(context, strings, sync),
         );
       },
+    );
+  }
+
+  /// Opens the pairing screen. Shared with the first-run "connect to another device" card,
+  /// so the two cannot drift into opening different things.
+  static Future<void> open(
+      BuildContext context, FfiStrings strings, SyncController sync) {
+    return Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => SyncScreen(strings: strings, sync: sync)),
+    );
+  }
+}
+
+/// The app's name, with the padlock that says what it is for.
+///
+/// Material's bundled icon font, not a 🔒: an emoji is drawn by whatever the phone vendor
+/// ships, and the desktop had to stop using them for the same reason.
+class _Wordmark extends StatelessWidget {
+  const _Wordmark();
+
+  @override
+  Widget build(BuildContext context) => const Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text('Ymemo', style: TextStyle(fontSize: 24)),
+          SizedBox(width: 8),
+          Icon(Icons.lock_outline, size: 22),
+        ],
+      );
+}
+
+/// One of the two ways to start on a fresh install: a heading and the sentence saying what
+/// choosing it does. Mirrors `SetupChoice` in the desktop's theme.slint.
+class _SetupChoice extends StatelessWidget {
+  const _SetupChoice({required this.title, required this.detail, required this.onTap});
+
+  final String title;
+  final String detail;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 6),
+              Text(detail, style: Theme.of(context).textTheme.bodySmall),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
