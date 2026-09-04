@@ -56,6 +56,7 @@ Relative to the app data directory (`~/.local/share/Ymemo` on Linux):
 | `session.json` | no | only with "stay unlocked" on: the **raw 32-byte key** (hex) plus an expiry; 0600 on unix |
 | `settings.json` | no | device-local settings (language, lock timeouts, ...) |
 | `shared_prefs/dev.ymemo.widget.xml` | no | Android only, and only if a home-screen widget is used: **plaintext** titles and body previews of up to 100 memos |
+| the platform keystore | no | Android only: the stay-unlocked session key, and — if biometric unlock is on — a second copy of the **data key** with no expiry. Both encrypted by a key the Android Keystore holds, never in a file of ours |
 
 Three rows matter most:
 
@@ -66,6 +67,15 @@ Three rows matter most:
 - **`session.json` bypasses the master password.** Setting the stay-unlocked window to a day
   or more leaves the key on disk for that long. Set it to 0 to be asked every time. (The
   settings window says the same thing.)
+- **Biometric unlock bypasses it too, and without an expiry.** A fingerprint cannot derive a
+  key — there is nothing secret enough in one to build a key from — so what the switch really
+  does is keep a copy of the data key in the Android Keystore and put the device's own
+  biometric check in front of reading it. While it is on, the master password protects nothing
+  *on that phone*: anyone whose fingerprint the phone accepts can open the vault, and so can
+  anyone who can read the keystore (a rooted device, an adb backup of an app that allowed
+  one). It buys convenience against a lost or borrowed phone, not against an attacker with the
+  device in hand and time to spend. It is off by default, the switch says so, and turning it
+  off deletes the copy.
 - **The widget snapshot is a second plaintext copy**, and unlike the cache it is also *shown*
   — a home screen is visible to anyone holding the phone, whether or not they can unlock it.
   So it is emptied the moment the vault closes: locking, or leaving the app with "lock when

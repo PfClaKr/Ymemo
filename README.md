@@ -71,7 +71,8 @@ the memos, so every device you connect shows the same one.
 
 - **Locking** — a master password, instant lock, idle auto-lock, and optionally staying
   unlocked for a set number of days. On the phone the app can close itself the moment you
-  switch away, and stay out of the app switcher.
+  switch away, and stay out of the app switcher — and can reopen with your fingerprint instead
+  of the password, if you would rather trade a little of one for the other.
 - **Connecting a device** — scan the other one's QR code, or type its pairing code; the other
   device is asked to allow it, and both screens show the same eight characters to compare. On
   one network, a 6-digit code links them outright. Linked devices can be revoked later.

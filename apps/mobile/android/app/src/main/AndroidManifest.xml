@@ -15,6 +15,11 @@
          permission; the lock itself is only taken while the pairing screen is open. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
+    <!-- The fingerprint prompt for the optional biometric unlock. It is only ever shown
+         because the user turned that setting on, and it unlocks nothing by itself: what it
+         releases is the key the platform keystore is already holding. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+
     <!-- allowBackup is on by default, which would let Android copy the app's private
          directory into the user's cloud backup — and that directory holds the **plaintext**
          SQLite cache of every memo, alongside the encrypted vault. A local-first app that

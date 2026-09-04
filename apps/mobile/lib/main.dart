@@ -217,6 +217,7 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
               : LockScreen(
                   strings: _strings,
                   sync: widget.sync,
+                  settings: widget.settings,
                   cacheDbPath: widget.cacheDbPath,
                   onUnlocked: _onUnlocked,
                 ),
@@ -233,12 +234,17 @@ class LockScreen extends StatefulWidget {
     super.key,
     required this.strings,
     required this.sync,
+    required this.settings,
     required this.cacheDbPath,
     required this.onUnlocked,
   });
 
   final FfiStrings strings;
   final SyncController sync;
+
+  /// Read for one thing only: whether biometric unlock was turned on.
+  final SettingsStore settings;
+
   final String cacheDbPath;
 
   /// Called once the vault is open; the app decides what to show next.
@@ -284,6 +290,15 @@ class _LockScreenState extends State<LockScreen> {
   /// screen becomes the unlock prompt on its own.
   bool _choosing = true;
 
+  /// Whether to draw the fingerprint button: the setting is on, a key is stored, and the
+  /// device can actually check one. Resolved once, asynchronously, because all three
+  /// questions cross the platform channel.
+  bool _biometricReady = false;
+
+  /// So a refused or cancelled prompt is not immediately put up again by a rebuild. The
+  /// button stays, and pressing it asks again.
+  bool _biometricTried = false;
+
   Timer? _probe;
 
   @override
@@ -291,6 +306,60 @@ class _LockScreenState extends State<LockScreen> {
     super.initState();
     _probeVault();
     _probe = Timer.periodic(_probeInterval, (_) => _probeVault());
+    _prepareBiometrics();
+  }
+
+  /// Decides whether the fingerprint button belongs on this screen, and offers the prompt
+  /// straight away if it does — reaching for a finger is why the setting was turned on, and
+  /// making it a two-step (open the app, press a button, then the prompt) would undo that.
+  Future<void> _prepareBiometrics() async {
+    if (!widget.settings.value.biometricUnlock) return;
+    const store = BiometricStore();
+    final ready = await store.enrolled && await store.available;
+    if (!mounted || !ready) return;
+    setState(() => _biometricReady = true);
+    await _unlockWithBiometrics();
+  }
+
+  /// Opens the vault with the key the fingerprint releases.
+  ///
+  /// A refusal is silent: the user either cancelled, or their finger was not recognised and
+  /// the system prompt has already said so. A key that does **not** open the vault is a
+  /// different matter — it is stale, so it is dropped and the password takes over, exactly
+  /// as a diverged session key is handled.
+  Future<void> _unlockWithBiometrics() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _biometricTried = true;
+      _error = null;
+      _notice = null;
+    });
+    try {
+      final key = await const BiometricStore().unlock(
+        widget.strings.biometricUnlock,
+        title: widget.strings.biometricPrompt,
+        cancel: widget.strings.cancel,
+      );
+      if (key == null) return;
+      await vaultOpenWithKey(
+        vaultDir: widget.sync.paths.vaultDir,
+        cacheDbPath: widget.cacheDbPath,
+        key: Uint8List.fromList(key),
+      );
+      await widget.onUnlocked();
+    } catch (e) {
+      debugPrint('the stored fingerprint key did not open the vault: $e');
+      await const BiometricStore().disable();
+      if (mounted) {
+        setState(() {
+          _biometricReady = false;
+          _error = '$e';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -408,8 +477,8 @@ class _LockScreenState extends State<LockScreen> {
   ///
   /// The unsharing that has to come first is the core's job (`vaultReset`), not this
   /// screen's — syncthing propagates deletions, and wiping a folder it still carries would
-  /// take the other devices' memos with it. The stored session key goes too: it is the data
-  /// key of a vault that no longer exists.
+  /// take the other devices' memos with it. Both stored keys go too: they are the data key
+  /// of a vault that no longer exists.
   Future<void> _reset() async {
     setState(() {
       _busy = true;
@@ -422,6 +491,8 @@ class _LockScreenState extends State<LockScreen> {
         cacheDbPath: widget.cacheDbPath,
       );
       await const SessionStore().clear();
+      await const BiometricStore().disable();
+      if (mounted) setState(() => _biometricReady = false);
       _leaveRecovery();
       await _probeVault();
       if (mounted) setState(() => _notice = widget.strings.resetDone);
@@ -537,6 +608,14 @@ class _LockScreenState extends State<LockScreen> {
                   ? s.unlock
                   : s.createVault),
         ),
+        // Only once the prompt has been offered and dismissed: while it is still up, or on
+        // the way to it, a second button for the same thing is just in the way.
+        if (_biometricReady && _biometricTried)
+          TextButton.icon(
+            onPressed: _busy ? null : _unlockWithBiometrics,
+            icon: const Icon(Icons.fingerprint),
+            label: Text(s.biometricUnlock),
+          ),
         // Nothing to recover before a vault exists, and offering it would only confuse.
         if (_vaultExists)
           TextButton(
@@ -2451,12 +2530,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     String? lang,
     int? unlockDays,
     bool? lockOnBackground,
+    bool? biometricUnlock,
     bool? updateCheck,
   }) async {
     await widget.settings.save(FfiSettings(
       lang: lang ?? _s.lang,
       unlockDays: unlockDays ?? _s.unlockDays,
       lockOnBackground: lockOnBackground ?? _s.lockOnBackground,
+      biometricUnlock: biometricUnlock ?? _s.biometricUnlock,
       updateCheck: updateCheck ?? _s.updateCheck,
       lastUpdateCheck: _s.lastUpdateCheck,
     ));
@@ -2484,6 +2565,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _save(unlockDays: days);
     await const SessionStore().clear();
   }
+
+  /// Turns biometric unlock on or off.
+  ///
+  /// Turning it **on** is the moment the key is stored, and it can only happen from here:
+  /// this screen is inside the unlocked app, so there is a key to store. The fingerprint is
+  /// checked first — not for security, since the vault is already open, but so that a switch
+  /// that cannot work never ends up looking on.
+  ///
+  /// Turning it **off** deletes the key, which is the entire promise of the switch.
+  Future<void> _setBiometric(bool on) async {
+    const store = BiometricStore();
+    if (!on) {
+      await store.disable();
+      await _save(biometricUnlock: false);
+      return;
+    }
+    if (!await store.available) {
+      if (mounted) _say(widget.strings.biometricUnavailable);
+      return;
+    }
+    if (!await store.confirm(
+      widget.strings.biometricUnlock,
+      title: widget.strings.biometricPrompt,
+      cancel: widget.strings.cancel,
+    )) {
+      if (mounted) _say(widget.strings.biometricFailed);
+      return;
+    }
+    try {
+      await store.enable(await vaultKey());
+    } catch (e) {
+      debugPrint('could not store the biometric key: $e');
+      if (mounted) _say('$e');
+      return;
+    }
+    await _save(biometricUnlock: true);
+  }
+
+  void _say(String message) => ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+      );
 
   Future<void> _checkNow() async {
     setState(() {
@@ -2548,6 +2670,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: (v) => _save(lockOnBackground: v),
             title: Text(s.lockOnBackground),
             subtitle: Text(s.lockOnBackgroundHint),
+          ),
+          SwitchListTile(
+            value: _s.biometricUnlock,
+            onChanged: _setBiometric,
+            title: Text(s.biometricUnlock),
+            subtitle: Text(s.biometricUnlockHint),
           ),
           ListTile(
             title: Text(s.unlockDays),

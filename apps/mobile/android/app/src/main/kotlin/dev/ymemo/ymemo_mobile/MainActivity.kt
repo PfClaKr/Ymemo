@@ -9,7 +9,7 @@ import android.view.WindowManager
 import dev.ymemo.ymemo_mobile.widget.Launch
 import dev.ymemo.ymemo_mobile.widget.WidgetStore
 import dev.ymemo.ymemo_mobile.widget.Widgets
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
@@ -35,13 +35,17 @@ import java.io.File
  * request from the other device. The lock is held only while the pairing screen is open — it
  * keeps the wifi radio from sleeping, so it is not something to leave on.
  *
+ * It is a `FlutterFragmentActivity` rather than the template's `FlutterActivity` for one
+ * reason: `local_auth` puts up a `BiometricPrompt`, which is a fragment and needs a
+ * `FragmentActivity` to attach to. Nothing else here depends on the difference.
+ *
  * **The home-screen widgets.** They are drawn by the launcher while the app is closed, so
  * they read a snapshot the app publishes rather than the vault (see `widget/Snapshot.kt`);
  * `widgetPublish` is Dart handing over a new one. In the other direction a tapped widget
  * starts this activity with an action in its extras, which Dart collects with
  * `takeWidgetAction` at startup and is handed through `widgetAction` while it is running.
  */
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
     private val channelName = "dev.ymemo/native"
     private var multicastLock: WifiManager.MulticastLock? = null
     private var channel: MethodChannel? = null

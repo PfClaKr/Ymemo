@@ -22,6 +22,14 @@ dependencies:
   flutter_rust_bridge: 2.11.1
   # QR scanning for pairing codes; the plugin requests the permission at runtime.
   image_picker: ^1.2.3
+  # The fingerprint prompt, for the optional biometric unlock. It only *checks* a
+  # fingerprint — the key it releases is the one flutter_secure_storage is holding — and it
+  # needs MainActivity to be a FlutterFragmentActivity, which is why it is one.
+  local_auth: ^2.3.0
+  # Only for AndroidAuthMessages: the prompt's own title and cancel button are the plugin's
+  # English defaults otherwise, on a dialog the rest of which is in the app's language. It is
+  # local_auth's own platform package, so it moves with it — bump the two together.
+  local_auth_android: ^1.0.56
   mobile_scanner: ^7.4.0
   # Per-platform app data directory (vault and cache paths).
   path_provider: ^2.1.0

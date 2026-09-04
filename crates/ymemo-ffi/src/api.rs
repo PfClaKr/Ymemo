@@ -159,6 +159,11 @@ pub struct FfiStrings {
     pub language: String,
     pub language_auto: String,
     pub lock_now: String,
+    pub biometric_failed: String,
+    pub biometric_prompt: String,
+    pub biometric_unavailable: String,
+    pub biometric_unlock: String,
+    pub biometric_unlock_hint: String,
     pub lock_on_background: String,
     pub lock_on_background_hint: String,
     pub lock_section: String,
@@ -280,6 +285,11 @@ pub fn mobile_strings() -> FfiStrings {
         language: t!("mobile.language"),
         language_auto: t!("mobile.language_auto"),
         lock_now: t!("mobile.lock_now"),
+        biometric_failed: t!("mobile.biometric_failed"),
+        biometric_prompt: t!("mobile.biometric_prompt"),
+        biometric_unavailable: t!("mobile.biometric_unavailable"),
+        biometric_unlock: t!("mobile.biometric_unlock"),
+        biometric_unlock_hint: t!("mobile.biometric_unlock_hint"),
         lock_on_background: t!("mobile.lock_on_background"),
         lock_on_background_hint: t!("mobile.lock_on_background_hint"),
         lock_section: t!("mobile.lock_section"),
@@ -1177,6 +1187,13 @@ pub struct FfiSettings {
     pub unlock_days: i32,
     /// Close the vault when the app leaves the foreground.
     pub lock_on_background: bool,
+    /// Android only: reopen the vault with the device's fingerprint instead of the password.
+    ///
+    /// The core has no part in this beyond remembering the answer — biometrics cannot derive
+    /// a key, so what the switch really turns on is **a copy of the data key kept in the
+    /// platform keystore**, released by the app once the fingerprint checks out. That is the
+    /// same trade `unlock_days` makes and the reason both default to off.
+    pub biometric_unlock: bool,
     /// Ask GitHub about newer releases. The app's only outbound request.
     pub update_check: bool,
     /// When that last happened (epoch millis), so it is not asked on every start.
@@ -1189,6 +1206,7 @@ impl Default for FfiSettings {
             lang: "auto".into(),
             unlock_days: 0,
             lock_on_background: true,
+            biometric_unlock: false,
             update_check: true,
             last_update_check: 0,
         }

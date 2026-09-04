@@ -145,6 +145,22 @@ adb shell 'run-as dev.ymemo.ymemo_mobile sh -c "cat > app_flutter/settings.json"
 JSON
 ```
 
+Biometrics **do** work on the emulator, which is worth knowing before hand-testing the
+fingerprint unlock. Enrol one once, then `finger touch` stands in for the sensor:
+
+```bash
+adb shell locksettings set-pin 1234       # a screen lock has to exist first
+adb shell am start -a android.settings.SECURITY_SETTINGS
+#   Device unlock > Pixel Imprint, then re-enter the PIN and agree
+adb emu finger touch 1                    # ~20 times to enrol, once per prompt afterwards
+```
+
+The enrolment screens and `BiometricPrompt` itself are `FLAG_SECURE`, so `screencap` is black
+throughout. `adb shell uiautomator dump /sdcard/ui.xml` reads them anyway — it goes through
+the accessibility tree — and is the way to find out what the prompt is currently saying.
+Tapping the prompt's *Cancel* with `input tap` does not register; `input keyevent KEYCODE_BACK`
+dismisses it.
+
 Widgets are worth driving from the launcher rather than reasoning about. There is no adb
 command that places one, so: long-press the wallpaper, **Widgets**, search "Ymemo", expand,
 then drag a preview out with `input motionevent` (a plain `input swipe` is too fast to
@@ -190,7 +206,9 @@ flutter build ios --no-codesign
 
 - **Lock** — open the vault with the master password, creating it if needed. Reachable from
   here, before any password: **Sync devices**, because a new install has to pair and receive
-  `vault.json` before there is anything to unlock.
+  `vault.json` before there is anything to unlock. With biometric unlock on, the fingerprint
+  prompt comes up by itself as the screen opens — reaching for a finger is why the setting was
+  turned on — and a button under the password field asks again if it was dismissed.
 - **List** — one folder at a time: subfolders first, then its memos. Tapping a folder goes
   into it, long-pressing one offers rename and delete (delete keeps the contents and lifts
   them up a level), and long-pressing a memo moves it to another folder. Swipe to delete, +
@@ -341,6 +359,18 @@ Two settings, deliberately separate:
   (EncryptedSharedPreferences behind a keystore-held key), never to a plain file. The expiry is
   fixed at the moment the password was typed and never extended by use. Locking from the
   settings screen, shortening the period, or the expiry passing all delete it.
+
+- **Unlock with a fingerprint** (default off) is the third, and it is the same trade again
+  rather than a different one. Biometrics cannot derive a key, so the switch stores a second
+  copy of the data key — in the same keystore-backed storage, under `biometric_vault_key`,
+  **with no expiry** — and `local_auth` puts the device's own prompt in front of reading it.
+  It is turned on from inside the unlocked app, which is the only moment there is a key to
+  store, and the fingerprint is checked once there so a switch that cannot work never ends up
+  looking on. Turning it off deletes the copy, and so does resetting the vault.
+
+  The key deliberately survives locking, unlike the session: opening the lock again is the
+  entire point. A stored key that no longer opens the vault is dropped and the password takes
+  over, exactly as a diverged session key is.
 
 **While a stored key exists the master password buys nothing** — anyone who can unlock the
 phone can read the memos. That is the inherent cost of not typing it every time, the same one
