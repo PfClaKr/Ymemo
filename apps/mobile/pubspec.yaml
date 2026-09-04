@@ -5,7 +5,7 @@ publish_to: "none"
 # Keep in step with the workspace version in the root Cargo.toml: the release tag
 # is checked against that one, and an APK reporting a different number is a support
 # question waiting to happen. The +N is Android's versionCode and must only grow.
-version: 0.9.1+2
+version: 1.0.0+3
 
 environment:
   # PopScope.onPopInvokedWithResult needs Flutter 3.24 (Dart 3.5) or newer.
