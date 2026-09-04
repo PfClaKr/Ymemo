@@ -19,6 +19,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'src/rust/api.dart';
+import 'home_widgets.dart' as widgets;
 import 'host.dart' as host;
 import 'palette.dart';
 import 'security.dart';
@@ -107,6 +108,9 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
     // The app-switcher thumbnail is taken as the app leaves, so the flag has to be on well
     // before that — not at the moment of leaving.
     host.setScreenshotBlock(widget.settings.value.lockOnBackground);
+    // Before the first frame: a widget tap is what started the app in the first place, and
+    // it has to be waiting when the list (or the lock screen ahead of it) comes up.
+    unawaited(widgets.startWidgetRequests());
     _restoreSession();
   }
 
@@ -181,6 +185,8 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
     } catch (e) {
       debugPrint('could not close the vault: $e');
     }
+    // A locked app that left its memos spread across the home screen would not be locked.
+    await widgets.hideWidgets();
     // Whatever was pushed over the list goes with it; an editor left on top would be showing
     // a memo from a vault that is no longer open.
     _navigator.currentState?.popUntil((route) => route.isFirst);
@@ -654,7 +660,60 @@ class _MemoListScreenState extends State<MemoListScreen> {
     super.initState();
     _reload();
     _merge = Timer.periodic(_mergeInterval, (_) => _mergeNow());
-    if (_atRoot) _checkForUpdate(); // one banner, on the screen you always start from
+    if (_atRoot) {
+      _checkForUpdate(); // one banner, on the screen you always start from
+      // Only the root screen answers widget taps: it is the one that is always there, and
+      // a request that arrived while a folder was open is not about that folder.
+      widgets.pendingWidgetRequest.addListener(_runWidgetRequest);
+      // One may already be waiting — tapping a widget is often what opened the app.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _runWidgetRequest());
+    }
+  }
+
+  /// Carries out what a tapped widget asked for, if anything is waiting.
+  ///
+  /// Whatever is stacked over the list belongs to the last thing the user did in the app,
+  /// not to this, so it goes first: arriving from the home screen should look like arriving,
+  /// not like landing on top of yesterday's editor.
+  Future<void> _runWidgetRequest() async {
+    final request = widgets.pendingWidgetRequest.value;
+    if (request == null || !mounted) return;
+    widgets.pendingWidgetRequest.value = null;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    switch (request.action) {
+      case widgets.WidgetAction.openList:
+        break; // this screen, already on it
+      case widgets.WidgetAction.newMemo:
+        await _add();
+        break;
+      case widgets.WidgetAction.newPhotoMemo:
+        await _add(withPhoto: true);
+        break;
+      case widgets.WidgetAction.openMemo:
+        await _openMemoById(request.id);
+        break;
+      case widgets.WidgetAction.openFolder:
+        await _openFolderById(request.id);
+        break;
+    }
+  }
+
+  /// Opens a memo the widget named, wherever it is filed. Silently does nothing when it has
+  /// been deleted since the snapshot was published, which a widget on another device can do.
+  Future<void> _openMemoById(String id) async {
+    for (final memo in await memoList()) {
+      if (memo.id != id) continue;
+      if (mounted) await _open(memo);
+      return;
+    }
+  }
+
+  Future<void> _openFolderById(String id) async {
+    for (final folder in await groupList()) {
+      if (folder.id != id) continue;
+      if (mounted) await _openFolder(folder);
+      return;
+    }
   }
 
   /// Asks about a newer release at most once a day, and says nothing unless there is one —
@@ -673,6 +732,7 @@ class _MemoListScreenState extends State<MemoListScreen> {
   @override
   void dispose() {
     _merge?.cancel();
+    if (_atRoot) widgets.pendingWidgetRequest.removeListener(_runWidgetRequest);
     super.dispose();
   }
 
@@ -691,6 +751,10 @@ class _MemoListScreenState extends State<MemoListScreen> {
         _vaultName = name;
       });
     }
+    // Every change to a memo or a folder comes back through here, so this is the one place
+    // the home screen has to be told about. It skips the write when nothing moved, which is
+    // what most of the merge timer's reloads are.
+    unawaited(widgets.publishWidgets());
   }
 
   /// Renames the vault, on every device that shares it.
@@ -879,7 +943,10 @@ class _MemoListScreenState extends State<MemoListScreen> {
   }
 
   /// Creates an empty memo and opens the editor; fewer taps than asking for a title first.
-  Future<void> _add() async {
+  ///
+  /// [withPhoto] goes straight on to the photo picker, which is what the camera button on
+  /// the quick-write widget and the launcher shortcut of the same name are for.
+  Future<void> _add({bool withPhoto = false}) async {
     final id = await memoUpsert(title: '', body: '');
     if (!_atRoot) await memoSetGroup(id: id, groupId: widget.groupId);
     if (!mounted) return;
@@ -891,6 +958,7 @@ class _MemoListScreenState extends State<MemoListScreen> {
           title: '',
           body: '',
           color: defaultColor,
+          pickPhotoOnOpen: withPhoto,
         ),
       ),
     );
@@ -1066,12 +1134,17 @@ class MemoEditScreen extends StatefulWidget {
     required this.title,
     required this.body,
     required this.color,
+    this.pickPhotoOnOpen = false,
   });
 
   final FfiStrings strings;
   final String id;
   final String title;
   final String body;
+
+  /// Opens the photo picker as soon as the editor is up, for the two ways of starting a
+  /// memo that are about a photo rather than about text.
+  final bool pickPhotoOnOpen;
 
   /// Palette key the memo arrived with; the editor wears it the way the desktop's sticky
   /// does, so the same memo looks like the same memo on either device.
@@ -1125,6 +1198,11 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   void initState() {
     super.initState();
     _reloadPhotos();
+    // After the first frame, so the picker's sheet opens over the editor rather than over
+    // whatever was still on screen while it was being built.
+    if (widget.pickPhotoOnOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _pickSource());
+    }
   }
 
   Future<void> _reloadPhotos() async {

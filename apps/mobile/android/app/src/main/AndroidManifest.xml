@@ -49,6 +49,92 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Long-pressing the launcher icon. A shortcut intent cannot carry extras, so
+                 these two arrive as actions of their own; MainActivity maps them onto the
+                 same actions the widgets send in their extras. -->
+            <intent-filter>
+                <action android:name="dev.ymemo.action.NEW_MEMO"/>
+                <action android:name="dev.ymemo.action.NEW_PHOTO_MEMO"/>
+                <action android:name="dev.ymemo.action.WIDGET"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+        </activity>
+
+        <!-- Home-screen widgets.
+             All three are drawn by the launcher, in its process, while this app may not be
+             running at all: they read the snapshot MainActivity stores for them and never
+             touch the vault or its cache. See widget/Snapshot.kt for why that is a copy.
+
+             exported="true" is required of a widget provider — the launcher is what sends it
+             APPWIDGET_UPDATE — and is not a way into anything: the receivers read a private
+             SharedPreferences file and answer nothing. -->
+        <receiver
+            android:name=".widget.QuickWriteWidget"
+            android:exported="true"
+            android:label="@string/widget_quick_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_quick_write_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.NoteWidget"
+            android:exported="true"
+            android:label="@string/widget_note_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_note_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.MemoListWidget"
+            android:exported="true"
+            android:label="@string/widget_list_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_list_info" />
+        </receiver>
+
+        <!-- Redraws the widgets when the app is replaced or the system language changes;
+             both leave what is on the home screen wrong, and neither runs the app. -->
+        <receiver
+            android:name=".widget.WidgetRefreshReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.LOCALE_CHANGED"/>
+            </intent-filter>
+        </receiver>
+
+        <!-- The list widget's rows. BIND_REMOTEVIEWS keeps the permission to bind with the
+             system, so only the launcher can ask this for views. -->
+        <service
+            android:name=".widget.MemoListService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+
+        <!-- "Which memo?", both when a sticky widget is added and when its ... is tapped.
+             Exported because the launcher starts it as part of placing the widget. -->
+        <activity
+            android:name=".widget.NoteConfigureActivity"
+            android:exported="true"
+            android:label="@string/widget_note_label"
+            android:theme="@style/WidgetConfigureTheme">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE"/>
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

@@ -33,3 +33,21 @@ Future<void> openUrl(String url) => _invoke<void>('openUrl', url);
 
 /// Keeps the window out of screenshots and the app switcher.
 Future<void> setScreenshotBlock(bool secure) => _invoke<void>('setSecure', secure);
+
+/// Hands the home-screen widgets a fresh snapshot to draw; see [home_widgets.dart].
+Future<void> widgetPublish(String snapshot) => _invoke<void>('widgetPublish', snapshot);
+
+/// The widget tap that launched the app, if it was one. Consumed by the call: asking twice
+/// returns nothing the second time, which is what keeps a relaunch from repeating it.
+Future<Map<Object?, Object?>?> takeWidgetAction() =>
+    _invoke<Map<Object?, Object?>>('takeWidgetAction');
+
+/// Called when a widget is tapped while the app is already running, which arrives as
+/// `onNewIntent` rather than as a launch.
+void onWidgetAction(void Function(Map<Object?, Object?>) handler) {
+  _channel.setMethodCallHandler((call) async {
+    if (call.method == 'widgetAction' && call.arguments is Map) {
+      handler(call.arguments as Map<Object?, Object?>);
+    }
+  });
+}

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The launcher icon's background layer. The app's Material seed color, so the icon,
+         the theme and the sticky palette are all the same gold. -->
+    <color name="ic_launcher_background">#E6D24A</color>
+
+    <!-- Widget chrome. A home screen is not the app's screen: these follow the *system's*
+         light/dark setting (values-night/) rather than anything the app can choose, because
+         a widget is drawn by the launcher whether the app is running or not.
+
+         The sticky colors are not here. A note keeps its paper color in either theme —
+         that is what makes it recognisable as the note it is — and comes from
+         `Palette.kt`, which mirrors lib/palette.dart. -->
+    <color name="widget_surface">#F2FFFFFF</color>
+    <color name="widget_pill">#FFFFFFFF</color>
+    <color name="widget_ink">#FF1B1B17</color>
+    <color name="widget_muted">#FF6E6B5E</color>
+    <color name="widget_divider">#1F000000</color>
+    <color name="widget_accent">#FF8C7B1E</color>
+</resources>

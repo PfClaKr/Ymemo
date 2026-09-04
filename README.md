@@ -64,6 +64,11 @@ the memos, so every device you connect shows the same one.
 
   <img src="docs/screenshots/mobile.png" alt="Ymemo on Android" width="620">
 
+- **On your home screen** — three Android widgets: a write bar that opens straight into a new
+  note (or into the camera), one memo pinned as a sticky in its own colour, and your folders
+  and recent notes in a list you can tap into. They go blank the moment the app locks, so a
+  home screen never shows what a password is supposed to be hiding.
+
 - **Locking** — a master password, instant lock, idle auto-lock, and optionally staying
   unlocked for a set number of days. On the phone the app can close itself the moment you
   switch away, and stay out of the app switcher.
@@ -238,6 +243,7 @@ the desktop inside a Fedora container for library compatibility.
 - [x] **Phase 4b** — photo attachments (encrypted blobs, platform-independent display size)
 - [x] Flutter mobile app, with the same bundled Syncthing and both pairing paths
 - [x] Mobile update notice and a mobile settings screen to switch it off
+- [x] Android home-screen widgets and launcher shortcuts
 - [ ] macOS support (tray, packaging)
 
 ### License

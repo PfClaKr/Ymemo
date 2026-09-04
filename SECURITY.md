@@ -55,8 +55,9 @@ Relative to the app data directory (`~/.local/share/Ymemo` on Linux):
 | `ymemo.db` | no | **plaintext SQLite cache** — memo bodies are in it as-is |
 | `session.json` | no | only with "stay unlocked" on: the **raw 32-byte key** (hex) plus an expiry; 0600 on unix |
 | `settings.json` | no | device-local settings (language, lock timeouts, ...) |
+| `shared_prefs/dev.ymemo.widget.xml` | no | Android only, and only if a home-screen widget is used: **plaintext** titles and body previews of up to 100 memos |
 
-Two rows matter most:
+Three rows matter most:
 
 - **`ymemo.db` is not encrypted.** It is a materialized view that can be rebuilt from the
   automerge document, but the memo bodies inside it are plaintext. So **anyone who can read
@@ -65,6 +66,14 @@ Two rows matter most:
 - **`session.json` bypasses the master password.** Setting the stay-unlocked window to a day
   or more leaves the key on disk for that long. Set it to 0 to be asked every time. (The
   settings window says the same thing.)
+- **The widget snapshot is a second plaintext copy**, and unlike the cache it is also *shown*
+  — a home screen is visible to anyone holding the phone, whether or not they can unlock it.
+  So it is emptied the moment the vault closes: locking, or leaving the app with "lock when
+  the app is left" on, leaves the widgets saying only "locked". A phone that stays unlocked
+  because the app was left open keeps showing them, which is the same trade the app switcher
+  makes and the same switch turns both off. The widgets are drawn from this file and never
+  from the vault — they run while the app is closed and have no key — and it is inside the
+  app's private directory, excluded from cloud backup with everything else.
 
 ## The sync path
 

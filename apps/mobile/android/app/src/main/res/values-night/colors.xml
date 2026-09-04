@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The dark half of the widget chrome; see values/colors.xml. -->
+    <color name="widget_surface">#F21D1C18</color>
+    <color name="widget_pill">#FF2A2924</color>
+    <color name="widget_ink">#FFF3F0E4</color>
+    <color name="widget_muted">#FFA5A296</color>
+    <color name="widget_divider">#26FFFFFF</color>
+    <color name="widget_accent">#FFE6D24A</color>
+</resources>

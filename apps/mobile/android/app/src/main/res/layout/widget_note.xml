@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 2x1 and up: one memo, kept on the home screen in its own paper color.
+     The two ImageViews behind the content are the card and its title bar, recolored at
+     runtime from the memo's palette key; see NoteWidget. The yellow tints and the title
+     below are what the widget picker draws, since it inflates this layout without ever
+     running the provider: a real widget overwrites all three before it is on screen. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="4dp">
+
+    <ImageView
+        android:id="@+id/note_paper"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="fitXY"
+        android:src="@drawable/widget_card"
+        android:tint="#FFFCE3" />
+
+    <LinearLayout
+        android:id="@+id/note_root"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="34dp">
+
+            <ImageView
+                android:id="@+id/note_bar"
+                android:layout_width="match_parent"
+                android:layout_height="34dp"
+                android:contentDescription="@null"
+                android:scaleType="fitXY"
+                android:src="@drawable/widget_card_top"
+                android:tint="#F4E98C" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="34dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="12dp"
+                android:paddingEnd="2dp">
+
+                <TextView
+                    android:id="@+id/note_title"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/widget_note_label"
+                    android:textColor="#FF5C5C25"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <ImageView
+                    android:id="@+id/note_edit"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:background="?android:attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/widget_edit"
+                    android:padding="6dp"
+                    android:src="@drawable/ic_widget_edit" />
+
+                <ImageView
+                    android:id="@+id/note_pick"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:background="?android:attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/widget_pick"
+                    android:padding="6dp"
+                    android:src="@drawable/ic_widget_more" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <TextView
+            android:id="@+id/note_body"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:gravity="top|start"
+            android:lineSpacingExtra="2dp"
+            android:padding="12dp"
+            android:textColor="#FF1B1B17"
+            android:textSize="12sp" />
+    </LinearLayout>
+</FrameLayout>

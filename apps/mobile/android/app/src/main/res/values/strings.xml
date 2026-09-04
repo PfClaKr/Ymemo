@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- **The one place strings live outside i18n/*.json**, and only because Android reads
+     them without the app running: the widget picker's labels, and everything the widgets
+     draw before (or instead of) memo text. They follow the *system* language, not the
+     app's language setting, for the same reason.
+
+     Everything else the widgets show is memo content and comes from the snapshot the app
+     publishes, which is already in the app's language. Korean is in values-ko/. -->
+<resources>
+    <string name="widget_quick_label">Ymemo quick note</string>
+    <string name="widget_quick_description">A write bar on the home screen: one tap and the keyboard is up.</string>
+    <string name="widget_quick_hint">Jot something down</string>
+
+    <string name="widget_note_label">Ymemo sticky</string>
+    <string name="widget_note_description">Keeps one memo on the home screen, in its own color.</string>
+
+    <string name="widget_list_label">Ymemo memos</string>
+    <string name="widget_list_description">Your folders and your most recent memos, tap to open.</string>
+
+    <string name="widget_empty">No memos yet</string>
+    <string name="widget_locked">Locked — tap to unlock</string>
+    <string name="widget_untitled">Untitled</string>
+
+    <string name="widget_new_memo">New memo</string>
+    <string name="widget_photo_memo">New memo with a photo</string>
+    <string name="widget_open">Open Ymemo</string>
+    <string name="widget_edit">Edit</string>
+    <string name="widget_pick">Show another memo</string>
+
+    <string name="widget_configure_title">Which memo should this show?</string>
+    <string name="widget_configure_recent">Most recently edited</string>
+    <string name="widget_configure_recent_hint">Follows whatever you wrote last</string>
+    <string name="widget_configure_empty">Open Ymemo and unlock it, then add the widget again.</string>
+
+    <string name="shortcut_new_memo_short">New memo</string>
+    <string name="shortcut_new_memo_long">Write a new memo</string>
+    <string name="shortcut_photo_memo_short">Photo memo</string>
+    <string name="shortcut_photo_memo_long">New memo with a photo</string>
+</resources>
