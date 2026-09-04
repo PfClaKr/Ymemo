@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Show a different memo": three dots rather than a gear, because it opens a picker. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24"
+    android:tint="@color/widget_accent">
+    <path android:fillColor="#000000"
+        android:pathData="M6,10A2,2 0 1 0 6,14A2,2 0 1 0 6,10ZM12,10A2,2 0 1 0 12,14A2,2 0 1 0 12,10ZM18,10A2,2 0 1 0 18,14A2,2 0 1 0 18,10Z" />
+</vector>

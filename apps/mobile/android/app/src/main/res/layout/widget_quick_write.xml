@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 4x1: the write bar. The whole pill starts a new memo; the two buttons are the two ways
+     of starting one that are worth a tap of their own. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="4dp">
+
+    <LinearLayout
+        android:id="@+id/quick_root"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/widget_pill"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingEnd="6dp">
+
+        <ImageView
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:contentDescription="@string/widget_quick_label"
+            android:src="@drawable/ic_widget_note" />
+
+        <TextView
+            android:id="@+id/quick_hint"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/widget_quick_hint"
+            android:textColor="@color/widget_muted"
+            android:textSize="14sp" />
+
+        <ImageView
+            android:id="@+id/quick_photo"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/widget_photo_memo"
+            android:padding="7dp"
+            android:src="@drawable/ic_widget_photo" />
+
+        <ImageView
+            android:id="@+id/quick_new"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/widget_new_memo"
+            android:padding="7dp"
+            android:src="@drawable/ic_widget_edit" />
+    </LinearLayout>
+</FrameLayout>

@@ -2262,12 +2262,14 @@ impl SseDecode for crate::api::FfiSettings {
         let mut var_lang = <String>::sse_decode(deserializer);
         let mut var_unlockDays = <i32>::sse_decode(deserializer);
         let mut var_lockOnBackground = <bool>::sse_decode(deserializer);
+        let mut var_biometricUnlock = <bool>::sse_decode(deserializer);
         let mut var_updateCheck = <bool>::sse_decode(deserializer);
         let mut var_lastUpdateCheck = <i64>::sse_decode(deserializer);
         return crate::api::FfiSettings {
             lang: var_lang,
             unlock_days: var_unlockDays,
             lock_on_background: var_lockOnBackground,
+            biometric_unlock: var_biometricUnlock,
             update_check: var_updateCheck,
             last_update_check: var_lastUpdateCheck,
         };
@@ -2309,6 +2311,11 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_language = <String>::sse_decode(deserializer);
         let mut var_languageAuto = <String>::sse_decode(deserializer);
         let mut var_lockNow = <String>::sse_decode(deserializer);
+        let mut var_biometricFailed = <String>::sse_decode(deserializer);
+        let mut var_biometricPrompt = <String>::sse_decode(deserializer);
+        let mut var_biometricUnavailable = <String>::sse_decode(deserializer);
+        let mut var_biometricUnlock = <String>::sse_decode(deserializer);
+        let mut var_biometricUnlockHint = <String>::sse_decode(deserializer);
         let mut var_lockOnBackground = <String>::sse_decode(deserializer);
         let mut var_lockOnBackgroundHint = <String>::sse_decode(deserializer);
         let mut var_lockSection = <String>::sse_decode(deserializer);
@@ -2421,6 +2428,11 @@ impl SseDecode for crate::api::FfiStrings {
             language: var_language,
             language_auto: var_languageAuto,
             lock_now: var_lockNow,
+            biometric_failed: var_biometricFailed,
+            biometric_prompt: var_biometricPrompt,
+            biometric_unavailable: var_biometricUnavailable,
+            biometric_unlock: var_biometricUnlock,
+            biometric_unlock_hint: var_biometricUnlockHint,
             lock_on_background: var_lockOnBackground,
             lock_on_background_hint: var_lockOnBackgroundHint,
             lock_section: var_lockSection,
@@ -2858,6 +2870,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiSettings {
             self.lang.into_into_dart().into_dart(),
             self.unlock_days.into_into_dart().into_dart(),
             self.lock_on_background.into_into_dart().into_dart(),
+            self.biometric_unlock.into_into_dart().into_dart(),
             self.update_check.into_into_dart().into_dart(),
             self.last_update_check.into_into_dart().into_dart(),
         ]
@@ -2911,6 +2924,11 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.language.into_into_dart().into_dart(),
             self.language_auto.into_into_dart().into_dart(),
             self.lock_now.into_into_dart().into_dart(),
+            self.biometric_failed.into_into_dart().into_dart(),
+            self.biometric_prompt.into_into_dart().into_dart(),
+            self.biometric_unavailable.into_into_dart().into_dart(),
+            self.biometric_unlock.into_into_dart().into_dart(),
+            self.biometric_unlock_hint.into_into_dart().into_dart(),
             self.lock_on_background.into_into_dart().into_dart(),
             self.lock_on_background_hint.into_into_dart().into_dart(),
             self.lock_section.into_into_dart().into_dart(),
@@ -3103,6 +3121,7 @@ impl SseEncode for crate::api::FfiSettings {
         <String>::sse_encode(self.lang, serializer);
         <i32>::sse_encode(self.unlock_days, serializer);
         <bool>::sse_encode(self.lock_on_background, serializer);
+        <bool>::sse_encode(self.biometric_unlock, serializer);
         <bool>::sse_encode(self.update_check, serializer);
         <i64>::sse_encode(self.last_update_check, serializer);
     }
@@ -3138,6 +3157,11 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.language, serializer);
         <String>::sse_encode(self.language_auto, serializer);
         <String>::sse_encode(self.lock_now, serializer);
+        <String>::sse_encode(self.biometric_failed, serializer);
+        <String>::sse_encode(self.biometric_prompt, serializer);
+        <String>::sse_encode(self.biometric_unavailable, serializer);
+        <String>::sse_encode(self.biometric_unlock, serializer);
+        <String>::sse_encode(self.biometric_unlock_hint, serializer);
         <String>::sse_encode(self.lock_on_background, serializer);
         <String>::sse_encode(self.lock_on_background_hint, serializer);
         <String>::sse_encode(self.lock_section, serializer);

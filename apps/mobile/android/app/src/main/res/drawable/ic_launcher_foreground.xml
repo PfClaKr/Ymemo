@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher icon's foreground layer: the same dog-eared note the desktop draws in
+     `crates/ymemo-desktop/src/icon.rs`, so one picture stands for the app everywhere.
+
+     Adaptive icons are 108x108 with only the middle 72x72 guaranteed to survive the
+     launcher's mask, so the page stays inside 31..77 across and 27..81 down. The pre-API-26
+     PNGs in mipmap-*/ are the same geometry: see tool/gen_launcher_icons.py. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- The page. Its top-right corner is cut away by the fold rather than rounded. -->
+    <path
+        android:pathData="M37,27 L63,27 L77,41 L77,75 A6,6 0 0 1 71,81 L37,81 A6,6 0 0 1 31,75 L31,33 A6,6 0 0 1 37,27 Z"
+        android:fillColor="#FFFCE3"
+        android:strokeColor="#8C7B1E"
+        android:strokeWidth="2.5" />
+
+    <!-- The dog ear, and the diagonal that separates it from the body. -->
+    <path
+        android:pathData="M63,27 L77,41 L63,41 Z"
+        android:fillColor="#D8C65C" />
+    <path
+        android:pathData="M63,27 L63,41 L77,41"
+        android:strokeColor="#8C7B1E"
+        android:strokeWidth="2.5"
+        android:strokeLineJoin="round" />
+
+    <!-- Three ruled lines, the last one short. -->
+    <path
+        android:pathData="M40.5,51.5 L67.5,51.5 M40.5,59.5 L67.5,59.5 M40.5,67.5 L55.5,67.5"
+        android:strokeColor="#B8A63A"
+        android:strokeWidth="3"
+        android:strokeLineCap="round" />
+</vector>

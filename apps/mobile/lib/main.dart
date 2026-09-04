@@ -19,6 +19,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'src/rust/api.dart';
+import 'home_widgets.dart' as widgets;
 import 'host.dart' as host;
 import 'palette.dart';
 import 'security.dart';
@@ -107,6 +108,9 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
     // The app-switcher thumbnail is taken as the app leaves, so the flag has to be on well
     // before that — not at the moment of leaving.
     host.setScreenshotBlock(widget.settings.value.lockOnBackground);
+    // Before the first frame: a widget tap is what started the app in the first place, and
+    // it has to be waiting when the list (or the lock screen ahead of it) comes up.
+    unawaited(widgets.startWidgetRequests());
     _restoreSession();
   }
 
@@ -181,6 +185,8 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
     } catch (e) {
       debugPrint('could not close the vault: $e');
     }
+    // A locked app that left its memos spread across the home screen would not be locked.
+    await widgets.hideWidgets();
     // Whatever was pushed over the list goes with it; an editor left on top would be showing
     // a memo from a vault that is no longer open.
     _navigator.currentState?.popUntil((route) => route.isFirst);
@@ -211,6 +217,7 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
               : LockScreen(
                   strings: _strings,
                   sync: widget.sync,
+                  settings: widget.settings,
                   cacheDbPath: widget.cacheDbPath,
                   onUnlocked: _onUnlocked,
                 ),
@@ -227,12 +234,17 @@ class LockScreen extends StatefulWidget {
     super.key,
     required this.strings,
     required this.sync,
+    required this.settings,
     required this.cacheDbPath,
     required this.onUnlocked,
   });
 
   final FfiStrings strings;
   final SyncController sync;
+
+  /// Read for one thing only: whether biometric unlock was turned on.
+  final SettingsStore settings;
+
   final String cacheDbPath;
 
   /// Called once the vault is open; the app decides what to show next.
@@ -278,6 +290,15 @@ class _LockScreenState extends State<LockScreen> {
   /// screen becomes the unlock prompt on its own.
   bool _choosing = true;
 
+  /// Whether to draw the fingerprint button: the setting is on, a key is stored, and the
+  /// device can actually check one. Resolved once, asynchronously, because all three
+  /// questions cross the platform channel.
+  bool _biometricReady = false;
+
+  /// So a refused or cancelled prompt is not immediately put up again by a rebuild. The
+  /// button stays, and pressing it asks again.
+  bool _biometricTried = false;
+
   Timer? _probe;
 
   @override
@@ -285,6 +306,60 @@ class _LockScreenState extends State<LockScreen> {
     super.initState();
     _probeVault();
     _probe = Timer.periodic(_probeInterval, (_) => _probeVault());
+    _prepareBiometrics();
+  }
+
+  /// Decides whether the fingerprint button belongs on this screen, and offers the prompt
+  /// straight away if it does — reaching for a finger is why the setting was turned on, and
+  /// making it a two-step (open the app, press a button, then the prompt) would undo that.
+  Future<void> _prepareBiometrics() async {
+    if (!widget.settings.value.biometricUnlock) return;
+    const store = BiometricStore();
+    final ready = await store.enrolled && await store.available;
+    if (!mounted || !ready) return;
+    setState(() => _biometricReady = true);
+    await _unlockWithBiometrics();
+  }
+
+  /// Opens the vault with the key the fingerprint releases.
+  ///
+  /// A refusal is silent: the user either cancelled, or their finger was not recognised and
+  /// the system prompt has already said so. A key that does **not** open the vault is a
+  /// different matter — it is stale, so it is dropped and the password takes over, exactly
+  /// as a diverged session key is handled.
+  Future<void> _unlockWithBiometrics() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _biometricTried = true;
+      _error = null;
+      _notice = null;
+    });
+    try {
+      final key = await const BiometricStore().unlock(
+        widget.strings.biometricUnlock,
+        title: widget.strings.biometricPrompt,
+        cancel: widget.strings.cancel,
+      );
+      if (key == null) return;
+      await vaultOpenWithKey(
+        vaultDir: widget.sync.paths.vaultDir,
+        cacheDbPath: widget.cacheDbPath,
+        key: Uint8List.fromList(key),
+      );
+      await widget.onUnlocked();
+    } catch (e) {
+      debugPrint('the stored fingerprint key did not open the vault: $e');
+      await const BiometricStore().disable();
+      if (mounted) {
+        setState(() {
+          _biometricReady = false;
+          _error = '$e';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -402,8 +477,8 @@ class _LockScreenState extends State<LockScreen> {
   ///
   /// The unsharing that has to come first is the core's job (`vaultReset`), not this
   /// screen's — syncthing propagates deletions, and wiping a folder it still carries would
-  /// take the other devices' memos with it. The stored session key goes too: it is the data
-  /// key of a vault that no longer exists.
+  /// take the other devices' memos with it. Both stored keys go too: they are the data key
+  /// of a vault that no longer exists.
   Future<void> _reset() async {
     setState(() {
       _busy = true;
@@ -416,6 +491,8 @@ class _LockScreenState extends State<LockScreen> {
         cacheDbPath: widget.cacheDbPath,
       );
       await const SessionStore().clear();
+      await const BiometricStore().disable();
+      if (mounted) setState(() => _biometricReady = false);
       _leaveRecovery();
       await _probeVault();
       if (mounted) setState(() => _notice = widget.strings.resetDone);
@@ -531,6 +608,14 @@ class _LockScreenState extends State<LockScreen> {
                   ? s.unlock
                   : s.createVault),
         ),
+        // Only once the prompt has been offered and dismissed: while it is still up, or on
+        // the way to it, a second button for the same thing is just in the way.
+        if (_biometricReady && _biometricTried)
+          TextButton.icon(
+            onPressed: _busy ? null : _unlockWithBiometrics,
+            icon: const Icon(Icons.fingerprint),
+            label: Text(s.biometricUnlock),
+          ),
         // Nothing to recover before a vault exists, and offering it would only confuse.
         if (_vaultExists)
           TextButton(
@@ -654,7 +739,60 @@ class _MemoListScreenState extends State<MemoListScreen> {
     super.initState();
     _reload();
     _merge = Timer.periodic(_mergeInterval, (_) => _mergeNow());
-    if (_atRoot) _checkForUpdate(); // one banner, on the screen you always start from
+    if (_atRoot) {
+      _checkForUpdate(); // one banner, on the screen you always start from
+      // Only the root screen answers widget taps: it is the one that is always there, and
+      // a request that arrived while a folder was open is not about that folder.
+      widgets.pendingWidgetRequest.addListener(_runWidgetRequest);
+      // One may already be waiting — tapping a widget is often what opened the app.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _runWidgetRequest());
+    }
+  }
+
+  /// Carries out what a tapped widget asked for, if anything is waiting.
+  ///
+  /// Whatever is stacked over the list belongs to the last thing the user did in the app,
+  /// not to this, so it goes first: arriving from the home screen should look like arriving,
+  /// not like landing on top of yesterday's editor.
+  Future<void> _runWidgetRequest() async {
+    final request = widgets.pendingWidgetRequest.value;
+    if (request == null || !mounted) return;
+    widgets.pendingWidgetRequest.value = null;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    switch (request.action) {
+      case widgets.WidgetAction.openList:
+        break; // this screen, already on it
+      case widgets.WidgetAction.newMemo:
+        await _add();
+        break;
+      case widgets.WidgetAction.newPhotoMemo:
+        await _add(withPhoto: true);
+        break;
+      case widgets.WidgetAction.openMemo:
+        await _openMemoById(request.id);
+        break;
+      case widgets.WidgetAction.openFolder:
+        await _openFolderById(request.id);
+        break;
+    }
+  }
+
+  /// Opens a memo the widget named, wherever it is filed. Silently does nothing when it has
+  /// been deleted since the snapshot was published, which a widget on another device can do.
+  Future<void> _openMemoById(String id) async {
+    for (final memo in await memoList()) {
+      if (memo.id != id) continue;
+      if (mounted) await _open(memo);
+      return;
+    }
+  }
+
+  Future<void> _openFolderById(String id) async {
+    for (final folder in await groupList()) {
+      if (folder.id != id) continue;
+      if (mounted) await _openFolder(folder);
+      return;
+    }
   }
 
   /// Asks about a newer release at most once a day, and says nothing unless there is one —
@@ -673,6 +811,7 @@ class _MemoListScreenState extends State<MemoListScreen> {
   @override
   void dispose() {
     _merge?.cancel();
+    if (_atRoot) widgets.pendingWidgetRequest.removeListener(_runWidgetRequest);
     super.dispose();
   }
 
@@ -691,6 +830,10 @@ class _MemoListScreenState extends State<MemoListScreen> {
         _vaultName = name;
       });
     }
+    // Every change to a memo or a folder comes back through here, so this is the one place
+    // the home screen has to be told about. It skips the write when nothing moved, which is
+    // what most of the merge timer's reloads are.
+    unawaited(widgets.publishWidgets());
   }
 
   /// Renames the vault, on every device that shares it.
@@ -879,7 +1022,10 @@ class _MemoListScreenState extends State<MemoListScreen> {
   }
 
   /// Creates an empty memo and opens the editor; fewer taps than asking for a title first.
-  Future<void> _add() async {
+  ///
+  /// [withPhoto] goes straight on to the photo picker, which is what the camera button on
+  /// the quick-write widget and the launcher shortcut of the same name are for.
+  Future<void> _add({bool withPhoto = false}) async {
     final id = await memoUpsert(title: '', body: '');
     if (!_atRoot) await memoSetGroup(id: id, groupId: widget.groupId);
     if (!mounted) return;
@@ -891,6 +1037,7 @@ class _MemoListScreenState extends State<MemoListScreen> {
           title: '',
           body: '',
           color: defaultColor,
+          pickPhotoOnOpen: withPhoto,
         ),
       ),
     );
@@ -1066,12 +1213,17 @@ class MemoEditScreen extends StatefulWidget {
     required this.title,
     required this.body,
     required this.color,
+    this.pickPhotoOnOpen = false,
   });
 
   final FfiStrings strings;
   final String id;
   final String title;
   final String body;
+
+  /// Opens the photo picker as soon as the editor is up, for the two ways of starting a
+  /// memo that are about a photo rather than about text.
+  final bool pickPhotoOnOpen;
 
   /// Palette key the memo arrived with; the editor wears it the way the desktop's sticky
   /// does, so the same memo looks like the same memo on either device.
@@ -1125,6 +1277,11 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   void initState() {
     super.initState();
     _reloadPhotos();
+    // After the first frame, so the picker's sheet opens over the editor rather than over
+    // whatever was still on screen while it was being built.
+    if (widget.pickPhotoOnOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _pickSource());
+    }
   }
 
   Future<void> _reloadPhotos() async {
@@ -2373,12 +2530,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     String? lang,
     int? unlockDays,
     bool? lockOnBackground,
+    bool? biometricUnlock,
     bool? updateCheck,
   }) async {
     await widget.settings.save(FfiSettings(
       lang: lang ?? _s.lang,
       unlockDays: unlockDays ?? _s.unlockDays,
       lockOnBackground: lockOnBackground ?? _s.lockOnBackground,
+      biometricUnlock: biometricUnlock ?? _s.biometricUnlock,
       updateCheck: updateCheck ?? _s.updateCheck,
       lastUpdateCheck: _s.lastUpdateCheck,
     ));
@@ -2406,6 +2565,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _save(unlockDays: days);
     await const SessionStore().clear();
   }
+
+  /// Turns biometric unlock on or off.
+  ///
+  /// Turning it **on** is the moment the key is stored, and it can only happen from here:
+  /// this screen is inside the unlocked app, so there is a key to store. The fingerprint is
+  /// checked first — not for security, since the vault is already open, but so that a switch
+  /// that cannot work never ends up looking on.
+  ///
+  /// Turning it **off** deletes the key, which is the entire promise of the switch.
+  Future<void> _setBiometric(bool on) async {
+    const store = BiometricStore();
+    if (!on) {
+      await store.disable();
+      await _save(biometricUnlock: false);
+      return;
+    }
+    if (!await store.available) {
+      if (mounted) _say(widget.strings.biometricUnavailable);
+      return;
+    }
+    if (!await store.confirm(
+      widget.strings.biometricUnlock,
+      title: widget.strings.biometricPrompt,
+      cancel: widget.strings.cancel,
+    )) {
+      if (mounted) _say(widget.strings.biometricFailed);
+      return;
+    }
+    try {
+      await store.enable(await vaultKey());
+    } catch (e) {
+      debugPrint('could not store the biometric key: $e');
+      if (mounted) _say('$e');
+      return;
+    }
+    await _save(biometricUnlock: true);
+  }
+
+  void _say(String message) => ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+      );
 
   Future<void> _checkNow() async {
     setState(() {
@@ -2470,6 +2670,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: (v) => _save(lockOnBackground: v),
             title: Text(s.lockOnBackground),
             subtitle: Text(s.lockOnBackgroundHint),
+          ),
+          SwitchListTile(
+            value: _s.biometricUnlock,
+            onChanged: _setBiometric,
+            title: Text(s.biometricUnlock),
+            subtitle: Text(s.biometricUnlockHint),
           ),
           ListTile(
             title: Text(s.unlockDays),

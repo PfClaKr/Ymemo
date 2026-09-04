@@ -4,14 +4,18 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.net.wifi.WifiManager
+import android.os.Bundle
 import android.view.WindowManager
-import io.flutter.embedding.android.FlutterActivity
+import dev.ymemo.ymemo_mobile.widget.Launch
+import dev.ymemo.ymemo_mobile.widget.WidgetStore
+import dev.ymemo.ymemo_mobile.widget.Widgets
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
 /**
- * The four things Dart cannot do for itself.
+ * The things Dart cannot do for itself.
  *
  * **Where the sync daemon's executable is.** Since Android 10 an app may only execute a binary
  * from its native library directory, so syncthing ships as `libsyncthing.so` in `jniLibs/` and
@@ -30,15 +34,34 @@ import java.io.File
  * to this device unless a multicast lock is held, which would silently cost us every pairing
  * request from the other device. The lock is held only while the pairing screen is open — it
  * keeps the wifi radio from sleeping, so it is not something to leave on.
+ *
+ * It is a `FlutterFragmentActivity` rather than the template's `FlutterActivity` for one
+ * reason: `local_auth` puts up a `BiometricPrompt`, which is a fragment and needs a
+ * `FragmentActivity` to attach to. Nothing else here depends on the difference.
+ *
+ * **The home-screen widgets.** They are drawn by the launcher while the app is closed, so
+ * they read a snapshot the app publishes rather than the vault (see `widget/Snapshot.kt`);
+ * `widgetPublish` is Dart handing over a new one. In the other direction a tapped widget
+ * starts this activity with an action in its extras, which Dart collects with
+ * `takeWidgetAction` at startup and is handed through `widgetAction` while it is running.
  */
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
     private val channelName = "dev.ymemo/native"
     private var multicastLock: WifiManager.MulticastLock? = null
+    private var channel: MethodChannel? = null
+
+    /**
+     * What a widget or launcher shortcut asked for, until Dart comes to collect it.
+     *
+     * Read off the launch intent here rather than pushed at Dart, because at this point the
+     * Dart side has not run a line: `takeWidgetAction` is the first thing it asks for.
+     */
+    private var pendingAction: Map<String, String>? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
-            .setMethodCallHandler { call, result ->
+        channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).also {
+            it.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "syncBinaryPath" -> result.success(syncBinaryPath())
                     "openUrl" -> result.success(openUrl(call.arguments as? String))
@@ -51,15 +74,80 @@ class MainActivity : FlutterActivity() {
                         releaseMulticastLock()
                         result.success(null)
                     }
+                    "widgetPublish" -> {
+                        publishToWidgets(call.arguments as? String)
+                        result.success(null)
+                    }
+                    "takeWidgetAction" -> {
+                        result.success(pendingAction)
+                        pendingAction = null
+                    }
                     else -> result.notImplemented()
                 }
             }
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        pendingAction = readAction(intent)
+    }
+
+    /**
+     * A widget tapped while the app is already open. `singleTop` means this rather than a
+     * second copy of the activity, and Dart is told at once — nothing will ask for it again.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val action = readAction(intent) ?: return
+        val sink = channel
+        if (sink == null) {
+            pendingAction = action
+        } else {
+            sink.invokeMethod("widgetAction", action)
+        }
     }
 
     override fun onDestroy() {
         // A lock outliving the activity would hold the radio awake for nothing.
         releaseMulticastLock()
+        channel = null
         super.onDestroy()
+    }
+
+    /**
+     * The action carried by a widget tap or a launcher shortcut, as `{action, id}`.
+     *
+     * Widgets put it in the extras: a collection widget's rows share one PendingIntent
+     * template and can differ only by the extras of their fill-in intent. Shortcuts cannot
+     * carry extras at all, so those arrive as actions of their own and are mapped here.
+     *
+     * Consumed as it is read. Android hands the same intent back when it recreates the
+     * activity after the process was killed, and "new memo" happening twice would leave an
+     * empty memo behind every time.
+     */
+    private fun readAction(intent: Intent?): Map<String, String>? {
+        if (intent == null) return null
+        val name = intent.getStringExtra(Launch.EXTRA_ACTION)
+            ?: when (intent.action) {
+                Launch.SHORTCUT_NEW_MEMO -> Launch.NEW_MEMO
+                Launch.SHORTCUT_NEW_PHOTO_MEMO -> Launch.NEW_PHOTO_MEMO
+                else -> null
+            }
+            ?: return null
+        val id = intent.getStringExtra(Launch.EXTRA_ID) ?: ""
+        intent.removeExtra(Launch.EXTRA_ACTION)
+        intent.removeExtra(Launch.EXTRA_ID)
+        intent.action = Intent.ACTION_MAIN
+        return mapOf("action" to name, "id" to id)
+    }
+
+    /** Stores the snapshot Dart just built and redraws whatever is on the home screen. */
+    private fun publishToWidgets(json: String?) {
+        if (json == null) return
+        WidgetStore.publish(applicationContext, json)
+        Widgets.refreshAll(applicationContext)
     }
 
     private fun syncBinaryPath(): String? {

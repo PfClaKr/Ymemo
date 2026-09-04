@@ -11,7 +11,9 @@ device is not.**
 1. Memo contents **never leave a device in the clear** — the sync transport (Syncthing nodes,
    relay servers, the network in between) only ever sees ciphertext.
 2. Without the master password, an entire copy of the vault directory reveals nothing.
-3. A locked desktop app shows no memos without the password.
+3. A locked app shows no memos without the password — on the phone that extends to the
+   app-switcher thumbnail and to the home-screen widgets, which are emptied as the vault
+   closes.
 
 ## Cryptography
 
@@ -45,7 +47,7 @@ after which a version of the app that predates wrapping can no longer open that 
 
 ## What lands on disk
 
-Relative to the app data directory (`~/.local/share/Ymemo` on Linux):
+Relative to the app data directory (`~/.local/share/ymemo` on Linux):
 
 | File | Synced | Contents |
 |---|---|---|
@@ -55,8 +57,10 @@ Relative to the app data directory (`~/.local/share/Ymemo` on Linux):
 | `ymemo.db` | no | **plaintext SQLite cache** — memo bodies are in it as-is |
 | `session.json` | no | only with "stay unlocked" on: the **raw 32-byte key** (hex) plus an expiry; 0600 on unix |
 | `settings.json` | no | device-local settings (language, lock timeouts, ...) |
+| `shared_prefs/dev.ymemo.widget.xml` | no | Android only, and only if a home-screen widget is used: **plaintext** titles and body previews of up to 100 memos |
+| the platform keystore | no | Android only: the stay-unlocked session key, and — if biometric unlock is on — a second copy of the **data key** with no expiry. Both encrypted by a key the Android Keystore holds, never in a file of ours |
 
-Two rows matter most:
+Three rows matter most:
 
 - **`ymemo.db` is not encrypted.** It is a materialized view that can be rebuilt from the
   automerge document, but the memo bodies inside it are plaintext. So **anyone who can read
@@ -65,6 +69,23 @@ Two rows matter most:
 - **`session.json` bypasses the master password.** Setting the stay-unlocked window to a day
   or more leaves the key on disk for that long. Set it to 0 to be asked every time. (The
   settings window says the same thing.)
+- **Biometric unlock bypasses it too, and without an expiry.** A fingerprint cannot derive a
+  key — there is nothing secret enough in one to build a key from — so what the switch really
+  does is keep a copy of the data key in the Android Keystore and put the device's own
+  biometric check in front of reading it. While it is on, the master password protects nothing
+  *on that phone*: anyone whose fingerprint the phone accepts can open the vault, and so can
+  anyone who can read the keystore (a rooted device, an adb backup of an app that allowed
+  one). It buys convenience against a lost or borrowed phone, not against an attacker with the
+  device in hand and time to spend. It is off by default, the switch says so, and turning it
+  off deletes the copy.
+- **The widget snapshot is a second plaintext copy**, and unlike the cache it is also *shown*
+  — a home screen is visible to anyone holding the phone, whether or not they can unlock it.
+  So it is emptied the moment the vault closes: locking, or leaving the app with "lock when
+  the app is left" on, leaves the widgets saying only "locked". A phone that stays unlocked
+  because the app was left open keeps showing them, which is the same trade the app switcher
+  makes and the same switch turns both off. The widgets are drawn from this file and never
+  from the vault — they run while the app is closed and have no key — and it is inside the
+  app's private directory, excluded from cloud backup with everything else.
 
 ## The sync path
 
@@ -126,7 +147,8 @@ derives the same key from the synced salt plus the master password, which the us
   stops further syncing but does not recall what it already has.
 - **A password change does not re-key the vault.** It replaces the wrapper, not the data
   key, so a leaked *password* is closed off but a leaked *data key* — anything read out of
-  `session.json` or process memory — still opens everything. Only a fresh vault sheds that.
+  `session.json`, the Android keystore copies, or process memory — still opens everything.
+  Only a fresh vault sheds that.
 - **A recovery code is a second full credential.** Issuing one widens the attack surface by
   design; not issuing one means a forgotten password destroys the memos on that device.
 - **Wiping is local.** "Delete everything and start over" removes this device's vault after

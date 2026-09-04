@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the launcher icon. The same two actions the quick-write widget offers, for
+     people who would rather not give up a home screen row to get them. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_widget_edit"
+        android:shortcutId="new_memo"
+        android:shortcutLongLabel="@string/shortcut_new_memo_long"
+        android:shortcutShortLabel="@string/shortcut_new_memo_short">
+        <intent
+            android:action="dev.ymemo.action.NEW_MEMO"
+            android:targetClass="dev.ymemo.ymemo_mobile.MainActivity"
+            android:targetPackage="dev.ymemo.ymemo_mobile" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_widget_photo"
+        android:shortcutId="photo_memo"
+        android:shortcutLongLabel="@string/shortcut_photo_memo_long"
+        android:shortcutShortLabel="@string/shortcut_photo_memo_short">
+        <intent
+            android:action="dev.ymemo.action.NEW_PHOTO_MEMO"
+            android:targetClass="dev.ymemo.ymemo_mobile.MainActivity"
+            android:targetPackage="dev.ymemo.ymemo_mobile" />
+    </shortcut>
+</shortcuts>

@@ -136,6 +136,41 @@ adb shell input tap 540 1212                   # coordinates assume 1080x2400
 adb shell input text "hunter2"                 # %s for spaces
 ```
 
+`screencap` returns a **black** frame whenever `lock_on_background` is on, because that is
+what `FLAG_SECURE` is for. Write the setting off before concluding the app is broken:
+
+```bash
+adb shell 'run-as dev.ymemo.ymemo_mobile sh -c "cat > app_flutter/settings.json"' <<'JSON'
+{"lang":"ko","unlock_days":0,"lock_on_background":false,"update_check":false,"last_update_check":0}
+JSON
+```
+
+Biometrics **do** work on the emulator, which is worth knowing before hand-testing the
+fingerprint unlock. Enrol one once, then `finger touch` stands in for the sensor:
+
+```bash
+adb shell locksettings set-pin 1234       # a screen lock has to exist first
+adb shell am start -a android.settings.SECURITY_SETTINGS
+#   Device unlock > Pixel Imprint, then re-enter the PIN and agree
+adb emu finger touch 1                    # ~20 times to enrol, once per prompt afterwards
+```
+
+The enrolment screens and `BiometricPrompt` itself are `FLAG_SECURE`, so `screencap` is black
+throughout. `adb shell uiautomator dump /sdcard/ui.xml` reads them anyway — it goes through
+the accessibility tree — and is the way to find out what the prompt is currently saying.
+Tapping the prompt's *Cancel* with `input tap` does not register; `input keyevent KEYCODE_BACK`
+dismisses it.
+
+Widgets are worth driving from the launcher rather than reasoning about. There is no adb
+command that places one, so: long-press the wallpaper, **Widgets**, search "Ymemo", expand,
+then drag a preview out with `input motionevent` (a plain `input swipe` is too fast to
+register as a long press). The home screen itself is not `FLAG_SECURE`, so it screenshots
+even while the app will not. What the widgets are currently drawing is:
+
+```bash
+adb shell run-as dev.ymemo.ymemo_mobile cat shared_prefs/dev.ymemo.widget.xml
+```
+
 To confirm the vault really landed on the device (debug builds only):
 
 ```bash
@@ -167,11 +202,26 @@ cargo build --release --target aarch64-apple-ios -p ymemo-ffi
 flutter build ios --no-codesign
 ```
 
+## Plugin constraints
+
+Two of the plugins reach into the platform side, so a change there can break them:
+
+- **`local_auth` needs a `FragmentActivity`.** Its prompt is a `BiometricPrompt`, which is a
+  fragment, so `MainActivity` extends `FlutterFragmentActivity` rather than the template's
+  `FlutterActivity`. Nothing else depends on the difference — but changing it back would break
+  the fingerprint unlock at runtime, not at compile time.
+- **`local_auth_android` is a direct dependency**, unusually for a platform package, and only
+  for `AndroidAuthMessages`: the prompt's own title and cancel button are the plugin's English
+  defaults otherwise, on a dialog whose other half comes from our catalog. It moves with
+  `local_auth`; bump the two together.
+
 ## Screens
 
 - **Lock** — open the vault with the master password, creating it if needed. Reachable from
   here, before any password: **Sync devices**, because a new install has to pair and receive
-  `vault.json` before there is anything to unlock.
+  `vault.json` before there is anything to unlock. With biometric unlock on, the fingerprint
+  prompt comes up by itself as the screen opens — reaching for a finger is why the setting was
+  turned on — and a button under the password field asks again if it was dismissed.
 - **List** — one folder at a time: subfolders first, then its memos. Tapping a folder goes
   into it, long-pressing one offers rename and delete (delete keeps the contents and lifts
   them up a level), and long-pressing a memo moves it to another folder. Swipe to delete, +
@@ -186,8 +236,71 @@ flutter build ios --no-codesign
 - **Sync devices** — the 6-digit LAN code and a field for the other device's, this device's
   long pairing code (copyable), QR scanning, and the paired devices with their connection
   state.
-- **Settings** — language, locking, updates, and the running version. Everything applies as it
-  is changed; Rust sanitizes on write and the screen shows what was actually kept.
+- **Settings** — language, locking (including the fingerprint switch, which is where the key
+  it releases is stored), updates, and the running version. Everything applies as it is
+  changed; Rust sanitizes on write and the screen shows what was actually kept.
+
+## Home-screen widgets
+
+Three, in `android/app/src/main/kotlin/dev/ymemo/ymemo_mobile/widget/`:
+
+| Widget | Size | What it is |
+|---|---|---|
+| **Quick note** | 4x1 | A write bar. Tapping it opens a new memo with the keyboard up; the camera button opens one straight into the photo picker. |
+| **Sticky** | 2x2, resizable | One memo, in its own paper colour. Which one is asked when it is added (`NoteConfigureActivity`) and changed again from the "..." on the widget; the default is "whatever was edited last". |
+| **Memos** | 4x2, resizable | The folders, then every memo, most recently edited first. Tapping a row opens that memo or folder; the header adds one. |
+
+Long-pressing the launcher icon offers the same two "new memo" actions as shortcuts
+(`res/xml/shortcuts.xml`), for people who would rather not give up a home-screen row.
+
+### Why the widgets read a copy
+
+**A widget is drawn by the launcher, in the launcher's process, while this app may not be
+running at all.** It cannot open the vault — that needs the master key — and it must not read
+`ymemo.db` either: `Vault::rebuild()` clears that cache and re-materializes it from the logs
+on every merge, so a widget reading it mid-rebuild would show an empty list.
+
+So the app **publishes a snapshot** (`lib/home_widgets.dart` -> `widgetPublish` on the
+`dev.ymemo/native` channel -> `WidgetStore`, a private SharedPreferences file) after every
+reload, which is after every change to a memo or folder. The widgets only ever read the last
+one published. Three consequences worth knowing:
+
+- It is a **second plaintext copy** of titles and body previews, next to the plaintext cache.
+  It is emptied whenever the vault closes, so a locked app leaves nothing on the home screen —
+  see SECURITY.md.
+- `updatePeriodMillis` is `0` on all three. Android's own period is capped at half an hour and
+  would wake the app to redraw something that has not changed; the app says when instead.
+  `WidgetRefreshReceiver` covers the two cases it cannot: the app being replaced (which
+  otherwise leaves every widget on the launcher's "updating" placeholder until it is next
+  opened) and the system language changing.
+- The widget picker's labels and everything a widget draws that is not memo text live in
+  `res/values/strings.xml` and `res/values-ko/`, **not** in `i18n/*.json` — Android reads them
+  without the app running, so they follow the *system* language rather than the app's setting.
+  It is the one place in the app where a string is written twice.
+
+In the other direction a tapped widget starts `MainActivity` with an action in its **extras**
+(a collection widget's rows share one `PendingIntent` template and can differ only by their
+fill-in intent's extras, so everything uses extras for consistency; launcher shortcuts cannot
+carry extras and arrive as actions of their own). Dart collects it with `takeWidgetAction` at
+startup, and through `widgetAction` while it is running. **A request that arrives while the
+vault is locked waits** in `pendingWidgetRequest` through the password screen rather than
+being dropped.
+
+### The launcher icon
+
+The same dog-eared note every other platform shows. Two files here:
+
+- `res/drawable/ic_launcher_foreground.xml` — the adaptive icon (API 26+), on the flat gold of
+  `ic_launcher_background`, plus `ic_launcher_monochrome.xml` for Android 13's themed icons.
+  This vector is the source of the geometry.
+- `res/mipmap-<density>/ic_launcher.png` — API 24-25, so the same phone cannot end up with two
+  different icons. **Generated**, together with the desktop's `packaging/assets`, by
+  `packaging/gen_icons.py` at the repo root; re-run it after changing the vector, and keep
+  `crates/ymemo-desktop/src/icon.rs` (which draws the same picture in code for the tray) in
+  step by hand.
+
+`tool/gen_widget_previews.py` draws the widget-picker previews for a similar reason:
+Android 12+ renders the real layout (`previewLayout`), everything older needs a PNG.
 
 Strings are not kept in Dart. `mobile_strings()` hands over one set from the repo root's
 `i18n/*.json`, so the screens and the core's error messages are always in the same language.
@@ -218,14 +331,34 @@ forward is uninstall-and-reinstall, which takes their memos with it. The keystor
 before the first release anyone is expected to update, and it has to be kept — losing it means
 no future build can ever update those installs.
 
-Create one (once, and back it up somewhere safe):
+**The key for this project was created on 2026-09-05** (RSA 2048, alias `ymemo`, valid
+until 2054), before the first release anyone could update from. It is **not** in the
+repository and never will be:
+
+```
+~/.ymemo-signing/ymemo.jks           the keystore
+~/.ymemo-signing/password.txt        its password, used for both the store and the key
+~/.ymemo-signing/ymemo.jks.base64    the same file, ready to paste as a CI secret
+```
+
+Its certificate is `SHA-256 42:8E:05:37:CA:8F:D0:2C:05:0D:F4:56:53:09:C1:CC:9F:CA:A3:B9:97:CA:FA:69:47:DE:47:8F:42:9B:04:BA`
+— `apksigner verify --print-certs <apk>` on any release build should print that digest, and a
+build that prints anything else was signed with the debug key.
+
+**Back all three up somewhere that is not this machine.** Losing them means no future build
+can ever update the installs that exist; there is no way to re-issue an Android signing key.
+Once they are safe, the password belongs in a password manager rather than in a file beside
+the key it opens.
+
+Making one, if it ever has to be done again for a different project:
 
 ```bash
 keytool -genkeypair -v -keystore ymemo.jks -keyalg RSA -keysize 2048 -validity 10000 \
-  -alias ymemo
+  -alias ymemo -dname "CN=Ymemo, O=Ymemo, C=KR"
 ```
 
-Local release builds read it from `apps/mobile/android/key.properties` (gitignored):
+Local release builds read it from `apps/mobile/android/key.properties` (gitignored), which is
+already written on this machine:
 
 ```properties
 storeFile=/absolute/path/to/ymemo.jks
@@ -234,10 +367,10 @@ keyAlias=ymemo
 keyPassword=…
 ```
 
-CI reads the same four values from repository secrets — `ANDROID_KEYSTORE_BASE64`
-(`base64 -w0 ymemo.jks`), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
-`ANDROID_KEY_PASSWORD` — and warns in the log when they are missing. Either way, a build
-without a keystore still succeeds with the debug key, which is fine for testing and never for
+CI reads the same four values from repository secrets — `ANDROID_KEYSTORE_BASE64` (the
+contents of `ymemo.jks.base64`), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` (`ymemo`),
+`ANDROID_KEY_PASSWORD` — and warns in the log when they are missing. Either way a build
+without a keystore still succeeds, falling back to the debug key: fine for testing, never for
 a release.
 
 Uninstalling on Android is clean by construction: the app runs no background service and
@@ -261,6 +394,18 @@ Two settings, deliberately separate:
   fixed at the moment the password was typed and never extended by use. Locking from the
   settings screen, shortening the period, or the expiry passing all delete it.
 
+- **Unlock with a fingerprint** (default off) is the third, and it is the same trade again
+  rather than a different one. Biometrics cannot derive a key, so the switch stores a second
+  copy of the data key — in the same keystore-backed storage, under `biometric_vault_key`,
+  **with no expiry** — and `local_auth` puts the device's own prompt in front of reading it.
+  It is turned on from inside the unlocked app, which is the only moment there is a key to
+  store, and the fingerprint is checked once there so a switch that cannot work never ends up
+  looking on. Turning it off deletes the copy, and so does resetting the vault.
+
+  The key deliberately survives locking, unlike the session: opening the lock again is the
+  entire point. A stored key that no longer opens the vault is dropped and the password takes
+  over, exactly as a diverged session key is.
+
 **While a stored key exists the master password buys nothing** — anyone who can unlock the
 phone can read the memos. That is the inherent cost of not typing it every time, the same one
 the desktop pays, and it is why 0 days stays the default and the setting says so on screen.
@@ -273,10 +418,11 @@ new device is supposed to get the memos.
 
 ## Remaining work
 
-- [ ] **Verify sync on real hardware.** The lock, settings and update paths have been run on
-      an emulator (see below), but the daemon and pairing have not: an emulator sits behind
-      NAT, so it cannot exchange LAN broadcasts with anything, and this build did not bundle
-      `libsyncthing.so`. Two real devices, or a device and the desktop, are what is left.
+- [ ] **Verify sync on real hardware.** Locking, biometric unlock, settings, updates and the
+      widgets have all been run on an emulator (see above), but the daemon and pairing have
+      not: an emulator sits behind NAT, so it cannot exchange LAN broadcasts with anything,
+      and a checkout without `libsyncthing.so` has no daemon to run. Two real devices, or a
+      device and the desktop, are what is left.
 - [ ] Show this device's pairing code as a QR too, so the desktop is not left with typing.
 - [ ] cargokit integration, so gradle and Xcode build the Rust automatically.
 - [ ] Idle auto-lock while the app is open (the desktop's `idle_lock_minutes`) — **decided

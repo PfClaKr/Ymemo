@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- updatePeriodMillis is 0 on all three widgets on purpose. Android's own period is
+     capped at 30 minutes and would wake the app for nothing: a widget here only changes
+     when the app changes a memo, and the app pushes the update itself (Widgets.refresh). -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_quick_description"
+    android:initialLayout="@layout/widget_quick_write"
+    android:minHeight="40dp"
+    android:minResizeWidth="180dp"
+    android:minWidth="250dp"
+    android:previewImage="@drawable/widget_preview_quick"
+    android:previewLayout="@layout/widget_quick_write"
+    android:resizeMode="horizontal"
+    android:targetCellHeight="1"
+    android:targetCellWidth="4"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

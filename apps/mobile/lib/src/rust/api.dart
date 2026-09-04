@@ -586,6 +586,14 @@ class FfiSettings {
   /// Close the vault when the app leaves the foreground.
   final bool lockOnBackground;
 
+  /// Android only: reopen the vault with the device's fingerprint instead of the password.
+  ///
+  /// The core has no part in this beyond remembering the answer — biometrics cannot derive
+  /// a key, so what the switch really turns on is **a copy of the data key kept in the
+  /// platform keystore**, released by the app once the fingerprint checks out. That is the
+  /// same trade `unlock_days` makes and the reason both default to off.
+  final bool biometricUnlock;
+
   /// Ask GitHub about newer releases. The app's only outbound request.
   final bool updateCheck;
 
@@ -596,6 +604,7 @@ class FfiSettings {
     required this.lang,
     required this.unlockDays,
     required this.lockOnBackground,
+    required this.biometricUnlock,
     required this.updateCheck,
     required this.lastUpdateCheck,
   });
@@ -608,6 +617,7 @@ class FfiSettings {
       lang.hashCode ^
       unlockDays.hashCode ^
       lockOnBackground.hashCode ^
+      biometricUnlock.hashCode ^
       updateCheck.hashCode ^
       lastUpdateCheck.hashCode;
 
@@ -619,6 +629,7 @@ class FfiSettings {
           lang == other.lang &&
           unlockDays == other.unlockDays &&
           lockOnBackground == other.lockOnBackground &&
+          biometricUnlock == other.biometricUnlock &&
           updateCheck == other.updateCheck &&
           lastUpdateCheck == other.lastUpdateCheck;
 }
@@ -676,6 +687,11 @@ class FfiStrings {
   final String language;
   final String languageAuto;
   final String lockNow;
+  final String biometricFailed;
+  final String biometricPrompt;
+  final String biometricUnavailable;
+  final String biometricUnlock;
+  final String biometricUnlockHint;
   final String lockOnBackground;
   final String lockOnBackgroundHint;
   final String lockSection;
@@ -789,6 +805,11 @@ class FfiStrings {
     required this.language,
     required this.languageAuto,
     required this.lockNow,
+    required this.biometricFailed,
+    required this.biometricPrompt,
+    required this.biometricUnavailable,
+    required this.biometricUnlock,
+    required this.biometricUnlockHint,
     required this.lockOnBackground,
     required this.lockOnBackgroundHint,
     required this.lockSection,
@@ -904,6 +925,11 @@ class FfiStrings {
       language.hashCode ^
       languageAuto.hashCode ^
       lockNow.hashCode ^
+      biometricFailed.hashCode ^
+      biometricPrompt.hashCode ^
+      biometricUnavailable.hashCode ^
+      biometricUnlock.hashCode ^
+      biometricUnlockHint.hashCode ^
       lockOnBackground.hashCode ^
       lockOnBackgroundHint.hashCode ^
       lockSection.hashCode ^
@@ -1021,6 +1047,11 @@ class FfiStrings {
           language == other.language &&
           languageAuto == other.languageAuto &&
           lockNow == other.lockNow &&
+          biometricFailed == other.biometricFailed &&
+          biometricPrompt == other.biometricPrompt &&
+          biometricUnavailable == other.biometricUnavailable &&
+          biometricUnlock == other.biometricUnlock &&
+          biometricUnlockHint == other.biometricUnlockHint &&
           lockOnBackground == other.lockOnBackground &&
           lockOnBackgroundHint == other.lockOnBackgroundHint &&
           lockSection == other.lockSection &&

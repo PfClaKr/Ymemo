@@ -15,4 +15,11 @@
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">?android:colorBackground</item>
     </style>
+    <!-- The "which memo?" screen the sticky widget opens. It is an ordinary Activity, not
+         Flutter, so it needs a theme of its own; DeviceDefault keeps it looking like the
+         launcher's own dialogs rather than like a second, differently-styled app. -->
+    <style name="WidgetConfigureTheme" parent="@android:style/Theme.DeviceDefault.Light">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
 </resources>

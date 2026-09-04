@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The sticky's title bar: the card's top corners only, so the bar meets the paper flush.
+     White for the same reason as widget_card. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FFFFFFFF" />
+    <corners android:topLeftRadius="20dp" android:topRightRadius="20dp" />
+</shape>
