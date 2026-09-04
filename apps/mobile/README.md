@@ -202,6 +202,19 @@ cargo build --release --target aarch64-apple-ios -p ymemo-ffi
 flutter build ios --no-codesign
 ```
 
+## Plugin constraints
+
+Two of the plugins reach into the platform side, so a change there can break them:
+
+- **`local_auth` needs a `FragmentActivity`.** Its prompt is a `BiometricPrompt`, which is a
+  fragment, so `MainActivity` extends `FlutterFragmentActivity` rather than the template's
+  `FlutterActivity`. Nothing else depends on the difference — but changing it back would break
+  the fingerprint unlock at runtime, not at compile time.
+- **`local_auth_android` is a direct dependency**, unusually for a platform package, and only
+  for `AndroidAuthMessages`: the prompt's own title and cancel button are the plugin's English
+  defaults otherwise, on a dialog whose other half comes from our catalog. It moves with
+  `local_auth`; bump the two together.
+
 ## Screens
 
 - **Lock** — open the vault with the master password, creating it if needed. Reachable from
@@ -223,8 +236,9 @@ flutter build ios --no-codesign
 - **Sync devices** — the 6-digit LAN code and a field for the other device's, this device's
   long pairing code (copyable), QR scanning, and the paired devices with their connection
   state.
-- **Settings** — language, locking, updates, and the running version. Everything applies as it
-  is changed; Rust sanitizes on write and the screen shows what was actually kept.
+- **Settings** — language, locking (including the fingerprint switch, which is where the key
+  it releases is stored), updates, and the running version. Everything applies as it is
+  changed; Rust sanitizes on write and the screen shows what was actually kept.
 
 ## Home-screen widgets
 
@@ -317,14 +331,34 @@ forward is uninstall-and-reinstall, which takes their memos with it. The keystor
 before the first release anyone is expected to update, and it has to be kept — losing it means
 no future build can ever update those installs.
 
-Create one (once, and back it up somewhere safe):
+**The key for this project was created on 2026-09-05** (RSA 2048, alias `ymemo`, valid
+until 2054), before the first release anyone could update from. It is **not** in the
+repository and never will be:
+
+```
+~/.ymemo-signing/ymemo.jks           the keystore
+~/.ymemo-signing/password.txt        its password, used for both the store and the key
+~/.ymemo-signing/ymemo.jks.base64    the same file, ready to paste as a CI secret
+```
+
+Its certificate is `SHA-256 42:8E:05:37:CA:8F:D0:2C:05:0D:F4:56:53:09:C1:CC:9F:CA:A3:B9:97:CA:FA:69:47:DE:47:8F:42:9B:04:BA`
+— `apksigner verify --print-certs <apk>` on any release build should print that digest, and a
+build that prints anything else was signed with the debug key.
+
+**Back all three up somewhere that is not this machine.** Losing them means no future build
+can ever update the installs that exist; there is no way to re-issue an Android signing key.
+Once they are safe, the password belongs in a password manager rather than in a file beside
+the key it opens.
+
+Making one, if it ever has to be done again for a different project:
 
 ```bash
 keytool -genkeypair -v -keystore ymemo.jks -keyalg RSA -keysize 2048 -validity 10000 \
-  -alias ymemo
+  -alias ymemo -dname "CN=Ymemo, O=Ymemo, C=KR"
 ```
 
-Local release builds read it from `apps/mobile/android/key.properties` (gitignored):
+Local release builds read it from `apps/mobile/android/key.properties` (gitignored), which is
+already written on this machine:
 
 ```properties
 storeFile=/absolute/path/to/ymemo.jks
@@ -333,10 +367,10 @@ keyAlias=ymemo
 keyPassword=…
 ```
 
-CI reads the same four values from repository secrets — `ANDROID_KEYSTORE_BASE64`
-(`base64 -w0 ymemo.jks`), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
-`ANDROID_KEY_PASSWORD` — and warns in the log when they are missing. Either way, a build
-without a keystore still succeeds with the debug key, which is fine for testing and never for
+CI reads the same four values from repository secrets — `ANDROID_KEYSTORE_BASE64` (the
+contents of `ymemo.jks.base64`), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` (`ymemo`),
+`ANDROID_KEY_PASSWORD` — and warns in the log when they are missing. Either way a build
+without a keystore still succeeds, falling back to the debug key: fine for testing, never for
 a release.
 
 Uninstalling on Android is clean by construction: the app runs no background service and
@@ -384,10 +418,11 @@ new device is supposed to get the memos.
 
 ## Remaining work
 
-- [ ] **Verify sync on real hardware.** The lock, settings and update paths have been run on
-      an emulator (see below), but the daemon and pairing have not: an emulator sits behind
-      NAT, so it cannot exchange LAN broadcasts with anything, and this build did not bundle
-      `libsyncthing.so`. Two real devices, or a device and the desktop, are what is left.
+- [ ] **Verify sync on real hardware.** Locking, biometric unlock, settings, updates and the
+      widgets have all been run on an emulator (see above), but the daemon and pairing have
+      not: an emulator sits behind NAT, so it cannot exchange LAN broadcasts with anything,
+      and a checkout without `libsyncthing.so` has no daemon to run. Two real devices, or a
+      device and the desktop, are what is left.
 - [ ] Show this device's pairing code as a QR too, so the desktop is not left with typing.
 - [ ] cargokit integration, so gradle and Xcode build the Rust automatically.
 - [ ] Idle auto-lock while the app is open (the desktop's `idle_lock_minutes`) — **decided

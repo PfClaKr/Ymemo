@@ -11,7 +11,9 @@ device is not.**
 1. Memo contents **never leave a device in the clear** — the sync transport (Syncthing nodes,
    relay servers, the network in between) only ever sees ciphertext.
 2. Without the master password, an entire copy of the vault directory reveals nothing.
-3. A locked desktop app shows no memos without the password.
+3. A locked app shows no memos without the password — on the phone that extends to the
+   app-switcher thumbnail and to the home-screen widgets, which are emptied as the vault
+   closes.
 
 ## Cryptography
 
@@ -45,7 +47,7 @@ after which a version of the app that predates wrapping can no longer open that 
 
 ## What lands on disk
 
-Relative to the app data directory (`~/.local/share/Ymemo` on Linux):
+Relative to the app data directory (`~/.local/share/ymemo` on Linux):
 
 | File | Synced | Contents |
 |---|---|---|
@@ -145,7 +147,8 @@ derives the same key from the synced salt plus the master password, which the us
   stops further syncing but does not recall what it already has.
 - **A password change does not re-key the vault.** It replaces the wrapper, not the data
   key, so a leaked *password* is closed off but a leaked *data key* — anything read out of
-  `session.json` or process memory — still opens everything. Only a fresh vault sheds that.
+  `session.json`, the Android keystore copies, or process memory — still opens everything.
+  Only a fresh vault sheds that.
 - **A recovery code is a second full credential.** Issuing one widens the attack surface by
   design; not issuing one means a forgotten password destroys the memos on that device.
 - **Wiping is local.** "Delete everything and start over" removes this device's vault after
