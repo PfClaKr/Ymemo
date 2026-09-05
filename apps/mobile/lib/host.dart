@@ -42,12 +42,36 @@ Future<void> widgetPublish(String snapshot) => _invoke<void>('widgetPublish', sn
 Future<Map<Object?, Object?>?> takeWidgetAction() =>
     _invoke<Map<Object?, Object?>>('takeWidgetAction');
 
+/// Whether the current network is one the user is not paying by the byte for. True when
+/// there is no network at all, and on a platform with no host side to ask.
+Future<bool> isUnmetered() async => await _invoke<bool>('isUnmetered') ?? true;
+
+/// Calls the host pushes at us, by method name.
+///
+/// One map rather than one `setMethodCallHandler` per feature: the channel keeps a **single**
+/// handler, so a second registration would silently unsubscribe the first — which is how a
+/// widget tap would quietly stop opening its memo the day something else started listening.
+final _incoming = <String, void Function(Object?)>{};
+bool _listening = false;
+
+void _listen(String method, void Function(Object?) handler) {
+  _incoming[method] = handler;
+  if (_listening) return;
+  _listening = true;
+  _channel.setMethodCallHandler((call) async {
+    _incoming[call.method]?.call(call.arguments);
+  });
+}
+
 /// Called when a widget is tapped while the app is already running, which arrives as
 /// `onNewIntent` rather than as a launch.
 void onWidgetAction(void Function(Map<Object?, Object?>) handler) {
-  _channel.setMethodCallHandler((call) async {
-    if (call.method == 'widgetAction' && call.arguments is Map) {
-      handler(call.arguments as Map<Object?, Object?>);
-    }
+  _listen('widgetAction', (args) {
+    if (args is Map) handler(args);
   });
+}
+
+/// Called when the network changes underfoot, with the new answer to [isUnmetered].
+void onNetworkChanged(void Function(bool unmetered) handler) {
+  _listen('networkChanged', (args) => handler(args as bool? ?? true));
 }

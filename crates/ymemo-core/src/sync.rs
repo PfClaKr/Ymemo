@@ -186,7 +186,36 @@ impl Syncthing {
             }
             std::thread::sleep(Duration::from_millis(200));
         }
+
+        // Best effort: a daemon that will not take this still syncs, and refusing to start
+        // over a privacy default we merely prefer would be the wrong trade.
+        if let Err(e) = st.disable_crash_reporting() {
+            eprintln!("could not turn syncthing's crash reporting off: {e}");
+        }
         Ok(st)
+    }
+
+    /// Turns off Syncthing's own crash reporting.
+    ///
+    /// **Not a setting, a correction.** Syncthing enables it by default and posts crashes to
+    /// `crash.syncthing.net`, which is a third party this app never told anyone about — and
+    /// an app whose whole claim is that nothing of yours leaves your devices cannot ship a
+    /// component that quietly phones home. Nobody would turn this back on, so it is not
+    /// offered as a choice.
+    ///
+    /// It runs at the end of [`Syncthing::spawn`], which leaves a window: a crash during
+    /// those first few seconds is still reportable. Closing that would mean writing
+    /// `config.xml` before the daemon's first start, and the daemon is what creates it.
+    fn disable_crash_reporting(&self) -> Result<()> {
+        let url = format!("{}/rest/config/options", self.base_url);
+        let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
+        let mut options: serde_json::Value = res.body_mut().read_json()?;
+        if options["crashReportingEnabled"] == serde_json::json!(false) {
+            return Ok(()); // already off, and a PUT here restarts more than it needs to
+        }
+        options["crashReportingEnabled"] = serde_json::json!(false);
+        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&options)?;
+        Ok(())
     }
 
     fn ping(&self) -> Result<()> {
@@ -257,6 +286,24 @@ impl Syncthing {
         folder["fsWatcherEnabled"] = serde_json::json!(true);
         folder["fsWatcherDelayS"] = serde_json::json!(watch_delay_s);
         folder["rescanIntervalS"] = serde_json::json!(rescan_s);
+        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
+        Ok(())
+    }
+
+    /// Pauses or resumes the vault folder.
+    ///
+    /// Pausing stops file transfer while leaving the daemon and its device connections up, so
+    /// pairing still works and syncing resumes the instant it is lifted. That is the right
+    /// granularity for "only on Wi-Fi": stopping the daemon instead would drop the
+    /// connections and make coming back slow, for a saving of a few keepalive bytes.
+    pub fn set_folder_paused(&self, folder_id: &str, paused: bool) -> Result<()> {
+        let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
+        let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
+        let mut folder: serde_json::Value = res.body_mut().read_json()?;
+        if folder["paused"] == serde_json::json!(paused) {
+            return Ok(()); // a PUT restarts the folder; this is called on every network change
+        }
+        folder["paused"] = serde_json::json!(paused);
         ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
         Ok(())
     }

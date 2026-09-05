@@ -168,6 +168,9 @@ pub struct FfiStrings {
     pub rescan: String,
     pub rescan_hint: String,
     pub seconds_unit: String,
+    pub wifi_only: String,
+    pub wifi_only_hint: String,
+    pub paused_metered: String,
     pub biometric_failed: String,
     pub biometric_prompt: String,
     pub biometric_unavailable: String,
@@ -303,6 +306,9 @@ pub fn mobile_strings() -> FfiStrings {
         rescan: t!("mobile.rescan"),
         rescan_hint: t!("mobile.rescan_hint"),
         seconds_unit: t!("mobile.seconds_unit"),
+        wifi_only: t!("mobile.wifi_only"),
+        wifi_only_hint: t!("mobile.wifi_only_hint"),
+        paused_metered: t!("mobile.paused_metered"),
         biometric_failed: t!("mobile.biometric_failed"),
         biometric_prompt: t!("mobile.biometric_prompt"),
         biometric_unavailable: t!("mobile.biometric_unavailable"),
@@ -851,6 +857,17 @@ pub fn sync_set_timing(watch_delay_seconds: i32, rescan_seconds: i32) -> Result<
     st.set_folder_timing(VAULT_FOLDER_ID, watch_delay_seconds, rescan_seconds)
 }
 
+/// Holds or releases file transfer, for "sync only on Wi-Fi".
+///
+/// The daemon keeps running either way: paused only stops the vault folder, so a device can
+/// still be paired over mobile data and starts catching up the moment the phone is back on
+/// an unmetered network.
+pub fn sync_set_paused(paused: bool) -> Result<()> {
+    let guard = sync_lock()?;
+    let Some(st) = guard.as_ref() else { return Ok(()) };
+    st.set_folder_paused(VAULT_FOLDER_ID, paused)
+}
+
 /// Stops the daemon. Safe to call when it is not running.
 pub fn sync_stop() -> Result<()> {
     // Dropping it shuts the daemon down over REST, then kills it if it will not go.
@@ -1229,6 +1246,11 @@ pub struct FfiSettings {
     pub watch_delay_seconds: i32,
     /// How often Syncthing sweeps the vault for changes its watcher missed, in seconds.
     pub rescan_seconds: i32,
+    /// Android only: hold syncing while the phone is on a metered network.
+    ///
+    /// Off by default, so an update never silently stops syncing for someone who was happy
+    /// with it. Memos are tiny; what this really guards is photos.
+    pub wifi_only_sync: bool,
     /// Android only: reopen the vault with the device's fingerprint instead of the password.
     ///
     /// The core has no part in this beyond remembering the answer — biometrics cannot derive
@@ -1252,6 +1274,7 @@ impl Default for FfiSettings {
             // Syncthing's own defaults, so an existing install behaves as it did before.
             watch_delay_seconds: 10,
             rescan_seconds: 60,
+            wifi_only_sync: false,
             biometric_unlock: false,
             update_check: true,
             last_update_check: 0,

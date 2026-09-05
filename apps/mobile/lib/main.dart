@@ -58,6 +58,7 @@ Future<void> main() async {
       watchDelaySeconds: settings.value.watchDelaySeconds,
       rescanSeconds: settings.value.rescanSeconds,
     ),
+    readWifiOnly: () => settings.value.wifiOnlySync,
   );
 
   runApp(YmemoApp(
@@ -1113,6 +1114,7 @@ class _MemoListScreenState extends State<MemoListScreen> {
                 builder: (_) => SettingsScreen(
                   strings: widget.strings,
                   settings: widget.settings,
+                  sync: widget.sync,
                   vaultDir: widget.sync.paths.vaultDir,
                   onLock: widget.onLock,
                   onLanguageChanged: widget.onLanguageChanged,
@@ -2115,6 +2117,17 @@ class _SyncScreenState extends State<SyncScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // A folder held back by "Wi-Fi only" looks exactly like sync being broken, so the
+        // reason is said here rather than left to be guessed at.
+        if (sync.pausedForMetered)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(children: [
+              const Icon(Icons.pause_circle_outline, size: 18),
+              const SizedBox(width: 8),
+              Expanded(child: Text(widget.strings.pausedMetered)),
+            ]),
+          ),
         Text(widget.strings.myCode, style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
         SelectableText(code, style: const TextStyle(fontFamily: 'monospace')),
@@ -2503,6 +2516,7 @@ class SettingsScreen extends StatefulWidget {
     super.key,
     required this.strings,
     required this.settings,
+    required this.sync,
     required this.vaultDir,
     required this.onLock,
     required this.onLanguageChanged,
@@ -2510,6 +2524,9 @@ class SettingsScreen extends StatefulWidget {
 
   final FfiStrings strings;
   final SettingsStore settings;
+
+  /// Only for the Wi-Fi switch: flipping it has to reach the running daemon now.
+  final SyncController sync;
 
   /// Passed through to the security screen, which asks `vault.json` itself whether a
   /// recovery code exists.
@@ -2552,6 +2569,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     int? mergeSeconds,
     int? watchDelaySeconds,
     int? rescanSeconds,
+    bool? wifiOnlySync,
   }) async {
     await widget.settings.save(FfiSettings(
       lang: lang ?? _s.lang,
@@ -2562,8 +2580,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       mergeSeconds: mergeSeconds ?? _s.mergeSeconds,
       watchDelaySeconds: watchDelaySeconds ?? _s.watchDelaySeconds,
       rescanSeconds: rescanSeconds ?? _s.rescanSeconds,
+      wifiOnlySync: wifiOnlySync ?? _s.wifiOnlySync,
       lastUpdateCheck: _s.lastUpdateCheck,
     ));
+    // Flipping the switch has to take effect now, not at the next daemon start.
+    if (wifiOnlySync != null) {
+      await widget.sync.applyNetworkPolicy();
+    }
     // The watch delay is Syncthing's, not ours, so saving has to push it across. It is a
     // no-op while the daemon is down; sync.dart applies it again when it comes up.
     if (watchDelaySeconds != null || rescanSeconds != null) {
@@ -2643,7 +2666,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// snapping to something the user never chose.
   Widget _seconds(String label, String hint, List<int> choices, int value,
       void Function(int) onPick) {
-    final items = choices.contains(value) ? choices : [value, ...choices]..sort();
+    // A growable copy, always: `..sort()` binds to the whole conditional, so returning the
+    // const list on the common path and sorting it threw "cannot modify an unmodifiable list".
+    final items = [...choices];
+    if (!items.contains(value)) {
+      items.add(value);
+      items.sort();
+    }
     return ListTile(
       title: Text(label),
       subtitle: Text(hint),
@@ -2785,6 +2814,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               (v) => _save(mergeSeconds: v)),
           _seconds(s.rescan, s.rescanHint, _rescanChoices, _s.rescanSeconds,
               (v) => _save(rescanSeconds: v)),
+          SwitchListTile(
+            value: _s.wifiOnlySync,
+            onChanged: (v) => _save(wifiOnlySync: v),
+            title: Text(s.wifiOnly),
+            subtitle: Text(s.wifiOnlyHint),
+          ),
 
           const Divider(),
           _header(s.updateSection),

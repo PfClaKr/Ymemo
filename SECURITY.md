@@ -91,6 +91,13 @@ Three rows matter most:
 
 Syncthing is a **courier for ciphertext** and is not trusted.
 
+It does talk to servers that are not yours, and the app changes one of those defaults: its
+crash reporting is **turned off** at every start, because posting crashes to a third party is
+not something an app with this promise should do quietly. What remains on is Syncthing's own
+discovery (your device id is announced to its discovery servers so devices on different
+networks can find each other) and its relays. Neither ever sees a memo — everything they carry
+is encrypted underneath — but both are contact with a machine you do not own.
+
 - Transfers are protected by Syncthing's TLS, with our own record encryption underneath, so
   even a relay sees only ciphertext.
 - Its REST API binds to localhost and is protected by an API key. The GUI is never used.

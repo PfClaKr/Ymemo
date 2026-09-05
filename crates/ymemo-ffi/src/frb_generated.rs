@@ -37,7 +37,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 882587836;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -311095130;
 
 // Section: executor
 
@@ -1521,6 +1521,41 @@ fn wire__crate__api__sync_running_impl(
         },
     )
 }
+fn wire__crate__api__sync_set_paused_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "sync_set_paused",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_paused = <bool>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::sync_set_paused(api_paused)?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__sync_set_timing_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2304,6 +2339,7 @@ impl SseDecode for crate::api::FfiSettings {
         let mut var_mergeSeconds = <i32>::sse_decode(deserializer);
         let mut var_watchDelaySeconds = <i32>::sse_decode(deserializer);
         let mut var_rescanSeconds = <i32>::sse_decode(deserializer);
+        let mut var_wifiOnlySync = <bool>::sse_decode(deserializer);
         let mut var_biometricUnlock = <bool>::sse_decode(deserializer);
         let mut var_updateCheck = <bool>::sse_decode(deserializer);
         let mut var_lastUpdateCheck = <i64>::sse_decode(deserializer);
@@ -2314,6 +2350,7 @@ impl SseDecode for crate::api::FfiSettings {
             merge_seconds: var_mergeSeconds,
             watch_delay_seconds: var_watchDelaySeconds,
             rescan_seconds: var_rescanSeconds,
+            wifi_only_sync: var_wifiOnlySync,
             biometric_unlock: var_biometricUnlock,
             update_check: var_updateCheck,
             last_update_check: var_lastUpdateCheck,
@@ -2365,6 +2402,9 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_rescan = <String>::sse_decode(deserializer);
         let mut var_rescanHint = <String>::sse_decode(deserializer);
         let mut var_secondsUnit = <String>::sse_decode(deserializer);
+        let mut var_wifiOnly = <String>::sse_decode(deserializer);
+        let mut var_wifiOnlyHint = <String>::sse_decode(deserializer);
+        let mut var_pausedMetered = <String>::sse_decode(deserializer);
         let mut var_biometricFailed = <String>::sse_decode(deserializer);
         let mut var_biometricPrompt = <String>::sse_decode(deserializer);
         let mut var_biometricUnavailable = <String>::sse_decode(deserializer);
@@ -2491,6 +2531,9 @@ impl SseDecode for crate::api::FfiStrings {
             rescan: var_rescan,
             rescan_hint: var_rescanHint,
             seconds_unit: var_secondsUnit,
+            wifi_only: var_wifiOnly,
+            wifi_only_hint: var_wifiOnlyHint,
+            paused_metered: var_pausedMetered,
             biometric_failed: var_biometricFailed,
             biometric_prompt: var_biometricPrompt,
             biometric_unavailable: var_biometricUnavailable,
@@ -2783,29 +2826,30 @@ fn pde_ffi_dispatcher_primary_impl(
         40 => wire__crate__api__sync_rebuild_impl(port, ptr, rust_vec_len, data_len),
         41 => wire__crate__api__sync_reject_device_impl(port, ptr, rust_vec_len, data_len),
         42 => wire__crate__api__sync_running_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__sync_set_timing_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__sync_start_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__api__sync_stop_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__api__sync_unpair_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__sync_verification_code_impl(port, ptr, rust_vec_len, data_len),
-        48 => wire__crate__api__update_check_impl(port, ptr, rust_vec_len, data_len),
-        49 => wire__crate__api__vault_change_password_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__api__vault_close_impl(port, ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__vault_exists_impl(port, ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__vault_has_recovery_code_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__vault_issue_recovery_code_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__vault_key_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__vault_name_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__vault_open_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__vault_open_with_key_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__vault_reset_impl(port, ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__vault_reset_password_with_recovery_impl(
+        43 => wire__crate__api__sync_set_paused_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__sync_set_timing_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__sync_start_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__sync_stop_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__sync_unpair_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__api__sync_verification_code_impl(port, ptr, rust_vec_len, data_len),
+        49 => wire__crate__api__update_check_impl(port, ptr, rust_vec_len, data_len),
+        50 => wire__crate__api__vault_change_password_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__vault_close_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__vault_exists_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__vault_has_recovery_code_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__vault_issue_recovery_code_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__vault_key_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__vault_name_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__vault_open_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__vault_open_with_key_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__vault_reset_impl(port, ptr, rust_vec_len, data_len),
+        60 => wire__crate__api__vault_reset_password_with_recovery_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        60 => wire__crate__api__vault_set_name_impl(port, ptr, rust_vec_len, data_len),
+        61 => wire__crate__api__vault_set_name_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -2937,6 +2981,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiSettings {
             self.merge_seconds.into_into_dart().into_dart(),
             self.watch_delay_seconds.into_into_dart().into_dart(),
             self.rescan_seconds.into_into_dart().into_dart(),
+            self.wifi_only_sync.into_into_dart().into_dart(),
             self.biometric_unlock.into_into_dart().into_dart(),
             self.update_check.into_into_dart().into_dart(),
             self.last_update_check.into_into_dart().into_dart(),
@@ -3000,6 +3045,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.rescan.into_into_dart().into_dart(),
             self.rescan_hint.into_into_dart().into_dart(),
             self.seconds_unit.into_into_dart().into_dart(),
+            self.wifi_only.into_into_dart().into_dart(),
+            self.wifi_only_hint.into_into_dart().into_dart(),
+            self.paused_metered.into_into_dart().into_dart(),
             self.biometric_failed.into_into_dart().into_dart(),
             self.biometric_prompt.into_into_dart().into_dart(),
             self.biometric_unavailable.into_into_dart().into_dart(),
@@ -3200,6 +3248,7 @@ impl SseEncode for crate::api::FfiSettings {
         <i32>::sse_encode(self.merge_seconds, serializer);
         <i32>::sse_encode(self.watch_delay_seconds, serializer);
         <i32>::sse_encode(self.rescan_seconds, serializer);
+        <bool>::sse_encode(self.wifi_only_sync, serializer);
         <bool>::sse_encode(self.biometric_unlock, serializer);
         <bool>::sse_encode(self.update_check, serializer);
         <i64>::sse_encode(self.last_update_check, serializer);
@@ -3245,6 +3294,9 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.rescan, serializer);
         <String>::sse_encode(self.rescan_hint, serializer);
         <String>::sse_encode(self.seconds_unit, serializer);
+        <String>::sse_encode(self.wifi_only, serializer);
+        <String>::sse_encode(self.wifi_only_hint, serializer);
+        <String>::sse_encode(self.paused_metered, serializer);
         <String>::sse_encode(self.biometric_failed, serializer);
         <String>::sse_encode(self.biometric_prompt, serializer);
         <String>::sse_encode(self.biometric_unavailable, serializer);

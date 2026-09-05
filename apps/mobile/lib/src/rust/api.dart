@@ -253,6 +253,14 @@ Future<void> syncSetTiming(
     RustLib.instance.api.crateApiSyncSetTiming(
         watchDelaySeconds: watchDelaySeconds, rescanSeconds: rescanSeconds);
 
+/// Holds or releases file transfer, for "sync only on Wi-Fi".
+///
+/// The daemon keeps running either way: paused only stops the vault folder, so a device can
+/// still be paired over mobile data and starts catching up the moment the phone is back on
+/// an unmetered network.
+Future<void> syncSetPaused({required bool paused}) =>
+    RustLib.instance.api.crateApiSyncSetPaused(paused: paused);
+
 /// Stops the daemon. Safe to call when it is not running.
 Future<void> syncStop() => RustLib.instance.api.crateApiSyncStop();
 
@@ -612,6 +620,12 @@ class FfiSettings {
   /// How often Syncthing sweeps the vault for changes its watcher missed, in seconds.
   final int rescanSeconds;
 
+  /// Android only: hold syncing while the phone is on a metered network.
+  ///
+  /// Off by default, so an update never silently stops syncing for someone who was happy
+  /// with it. Memos are tiny; what this really guards is photos.
+  final bool wifiOnlySync;
+
   /// Android only: reopen the vault with the device's fingerprint instead of the password.
   ///
   /// The core has no part in this beyond remembering the answer — biometrics cannot derive
@@ -633,6 +647,7 @@ class FfiSettings {
     required this.mergeSeconds,
     required this.watchDelaySeconds,
     required this.rescanSeconds,
+    required this.wifiOnlySync,
     required this.biometricUnlock,
     required this.updateCheck,
     required this.lastUpdateCheck,
@@ -649,6 +664,7 @@ class FfiSettings {
       mergeSeconds.hashCode ^
       watchDelaySeconds.hashCode ^
       rescanSeconds.hashCode ^
+      wifiOnlySync.hashCode ^
       biometricUnlock.hashCode ^
       updateCheck.hashCode ^
       lastUpdateCheck.hashCode;
@@ -664,6 +680,7 @@ class FfiSettings {
           mergeSeconds == other.mergeSeconds &&
           watchDelaySeconds == other.watchDelaySeconds &&
           rescanSeconds == other.rescanSeconds &&
+          wifiOnlySync == other.wifiOnlySync &&
           biometricUnlock == other.biometricUnlock &&
           updateCheck == other.updateCheck &&
           lastUpdateCheck == other.lastUpdateCheck;
@@ -731,6 +748,9 @@ class FfiStrings {
   final String rescan;
   final String rescanHint;
   final String secondsUnit;
+  final String wifiOnly;
+  final String wifiOnlyHint;
+  final String pausedMetered;
   final String biometricFailed;
   final String biometricPrompt;
   final String biometricUnavailable;
@@ -858,6 +878,9 @@ class FfiStrings {
     required this.rescan,
     required this.rescanHint,
     required this.secondsUnit,
+    required this.wifiOnly,
+    required this.wifiOnlyHint,
+    required this.pausedMetered,
     required this.biometricFailed,
     required this.biometricPrompt,
     required this.biometricUnavailable,
@@ -987,6 +1010,9 @@ class FfiStrings {
       rescan.hashCode ^
       rescanHint.hashCode ^
       secondsUnit.hashCode ^
+      wifiOnly.hashCode ^
+      wifiOnlyHint.hashCode ^
+      pausedMetered.hashCode ^
       biometricFailed.hashCode ^
       biometricPrompt.hashCode ^
       biometricUnavailable.hashCode ^
@@ -1118,6 +1144,9 @@ class FfiStrings {
           rescan == other.rescan &&
           rescanHint == other.rescanHint &&
           secondsUnit == other.secondsUnit &&
+          wifiOnly == other.wifiOnly &&
+          wifiOnlyHint == other.wifiOnlyHint &&
+          pausedMetered == other.pausedMetered &&
           biometricFailed == other.biometricFailed &&
           biometricPrompt == other.biometricPrompt &&
           biometricUnavailable == other.biometricUnavailable &&

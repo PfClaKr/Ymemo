@@ -39,7 +39,7 @@ class SyncPaths {
 /// A [ChangeNotifier] rather than anything larger: three screens read it and nothing else in
 /// the app has state worth a framework.
 class SyncController extends ChangeNotifier with WidgetsBindingObserver {
-  SyncController(this.paths, {this.readTiming});
+  SyncController(this.paths, {this.readTiming, this.readWifiOnly});
 
   /// Where the sync timings come from, read at the moment the daemon comes up.
   ///
@@ -47,6 +47,10 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
   /// and the daemon restarts every time the app returns to the foreground; reading them at
   /// the moment of use is what keeps the two from drifting apart.
   final ({int watchDelaySeconds, int rescanSeconds}) Function()? readTiming;
+
+  /// Whether the user asked to hold syncing on metered networks. Read on demand for the same
+  /// reason as [readTiming]: the setting outlives any one daemon.
+  final bool Function()? readWifiOnly;
 
   /// How long a join broadcasts before giving up. Each attempt costs both sides an Argon2
   /// derivation, so this is a handful of retries, not a busy loop.
@@ -67,6 +71,12 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
   List<ffi.FfiPendingDevice> _pending = const [];
   Timer? _pendingTimer;
 
+  /// True while transfer is held back because this network is metered and the user asked for
+  /// Wi-Fi only. Kept as state because the *reason* has to reach the sync screen: a paused
+  /// folder with no explanation is indistinguishable from sync being broken.
+  bool _pausedForMetered = false;
+  bool get pausedForMetered => _pausedForMetered;
+
   /// Devices asking to be let in, oldest first. Polled here rather than by the screen so the
   /// app-bar button can badge itself without the pairing screen being open.
   List<ffi.FfiPendingDevice> get pending => _pending;
@@ -86,6 +96,9 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
   /// Begins observing the lifecycle and starts the daemon. Call once, at app start.
   Future<void> init() async {
     WidgetsBinding.instance.addObserver(this);
+    // Walking out of the house is exactly when this matters, so it is a subscription rather
+    // than something checked on the next start.
+    host.onNetworkChanged((_) => applyNetworkPolicy());
     _binaryPath = await _findBinary();
     if (_binaryPath == null) {
       notifyListeners(); // available == false; the UI explains it
@@ -134,6 +147,7 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
       // Syncthing's own config, so it has to be pushed after every start — the daemon is a
       // fresh process each time and only remembers what its config.xml already said.
       await _applyTiming();
+      await applyNetworkPolicy();
       _startPendingPoll();
     } catch (e) {
       _code = null;
@@ -156,6 +170,26 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
       );
     } catch (e) {
       debugPrint('could not apply the sync timing: $e');
+    }
+  }
+
+  /// Holds or releases transfer according to the setting and the network underneath.
+  ///
+  /// Called when the daemon starts, when the network changes and when the switch is flipped —
+  /// all three change the answer, and none of them is more authoritative than the others, so
+  /// each just recomputes it.
+  Future<void> applyNetworkPolicy() async {
+    final wifiOnly = readWifiOnly?.call() ?? false;
+    final shouldPause = wifiOnly && !await host.isUnmetered();
+    try {
+      await ffi.syncSetPaused(paused: shouldPause);
+    } catch (e) {
+      debugPrint('could not apply the network policy: $e');
+      return;
+    }
+    if (shouldPause != _pausedForMetered) {
+      _pausedForMetered = shouldPause;
+      notifyListeners();
     }
   }
 

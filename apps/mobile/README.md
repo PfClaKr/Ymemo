@@ -241,11 +241,21 @@ Two of the plugins reach into the platform side, so a change there can break the
   the three timings that decide how fast a change appears elsewhere. Everything applies as it
   is changed; Rust sanitizes on write and the screen shows what was actually kept.
 
-  The three belong together because they add up: the sending device's watch delay (Syncthing
-  waiting before it hands the file over) plus the receiving one's pull interval. With the
-  defaults that is about twenty seconds. The watch delay is Syncthing's own folder setting,
-  so `sync_set_timing` pushes it over REST after every daemon start and on every save —
-  `sync_ensure_folder` cannot, because it returns early on a folder that already exists.
+  The three timings belong together because they add up: the sending device's watch delay
+  (Syncthing waiting before it hands the file over) plus the receiving one's pull interval.
+  With the defaults that is about twenty seconds. The watch delay is Syncthing's own folder
+  setting, so `sync_set_timing` pushes it over REST after every daemon start and on every save
+  — `sync_ensure_folder` cannot, because it returns early on a folder that already exists.
+
+  **Sync only on Wi-Fi** is in the same section and works differently: it pauses the *folder*
+  (`sync_set_paused`) rather than stopping the daemon, so devices stay connected, pairing
+  still works on mobile data, and the phone catches up the moment it is back on an unmetered
+  network. The condition is Android's `NET_CAPABILITY_NOT_METERED`, not literally Wi-Fi — a
+  tethered hotspot is Wi-Fi and charges by the byte — and `MainActivity` pushes
+  `networkChanged` from a `NetworkCallback` so it reacts to walking out of the house rather
+  than waiting for the next start. It is off by default: an update must never quietly stop
+  syncing for someone who was happy with it. Because a paused folder is indistinguishable
+  from broken sync, the reason is shown on the **Sync devices** screen.
 
 ## Home-screen widgets
 

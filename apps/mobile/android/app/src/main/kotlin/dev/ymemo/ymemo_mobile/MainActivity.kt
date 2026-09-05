@@ -2,6 +2,9 @@ package dev.ymemo.ymemo_mobile
 
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Bundle
@@ -39,6 +42,13 @@ import java.io.File
  * reason: `local_auth` puts up a `BiometricPrompt`, which is a fragment and needs a
  * `FragmentActivity` to attach to. Nothing else here depends on the difference.
  *
+ * **Whether this network costs money.** "Sync only on Wi-Fi" needs to know, and the answer
+ * changes while the app runs — walking out of the house is exactly the moment it matters. So
+ * there is both a question (`isUnmetered`) and a subscription: a `NetworkCallback` pushes
+ * `networkChanged` whenever the answer flips. It is asked as *unmetered*, not as *Wi-Fi*,
+ * because that is the thing that actually costs the user: a tethered hotspot is Wi-Fi and
+ * charges by the byte, and an unlimited plan is mobile data and does not.
+ *
  * **The home-screen widgets.** They are drawn by the launcher while the app is closed, so
  * they read a snapshot the app publishes rather than the vault (see `widget/Snapshot.kt`);
  * `widgetPublish` is Dart handing over a new one. In the other direction a tapped widget
@@ -49,6 +59,7 @@ class MainActivity : FlutterFragmentActivity() {
     private val channelName = "dev.ymemo/native"
     private var multicastLock: WifiManager.MulticastLock? = null
     private var channel: MethodChannel? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     /**
      * What a widget or launcher shortcut asked for, until Dart comes to collect it.
@@ -69,6 +80,7 @@ class MainActivity : FlutterFragmentActivity() {
                         setSecure(call.arguments as? Boolean ?: false)
                         result.success(null)
                     }
+                    "isUnmetered" -> result.success(isUnmetered())
                     "acquireMulticastLock" -> result.success(acquireMulticastLock())
                     "releaseMulticastLock" -> {
                         releaseMulticastLock()
@@ -91,6 +103,7 @@ class MainActivity : FlutterFragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         pendingAction = readAction(intent)
+        watchNetwork()
     }
 
     /**
@@ -112,8 +125,57 @@ class MainActivity : FlutterFragmentActivity() {
     override fun onDestroy() {
         // A lock outliving the activity would hold the radio awake for nothing.
         releaseMulticastLock()
+        networkCallback?.let {
+            try {
+                connectivity()?.unregisterNetworkCallback(it)
+            } catch (e: Exception) {
+                // Already gone; nothing to undo.
+            }
+        }
+        networkCallback = null
         channel = null
         super.onDestroy()
+    }
+
+    private fun connectivity(): ConnectivityManager? =
+        applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+
+    /**
+     * Whether the current network is one the user is not paying by the byte for.
+     *
+     * True is also the answer when there is no network at all: nothing is being sent either
+     * way, and returning false would leave syncing switched off after the phone comes back.
+     */
+    private fun isUnmetered(): Boolean {
+        val cm = connectivity() ?: return true
+        return try {
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return true
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        } catch (e: Exception) {
+            true
+        }
+    }
+
+    /** Tells Dart when the answer to [isUnmetered] changes, so it can hold or release sync. */
+    private fun watchNetwork() {
+        val cm = connectivity() ?: return
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            private fun push() {
+                val unmetered = isUnmetered()
+                // The callback is not on the UI thread and a MethodChannel must be.
+                runOnUiThread { channel?.invokeMethod("networkChanged", unmetered) }
+            }
+            override fun onAvailable(network: Network) = push()
+            override fun onLost(network: Network) = push()
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = push()
+        }
+        try {
+            cm.registerDefaultNetworkCallback(cb)
+            networkCallback = cb
+        } catch (e: Exception) {
+            // Without the subscription the setting still works, it just waits for the next
+            // time Dart asks rather than reacting the moment the network changes.
+        }
     }
 
     /**

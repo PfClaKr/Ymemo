@@ -135,6 +135,7 @@ class SettingsStore {
       mergeSeconds: s.mergeSeconds,
       watchDelaySeconds: s.watchDelaySeconds,
       rescanSeconds: s.rescanSeconds,
+      wifiOnlySync: s.wifiOnlySync,
       lastUpdateCheck: DateTime.now().millisecondsSinceEpoch,
     ));
   }
