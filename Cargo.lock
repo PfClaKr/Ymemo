@@ -6987,7 +6987,7 @@ dependencies = [
 
 [[package]]
 name = "ymemo-core"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "argon2",
@@ -7007,7 +7007,7 @@ dependencies = [
 
 [[package]]
 name = "ymemo-desktop"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -7031,7 +7031,7 @@ dependencies = [
 
 [[package]]
 name = "ymemo-ffi"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "flutter_rust_bridge",
@@ -7043,7 +7043,7 @@ dependencies = [
 
 [[package]]
 name = "ymemo-i18n"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "serde_json",
 ]
