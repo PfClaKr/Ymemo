@@ -19,6 +19,7 @@ ureq.workspace = true
 argon2.workspace = true
 rand.workspace = true
 sha2.workspace = true
+chrono.workspace = true
 
 # Tie the syncthing child to our own lifetime (see sync.rs).
 [target.'cfg(unix)'.dependencies]

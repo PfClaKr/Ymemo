@@ -65,6 +65,7 @@ export component SettingsWindow inherits Window {
     in-out property <int> merge-seconds: 15;
     in-out property <int> watch-delay-seconds: 10;
     in-out property <int> rescan-seconds: 60;
+    in-out property <int> keep-versions-days: 30;
     // One-line status, e.g. the result of a save.
     in property <string> status;
     // Whether the vault is unlocked; locking again is meaningless when it is not.
@@ -89,6 +90,7 @@ export component SettingsWindow inherits Window {
     // they are the only things on this screen that are not device-local settings.
     callback open-security();
     callback check-update();
+    callback open-log();
     callback open-update();
 
     VerticalLayout {
@@ -244,6 +246,29 @@ export component SettingsWindow inherits Window {
                         minimum: 60;
                         maximum: 3600;
                         value <=> root.rescan-seconds;
+                    }
+                }
+                SettingRow {
+                    label: Strings.ui_settings_keep_versions;
+                    hint: Strings.ui_settings_keep_versions_hint;
+                    SpinBox {
+                        minimum: 0;
+                        maximum: 365;
+                        value <=> root.keep-versions-days;
+                    }
+                }
+
+                // Last in Advanced because it is the row someone is sent to rather than one
+                // they go looking for: a button, not a value.
+                SettingRow {
+                    label: Strings.ui_settings_log;
+                    hint: Strings.ui_settings_log_hint;
+                    HorizontalLayout {
+                        Button {
+                            text: Strings.ui_settings_log_open;
+                            clicked => { root.open-log(); }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
                     }
                 }
 

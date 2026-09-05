@@ -46,7 +46,8 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
   /// A callback rather than two numbers, because the settings can change while the app runs
   /// and the daemon restarts every time the app returns to the foreground; reading them at
   /// the moment of use is what keeps the two from drifting apart.
-  final ({int watchDelaySeconds, int rescanSeconds}) Function()? readTiming;
+  final ({int watchDelaySeconds, int rescanSeconds, int keepVersionsDays}) Function()?
+      readTiming;
 
   /// Whether the user asked to hold syncing on metered networks. Read on demand for the same
   /// reason as [readTiming]: the setting outlives any one daemon.
@@ -158,8 +159,8 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// Hands the daemon the watch delay and rescan interval. Best effort: a failure here
-  /// costs slower sync, never a start.
+  /// Hands the daemon the watch delay, the rescan interval and how long it may keep replaced
+  /// copies. Best effort: a failure here costs slower sync or more disk, never a start.
   Future<void> _applyTiming() async {
     final t = readTiming?.call();
     if (t == null) return;
@@ -170,6 +171,11 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
       );
     } catch (e) {
       debugPrint('could not apply the sync timing: $e');
+    }
+    try {
+      await ffi.syncSetVersioning(keepDays: t.keepVersionsDays);
+    } catch (e) {
+      debugPrint('could not apply the version retention: $e');
     }
   }
 

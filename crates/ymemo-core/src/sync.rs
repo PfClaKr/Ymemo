@@ -17,10 +17,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// How long old file versions are kept: 30 days, after which staggered versioning drops
-/// them. Long enough to notice a vault that lost records, short enough to bound the disk.
-const MAX_VERSION_AGE_SECONDS: u64 = 30 * 24 * 60 * 60;
-
 /// How long to wait for a first start, key generation included.
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -190,7 +186,7 @@ impl Syncthing {
         // Best effort: a daemon that will not take this still syncs, and refusing to start
         // over a privacy default we merely prefer would be the wrong trade.
         if let Err(e) = st.disable_crash_reporting() {
-            eprintln!("could not turn syncthing's crash reporting off: {e}");
+            crate::diag!("could not turn syncthing's crash reporting off: {e}");
         }
         Ok(st)
     }
@@ -308,7 +304,8 @@ impl Syncthing {
         Ok(())
     }
 
-    /// Turns on Syncthing's file versioning for the vault folder, if it has none.
+    /// Sets how long Syncthing keeps its own copies of replaced files, in days; 0 turns the
+    /// copies off entirely.
     ///
     /// **This is a backup, not the history.** A memo's past lives in the change logs and is
     /// read from there ([`crate::history`]). What this protects against is the other kind of
@@ -317,26 +314,37 @@ impl Syncthing {
     /// back from that.
     ///
     /// Staggered rather than the simpler schemes, because logs are appended to constantly:
-    /// every sync of a changed log would archive the version before it, and a scheme that
-    /// keeps them all would outgrow the vault. Staggered thins as versions age — hourly for
-    /// a day, daily for a month — so the cost stays bounded.
+    /// every sync of a changed log would otherwise archive the version before it, and a scheme
+    /// that keeps them all would outgrow the vault. Staggered thins as versions age — hourly
+    /// for a day, daily for a month — so the cost stays bounded but is **not small**: the
+    /// archive is a series of snapshots of a file that only ever grows, which is why how long
+    /// to keep them is the user's call and not a constant.
     ///
     /// Versions live in `.stversions` inside the folder, which Syncthing does not sync, so
     /// each device keeps its own and nothing new travels between them.
-    pub fn ensure_versioning(&self, folder_id: &str) -> Result<()> {
+    pub fn set_folder_versioning(&self, folder_id: &str, keep_days: i32) -> Result<()> {
         let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
         let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
         let mut folder: serde_json::Value = res.body_mut().read_json()?;
 
-        // Leave a configuration the user chose alone; only an unset one is filled in.
-        if folder["versioning"]["type"].as_str().is_some_and(|t| !t.is_empty()) {
+        let want = if keep_days <= 0 {
+            serde_json::json!({ "type": "", "params": {}, "cleanupIntervalS": 3600 })
+        } else {
+            let max_age = keep_days as u64 * 24 * 60 * 60;
+            serde_json::json!({
+                "type": "staggered",
+                "params": { "maxAge": max_age.to_string() },
+                "cleanupIntervalS": 3600,
+            })
+        };
+        // Skip the PUT when it already matches: this runs on every settings save, and a PUT
+        // restarts the folder.
+        if folder["versioning"]["type"] == want["type"]
+            && folder["versioning"]["params"]["maxAge"] == want["params"]["maxAge"]
+        {
             return Ok(());
         }
-        folder["versioning"] = serde_json::json!({
-            "type": "staggered",
-            "params": { "maxAge": MAX_VERSION_AGE_SECONDS.to_string() },
-            "cleanupIntervalS": 3600,
-        });
+        folder["versioning"] = want;
         ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
         Ok(())
     }

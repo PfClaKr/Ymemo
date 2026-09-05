@@ -156,6 +156,12 @@ pub struct FfiStrings {
     pub lan_pairing: String,
     pub lan_searching: String,
     pub days_unit: String,
+    pub keep_versions: String,
+    pub keep_versions_hint: String,
+    pub log: String,
+    pub log_hint: String,
+    pub log_view: String,
+    pub log_empty: String,
     pub language: String,
     pub language_auto: String,
     pub lock_now: String,
@@ -294,6 +300,12 @@ pub fn mobile_strings() -> FfiStrings {
         lan_pairing: t!("mobile.lan_pairing"),
         lan_searching: t!("mobile.lan_searching"),
         days_unit: t!("mobile.days_unit"),
+        keep_versions: t!("mobile.keep_versions"),
+        keep_versions_hint: t!("mobile.keep_versions_hint"),
+        log: t!("mobile.log"),
+        log_hint: t!("mobile.log_hint"),
+        log_view: t!("mobile.log_view"),
+        log_empty: t!("mobile.log_empty"),
         language: t!("mobile.language"),
         language_auto: t!("mobile.language_auto"),
         lock_now: t!("mobile.lock_now"),
@@ -857,6 +869,16 @@ pub fn sync_set_timing(watch_delay_seconds: i32, rescan_seconds: i32) -> Result<
     st.set_folder_timing(VAULT_FOLDER_ID, watch_delay_seconds, rescan_seconds)
 }
 
+/// Applies the `.stversions` retention to the vault folder of the running daemon.
+///
+/// Kept apart from [`sync_set_timing`] because the two are different questions — how fast
+/// syncing is versus how much disk it may keep — and a phone is where the second one bites.
+pub fn sync_set_versioning(keep_days: i32) -> Result<()> {
+    let guard = sync_lock()?;
+    let Some(st) = guard.as_ref() else { return Ok(()) };
+    st.set_folder_versioning(VAULT_FOLDER_ID, keep_days)
+}
+
 /// Holds or releases file transfer, for "sync only on Wi-Fi".
 ///
 /// The daemon keeps running either way: paused only stops the vault folder, so a device can
@@ -1246,6 +1268,12 @@ pub struct FfiSettings {
     pub watch_delay_seconds: i32,
     /// How often Syncthing sweeps the vault for changes its watcher missed, in seconds.
     pub rescan_seconds: i32,
+    /// Days a replaced file's previous copy is kept in `.stversions`; 0 keeps none.
+    ///
+    /// **Not** where the memo history comes from — that is read back out of the logs. This is
+    /// the backstop for a log file that got truncated, and on a phone it is also the one
+    /// advanced setting that costs storage rather than battery.
+    pub keep_versions_days: i32,
     /// Android only: hold syncing while the phone is on a metered network.
     ///
     /// Off by default, so an update never silently stops syncing for someone who was happy
@@ -1274,6 +1302,7 @@ impl Default for FfiSettings {
             // Syncthing's own defaults, so an existing install behaves as it did before.
             watch_delay_seconds: 10,
             rescan_seconds: 60,
+            keep_versions_days: 30,
             wifi_only_sync: false,
             biometric_unlock: false,
             update_check: true,
@@ -1295,6 +1324,7 @@ impl FfiSettings {
             self.watch_delay_seconds.clamp(WATCH_DELAY_RANGE.0, WATCH_DELAY_RANGE.1);
         self.rescan_seconds =
             self.rescan_seconds.clamp(RESCAN_SECONDS_RANGE.0, RESCAN_SECONDS_RANGE.1);
+        self.keep_versions_days = self.keep_versions_days.clamp(0, KEEP_VERSIONS_DAYS_MAX);
         if self.last_update_check < 0 || self.last_update_check > now_millis() {
             self.last_update_check = 0;
         }
@@ -1307,6 +1337,8 @@ pub const UNLOCK_DAYS_MAX: i32 = 365;
 pub const MERGE_SECONDS_RANGE: (i32, i32) = (3, 3600);
 pub const WATCH_DELAY_RANGE: (i32, i32) = (1, 60);
 pub const RESCAN_SECONDS_RANGE: (i32, i32) = (60, 3600);
+/// Longest a replaced file's previous copy is kept; 0 turns versioning off entirely.
+pub const KEEP_VERSIONS_DAYS_MAX: i32 = 365;
 
 /// Reads the settings; a missing or damaged file gives the defaults rather than an error,
 /// since preferences must never be what stops the app from starting.
@@ -1392,4 +1424,25 @@ pub fn update_check() -> Result<Option<FfiRelease>> {
             FfiRelease { version: r.version, url, file: r.asset_name }
         }),
     )
+}
+
+/// Points the diagnostic log at the app's private directory and writes the opening line.
+///
+/// Android sends a process's stderr to `/dev/null`, so every `diag!` in the core — a log that
+/// would not decrypt, a daemon that would not start — was invisible on the phone. Call this
+/// once, before anything else, and the same messages land in `<dir>/ymemo.log`.
+pub fn diag_init(dir: String) {
+    ymemo_core::diag::init(Path::new(&dir));
+    ymemo_core::diag!("--- ymemo {} starting on android ---", env!("CARGO_PKG_VERSION"));
+}
+
+/// One line into the log, for the Dart side to funnel its own errors through.
+pub fn diag_log(message: String) {
+    ymemo_core::diag::write(&message);
+}
+
+/// The tail of the log, for the settings screen to show and offer to copy. A phone has no
+/// file manager worth sending someone to, so this is how a bug report gets one.
+pub fn diag_tail(max_bytes: u32) -> String {
+    ymemo_core::diag::tail(max_bytes as usize)
 }

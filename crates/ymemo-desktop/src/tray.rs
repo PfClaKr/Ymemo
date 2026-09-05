@@ -170,7 +170,7 @@ mod imp {
         match YmemoTray.spawn() {
             Ok(handle) => TrayHandle(Some(handle)),
             Err(e) => {
-                eprintln!("could not register the tray icon, continuing without it: {e}");
+                ymemo_core::diag!("could not register the tray icon, continuing without it: {e}");
                 TrayHandle(None)
             }
         }
@@ -248,7 +248,7 @@ mod imp {
         let tray = match tray {
             Ok(t) => Some(t),
             Err(e) => {
-                eprintln!("could not register the tray icon, continuing without it: {e}");
+                ymemo_core::diag!("could not register the tray icon, continuing without it: {e}");
                 None
             }
         };
@@ -299,7 +299,7 @@ mod imp {
     }
 
     pub fn start() -> TrayHandle {
-        eprintln!("no tray backend on this platform, running without a tray");
+        ymemo_core::diag!("no tray backend on this platform, running without a tray");
         TrayHandle
     }
 }

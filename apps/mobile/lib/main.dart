@@ -41,6 +41,22 @@ Future<void> main() async {
   // shared between the two: it is what the daemon syncs and what the vault is opened from,
   // and two spellings of it would mean syncing one directory while reading another.
   final docs = await getApplicationDocumentsDirectory();
+
+  // The core writes its failures to <docs>/ymemo.log from here on. Android sends a process's
+  // stderr to /dev/null, so before this every `diag!` in Rust was simply lost on the one
+  // platform a bug report comes from. Flutter's own errors go to the same file: `debugPrint`
+  // is a swappable function pointer, and everything in the framework routes through it.
+  await diagInit(dir: docs.path);
+  final flutterPrint = debugPrint;
+  debugPrint = (String? message, {int? wrapWidth}) {
+    flutterPrint(message, wrapWidth: wrapWidth);
+    if (message == null) return;
+    // Swallowed on purpose: an error escaping here would be reported through `debugPrint`,
+    // which is this function, and a log that cannot write would spin instead of failing
+    // quietly. Framework errors need no separate hook — `presentError` prints through this.
+    unawaited(diagLog(message: message).catchError((_) {}));
+  };
+
   final settings = await SettingsStore.load('${docs.path}/settings.json');
 
   // Language before anything is drawn, so the core's error messages and the screens speak
@@ -57,6 +73,7 @@ Future<void> main() async {
     readTiming: () => (
       watchDelaySeconds: settings.value.watchDelaySeconds,
       rescanSeconds: settings.value.rescanSeconds,
+      keepVersionsDays: settings.value.keepVersionsDays,
     ),
     readWifiOnly: () => settings.value.wifiOnlySync,
   );
@@ -2550,6 +2567,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   static const _watchChoices = [1, 2, 5, 10, 20, 60];
   static const _rescanChoices = [60, 300, 900, 3600];
 
+  /// Retention is in days rather than seconds, and 0 is a real answer: keep nothing.
+  static const _keepChoices = [0, 1, 7, 30, 90, 365];
+
   /// What the last check concluded. Kept as state rather than as a finished sentence: a
   /// rendered string would still be in the old language after the language is changed.
   _UpdateState _updateState = _UpdateState.idle;
@@ -2569,6 +2589,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     int? mergeSeconds,
     int? watchDelaySeconds,
     int? rescanSeconds,
+    int? keepVersionsDays,
     bool? wifiOnlySync,
   }) async {
     await widget.settings.save(FfiSettings(
@@ -2580,6 +2601,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       mergeSeconds: mergeSeconds ?? _s.mergeSeconds,
       watchDelaySeconds: watchDelaySeconds ?? _s.watchDelaySeconds,
       rescanSeconds: rescanSeconds ?? _s.rescanSeconds,
+      keepVersionsDays: keepVersionsDays ?? _s.keepVersionsDays,
       wifiOnlySync: wifiOnlySync ?? _s.wifiOnlySync,
       lastUpdateCheck: _s.lastUpdateCheck,
     ));
@@ -2597,6 +2619,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       } catch (e) {
         debugPrint('could not apply the sync timing: $e');
+      }
+    }
+    if (keepVersionsDays != null) {
+      try {
+        await syncSetVersioning(keepDays: _s.keepVersionsDays);
+      } catch (e) {
+        debugPrint('could not apply the version retention: $e');
       }
     }
     // One switch, two protections: closing the vault and keeping the memos out of the app
@@ -2682,6 +2711,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
         items: [
           for (final n in items)
             DropdownMenuItem(value: n, child: Text('$n ${widget.strings.secondsUnit}')),
+        ],
+      ),
+    );
+  }
+
+  /// Shows the tail of the problem log, with one button that puts it on the clipboard —
+  /// which is the whole point: a bug report someone can paste rather than describe.
+  Future<void> _showLog() async {
+    final s = widget.strings;
+    final text = await diagTail(maxBytes: 64 * 1024);
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(s.log),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              text.isEmpty ? s.logEmpty : text,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+            ),
+          ),
+        ),
+        actions: [
+          if (text.isNotEmpty)
+            TextButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: text));
+                if (context.mounted) Navigator.pop(context);
+                if (mounted) _say(s.copied);
+              },
+              child: Text(s.copy),
+            ),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(s.ok)),
         ],
       ),
     );
@@ -2819,6 +2883,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: (v) => _save(wifiOnlySync: v),
             title: Text(s.wifiOnly),
             subtitle: Text(s.wifiOnlyHint),
+          ),
+          ListTile(
+            title: Text(s.keepVersions),
+            subtitle: Text(s.keepVersionsHint),
+            trailing: DropdownButton<int>(
+              value: _keepChoices.contains(_s.keepVersionsDays) ? _s.keepVersionsDays : 30,
+              onChanged: (v) => v == null ? null : _save(keepVersionsDays: v),
+              items: [
+                for (final days in _keepChoices)
+                  DropdownMenuItem(value: days, child: Text('$days ${s.daysUnit}')),
+              ],
+            ),
+          ),
+          // A phone has no file manager worth sending someone to, so the log is shown here
+          // and offered for copying rather than pointed at.
+          ListTile(
+            title: Text(s.log),
+            subtitle: Text(s.logHint),
+            trailing: TextButton(onPressed: _showLog, child: Text(s.logView)),
           ),
 
           const Divider(),

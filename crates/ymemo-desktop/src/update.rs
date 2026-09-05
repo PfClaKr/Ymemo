@@ -8,6 +8,7 @@
 //! It runs on a worker thread. The request can take seconds or hang on a captive portal, and
 //! the UI thread has memos to draw; the answer comes back through `invoke_from_event_loop`.
 
+use ymemo_core::diag;
 use std::cell::RefCell;
 
 use slint::SharedString;
@@ -45,7 +46,7 @@ pub(crate) fn spawn_check(ctx: &Ctx, announce: bool) {
         let _ = slint::invoke_from_event_loop(move || {
             match found {
                 Ok(Some(release)) => {
-                    eprintln!(
+                    diag!(
                         "update available: {} ({})",
                         release.version,
                         release.download_url()
@@ -73,7 +74,7 @@ pub(crate) fn spawn_check(ctx: &Ctx, announce: bool) {
                 // Offline, a captive portal, GitHub having a bad day: only worth a word when
                 // the user asked for the check.
                 Err(e) => {
-                    eprintln!("update check failed: {e}");
+                    diag!("update check failed: {e}");
                     if announce {
                         with_settings(|w| w.set_update_status(SharedString::from(format!("{e}"))));
                     }
@@ -96,7 +97,7 @@ pub(crate) fn open_download() {
         return;
     }
     if let Err(e) = open_url(&url) {
-        eprintln!("could not open the browser: {e}");
+        diag!("could not open the browser: {e}");
     }
 }
 
@@ -105,7 +106,7 @@ pub(crate) fn open_download() {
 /// Two lines of platform code instead of a crate: `xdg-open` on Linux, and on Windows the
 /// shell's `start` through cmd — with `CREATE_NO_WINDOW`, since a GUI-subsystem parent makes
 /// a console child flash one up.
-fn open_url(url: &str) -> std::io::Result<()> {
+pub(crate) fn open_url(url: &str) -> std::io::Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

@@ -253,6 +253,13 @@ Future<void> syncSetTiming(
     RustLib.instance.api.crateApiSyncSetTiming(
         watchDelaySeconds: watchDelaySeconds, rescanSeconds: rescanSeconds);
 
+/// Applies the `.stversions` retention to the vault folder of the running daemon.
+///
+/// Kept apart from [`sync_set_timing`] because the two are different questions — how fast
+/// syncing is versus how much disk it may keep — and a phone is where the second one bites.
+Future<void> syncSetVersioning({required int keepDays}) =>
+    RustLib.instance.api.crateApiSyncSetVersioning(keepDays: keepDays);
+
 /// Holds or releases file transfer, for "sync only on Wi-Fi".
 ///
 /// The daemon keeps running either way: paused only stops the vault folder, so a device can
@@ -371,6 +378,23 @@ Future<String> appVersion() => RustLib.instance.api.crateApiAppVersion();
 /// The **only** request the app makes to anyone's server, which is why it sits behind a
 /// setting; see `ymemo_core::update` for what it does and does not send.
 Future<FfiRelease?> updateCheck() => RustLib.instance.api.crateApiUpdateCheck();
+
+/// Points the diagnostic log at the app's private directory and writes the opening line.
+///
+/// Android sends a process's stderr to `/dev/null`, so every `diag!` in the core — a log that
+/// would not decrypt, a daemon that would not start — was invisible on the phone. Call this
+/// once, before anything else, and the same messages land in `<dir>/ymemo.log`.
+Future<void> diagInit({required String dir}) =>
+    RustLib.instance.api.crateApiDiagInit(dir: dir);
+
+/// One line into the log, for the Dart side to funnel its own errors through.
+Future<void> diagLog({required String message}) =>
+    RustLib.instance.api.crateApiDiagLog(message: message);
+
+/// The tail of the log, for the settings screen to show and offer to copy. A phone has no
+/// file manager worth sending someone to, so this is how a bug report gets one.
+Future<String> diagTail({required int maxBytes}) =>
+    RustLib.instance.api.crateApiDiagTail(maxBytes: maxBytes);
 
 /// A photo attachment as handed to Dart.
 ///
@@ -620,6 +644,13 @@ class FfiSettings {
   /// How often Syncthing sweeps the vault for changes its watcher missed, in seconds.
   final int rescanSeconds;
 
+  /// Days a replaced file's previous copy is kept in `.stversions`; 0 keeps none.
+  ///
+  /// **Not** where the memo history comes from — that is read back out of the logs. This is
+  /// the backstop for a log file that got truncated, and on a phone it is also the one
+  /// advanced setting that costs storage rather than battery.
+  final int keepVersionsDays;
+
   /// Android only: hold syncing while the phone is on a metered network.
   ///
   /// Off by default, so an update never silently stops syncing for someone who was happy
@@ -647,6 +678,7 @@ class FfiSettings {
     required this.mergeSeconds,
     required this.watchDelaySeconds,
     required this.rescanSeconds,
+    required this.keepVersionsDays,
     required this.wifiOnlySync,
     required this.biometricUnlock,
     required this.updateCheck,
@@ -664,6 +696,7 @@ class FfiSettings {
       mergeSeconds.hashCode ^
       watchDelaySeconds.hashCode ^
       rescanSeconds.hashCode ^
+      keepVersionsDays.hashCode ^
       wifiOnlySync.hashCode ^
       biometricUnlock.hashCode ^
       updateCheck.hashCode ^
@@ -680,6 +713,7 @@ class FfiSettings {
           mergeSeconds == other.mergeSeconds &&
           watchDelaySeconds == other.watchDelaySeconds &&
           rescanSeconds == other.rescanSeconds &&
+          keepVersionsDays == other.keepVersionsDays &&
           wifiOnlySync == other.wifiOnlySync &&
           biometricUnlock == other.biometricUnlock &&
           updateCheck == other.updateCheck &&
@@ -736,6 +770,12 @@ class FfiStrings {
   final String lanPairing;
   final String lanSearching;
   final String daysUnit;
+  final String keepVersions;
+  final String keepVersionsHint;
+  final String log;
+  final String logHint;
+  final String logView;
+  final String logEmpty;
   final String language;
   final String languageAuto;
   final String lockNow;
@@ -866,6 +906,12 @@ class FfiStrings {
     required this.lanPairing,
     required this.lanSearching,
     required this.daysUnit,
+    required this.keepVersions,
+    required this.keepVersionsHint,
+    required this.log,
+    required this.logHint,
+    required this.logView,
+    required this.logEmpty,
     required this.language,
     required this.languageAuto,
     required this.lockNow,
@@ -998,6 +1044,12 @@ class FfiStrings {
       lanPairing.hashCode ^
       lanSearching.hashCode ^
       daysUnit.hashCode ^
+      keepVersions.hashCode ^
+      keepVersionsHint.hashCode ^
+      log.hashCode ^
+      logHint.hashCode ^
+      logView.hashCode ^
+      logEmpty.hashCode ^
       language.hashCode ^
       languageAuto.hashCode ^
       lockNow.hashCode ^
@@ -1132,6 +1184,12 @@ class FfiStrings {
           lanPairing == other.lanPairing &&
           lanSearching == other.lanSearching &&
           daysUnit == other.daysUnit &&
+          keepVersions == other.keepVersions &&
+          keepVersionsHint == other.keepVersionsHint &&
+          log == other.log &&
+          logHint == other.logHint &&
+          logView == other.logView &&
+          logEmpty == other.logEmpty &&
           language == other.language &&
           languageAuto == other.languageAuto &&
           lockNow == other.lockNow &&

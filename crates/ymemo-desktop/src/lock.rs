@@ -35,6 +35,7 @@ pub(crate) fn fill_settings_window(ctx: &Ctx, win: &SettingsWindow) {
     win.set_merge_seconds(s.merge_seconds);
     win.set_watch_delay_seconds(s.watch_delay_seconds);
     win.set_rescan_seconds(s.rescan_seconds);
+    win.set_keep_versions_days(s.keep_versions_days);
     win.set_update_check(s.update_check);
 }
 

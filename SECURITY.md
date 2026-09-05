@@ -57,6 +57,7 @@ Relative to the app data directory (`~/.local/share/ymemo` on Linux):
 | `ymemo.db` | no | **plaintext SQLite cache** — memo bodies are in it as-is |
 | `session.json` | no | only with "stay unlocked" on: the **raw 32-byte key** (hex) plus an expiry; 0600 on unix |
 | `settings.json` | no | device-local settings (language, lock timeouts, ...) |
+| `ymemo.log` (+ `.1`) | no | the last 512 KB of what went wrong: timestamps, paths, error strings. **No memo text** — it is written to be attachable to a bug report without reading it first |
 | `shared_prefs/dev.ymemo.widget.xml` | no | Android only, and only if a home-screen widget is used: **plaintext** titles and body previews of up to 100 memos |
 | the platform keystore | no | Android only: the stay-unlocked session key, and — if biometric unlock is on — a second copy of the **data key** with no expiry. Both encrypted by a key the Android Keystore holds, never in a file of ours |
 

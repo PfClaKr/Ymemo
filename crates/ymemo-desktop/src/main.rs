@@ -14,6 +14,7 @@
 //! tray menu quits.
 
 
+use ymemo_core::diag;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -87,10 +88,10 @@ fn select_renderer() {
     {
         Ok(backend) => {
             if let Err(e) = slint::platform::set_platform(Box::new(backend)) {
-                eprintln!("could not select renderer '{name}', continuing with the default: {e:?}");
+                diag!("could not select renderer '{name}', continuing with the default: {e:?}");
             }
         }
-        Err(e) => eprintln!("could not build the '{name}' backend, continuing with the default: {e}"),
+        Err(e) => diag!("could not build the '{name}' backend, continuing with the default: {e}"),
     }
 }
 
@@ -177,9 +178,19 @@ fn main() -> Result<()> {
     // From here on this is a real session, so the directory has to exist.
     let _ = std::fs::create_dir_all(&dir);
 
+    // From here on, everything that reports a failure also reaches <data_dir>/ymemo.log. A
+    // release build has `windows_subsystem = "windows"` and so no console at all, which is
+    // exactly the platform a bug report is most likely to come from.
+    diag::init(&dir);
+    diag!(
+        "--- ymemo {} starting on {} ---",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS
+    );
+
     let Some(_instance) = instance::acquire(&dir) else {
         instance::send_show(&dir); // hand the running one the foreground instead
-        eprintln!("Ymemo is already running; asked it to show itself");
+        diag!("Ymemo is already running; asked it to show itself");
         return Ok(());
     };
     instance::serve(&dir);
@@ -211,7 +222,7 @@ fn main() -> Result<()> {
                 list.set_sync_available(true);
                 my_device_id = Some(id);
             }
-            Err(e) => eprintln!("could not read the device id: {e}"),
+            Err(e) => diag!("could not read the device id: {e}"),
         }
     }
     // Dropping this on exit shuts the daemon down.
@@ -224,7 +235,7 @@ fn main() -> Result<()> {
         .and_then(|id| match lan_pair::PairListener::start(id.clone()) {
             Ok(l) => Some(Rc::new(l)),
             Err(e) => {
-                eprintln!("LAN pairing unavailable, continuing without it: {e}");
+                diag!("LAN pairing unavailable, continuing without it: {e}");
                 None
             }
         });
@@ -237,7 +248,11 @@ fn main() -> Result<()> {
         if let Err(e) =
             st.set_folder_timing(SYNC_FOLDER_ID, loaded.watch_delay_seconds, loaded.rescan_seconds)
         {
-            eprintln!("could not apply the sync timing: {e}");
+            diag!("could not apply the sync timing: {e}");
+        }
+        // A safety net under the logs, not the memo history — see the core's docs.
+        if let Err(e) = st.set_folder_versioning(SYNC_FOLDER_ID, loaded.keep_versions_days) {
+            diag!("could not apply the version retention: {e}");
         }
     }
     let ctx = Ctx {
@@ -306,7 +321,7 @@ fn main() -> Result<()> {
                     true
                 }
                 Err(e) => {
-                    eprintln!("could not unlock from the session, asking for the password: {e}");
+                    diag!("could not unlock from the session, asking for the password: {e}");
                     settings::clear_session(&dir);
                     false
                 }
@@ -375,7 +390,7 @@ fn main() -> Result<()> {
                         if let Err(e) =
                             st.ensure_folder(SYNC_FOLDER_ID, "Ymemo Vault", &dir.join("vault"))
                         {
-                            eprintln!("could not register the shared folder: {e}");
+                            diag!("could not register the shared folder: {e}");
                         }
                     }
                     start_unlock_session(&ctx, &v);
@@ -390,7 +405,7 @@ fn main() -> Result<()> {
                         // A vault without a recovery code still works, so this never blocks
                         // the user out of the app they just set up.
                         Err(e) => {
-                            eprintln!("could not issue a recovery code: {e}");
+                            diag!("could not issue a recovery code: {e}");
                             lock.set_vault_exists(true);
                             apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked);
                         }
@@ -504,7 +519,7 @@ fn main() -> Result<()> {
                 }
             };
             if let Err(e) = open_sticky(&ctx, &memo, false) {
-                eprintln!("could not open the sticky window: {e}");
+                diag!("could not open the sticky window: {e}");
             }
         });
     }
@@ -522,7 +537,7 @@ fn main() -> Result<()> {
                 // Deleting a group lifts its contents instead of removing them.
                 let res = if is_group { v.delete_group(&id) } else { v.delete(&id) };
                 if let Err(e) = res {
-                    eprintln!("delete failed: {e}");
+                    diag!("delete failed: {e}");
                     return;
                 }
                 refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
@@ -544,7 +559,7 @@ fn main() -> Result<()> {
                 let mut guard = ctx.vault.borrow_mut();
                 let Some(v) = guard.as_mut() else { return };
                 if let Err(e) = v.upsert_group(&group) {
-                    eprintln!("could not create the group: {e}");
+                    diag!("could not create the group: {e}");
                     return;
                 }
                 refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
@@ -584,7 +599,7 @@ fn main() -> Result<()> {
             g.name = name.to_string();
             g.updated_at = now_millis();
             if let Err(e) = v.upsert_group(&g) {
-                eprintln!("could not rename the group: {e}");
+                diag!("could not rename the group: {e}");
                 return;
             }
             refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
@@ -601,7 +616,7 @@ fn main() -> Result<()> {
                 let mut guard = ctx.vault.borrow_mut();
                 let Some(v) = guard.as_mut() else { return };
                 if let Err(e) = v.set_name(name.as_str()) {
-                    eprintln!("could not rename the vault: {e}");
+                    diag!("could not rename the vault: {e}");
                     return;
                 }
                 v.name()
@@ -699,6 +714,7 @@ fn main() -> Result<()> {
                 merge_seconds: w.get_merge_seconds(),
                 watch_delay_seconds: w.get_watch_delay_seconds(),
                 rescan_seconds: w.get_rescan_seconds(),
+                keep_versions_days: w.get_keep_versions_days(),
                 update_check: w.get_update_check(),
                 // Not a user-visible field: keep whatever the last check recorded, so saving
                 // settings does not silently schedule another request.
@@ -732,7 +748,12 @@ fn main() -> Result<()> {
                     next.watch_delay_seconds,
                     next.rescan_seconds,
                 ) {
-                    eprintln!("could not apply the sync timing: {e}");
+                    diag!("could not apply the sync timing: {e}");
+                }
+                if let Err(e) =
+                    st.set_folder_versioning(SYNC_FOLDER_ID, next.keep_versions_days)
+                {
+                    diag!("could not apply the version retention: {e}");
                 }
             }
 
@@ -851,6 +872,17 @@ fn main() -> Result<()> {
         settings_win.on_check_update(move || update::spawn_check(&ctx, true));
     }
     settings_win.on_open_update(update::open_download);
+
+    // The log is a file the user is asked for, never one they read here: open the folder and
+    // let the desktop's own file manager do the rest.
+    {
+        let dir = dir.clone();
+        settings_win.on_open_log(move || {
+            if let Err(e) = update::open_url(&dir.to_string_lossy()) {
+                diag!("could not open the log folder: {e}");
+            }
+        });
+    }
     list.on_open_update(update::open_download);
 
     // Do not raise the lock window when the session already unlocked us.
@@ -872,7 +904,7 @@ fn main() -> Result<()> {
     // for crashes, not for the ordinary way of quitting.
     if let Some(st) = syncthing.borrow_mut().take() {
         if let Err(e) = st.shutdown() {
-            eprintln!("the sync daemon did not shut down cleanly: {e}");
+            diag!("the sync daemon did not shut down cleanly: {e}");
         }
     }
     Ok(())

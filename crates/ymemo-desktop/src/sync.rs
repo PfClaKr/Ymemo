@@ -3,6 +3,7 @@
 //! The transport itself lives in `ymemo_core::sync`; this is only the desktop lifecycle —
 //! spawn the daemon at startup, then periodically merge other devices' logs into the UI.
 
+use ymemo_core::diag;
 use std::time::Duration;
 
 use slint::{ComponentHandle, TimerMode};
@@ -92,11 +93,11 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
                         Ok(None) => {
                             let _ = entry.window.hide();
                         }
-                        Err(e) => eprintln!("could not read the memo: {e}"),
+                        Err(e) => diag!("could not read the memo: {e}"),
                     }
                 }
             }
-            Err(e) => eprintln!("merge failed: {e}"),
+            Err(e) => diag!("merge failed: {e}"),
         }
     });
 }
@@ -108,16 +109,12 @@ pub(crate) fn start_syncthing(data_dir: &std::path::Path, vault_dir: &std::path:
     match Syncthing::spawn(&bin, &data_dir.join("syncthing")) {
         Ok(st) => {
             if let Err(e) = st.ensure_folder(SYNC_FOLDER_ID, "Ymemo Vault", vault_dir) {
-                eprintln!("could not register the shared folder: {e}");
-            }
-            // A safety net under the logs, not the memo history — see the core's docs.
-            if let Err(e) = st.ensure_versioning(SYNC_FOLDER_ID) {
-                eprintln!("could not enable vault file versioning: {e}");
+                diag!("could not register the shared folder: {e}");
             }
             Some(st)
         }
         Err(e) => {
-            eprintln!("syncthing did not start, continuing without sync: {e}");
+            diag!("syncthing did not start, continuing without sync: {e}");
             None
         }
     }

@@ -8,6 +8,7 @@
 //! <data_dir>/session.json    <- cached vault key (0600 on unix)
 //! ```
 
+use ymemo_core::diag;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -32,6 +33,9 @@ pub const WATCH_DELAY_RANGE: (i32, i32) = (1, 60);
 /// Bounds for the fallback rescan in seconds. Syncthing's own floor is a minute; an hour is
 /// its default, and there is no point offering less often than the thing it is a fallback for.
 pub const RESCAN_SECONDS_RANGE: (i32, i32) = (60, 3600);
+/// Days of Syncthing's own file copies to keep; 0 keeps none. A year is already far past the
+/// point where the copies cost more disk than the vault they are protecting.
+pub const KEEP_VERSIONS_DAYS_MAX: i32 = 365;
 /// Gap between automatic update checks. Daily is often enough for a release cadence measured
 /// in weeks, and it keeps the request rare enough to be unremarkable.
 const UPDATE_CHECK_INTERVAL_MS: i64 = 24 * 60 * 60 * 1000;
@@ -60,6 +64,12 @@ pub struct Settings {
     pub watch_delay_seconds: i32,
     /// How often Syncthing sweeps the vault for changes its watcher missed, in seconds.
     pub rescan_seconds: i32,
+    /// Days of Syncthing's replaced-file copies to keep in `.stversions`; 0 keeps none.
+    ///
+    /// The safety net under a truncated log, **not** the memo history — that is read from the
+    /// logs themselves. It costs real disk: the archive is a series of snapshots of a file
+    /// that only grows, which is why it is a setting.
+    pub keep_versions_days: i32,
     /// Whether to ask GitHub about newer releases. The app's only outbound request, so it is
     /// the user's to refuse; see `ymemo_core::update`.
     pub update_check: bool,
@@ -80,6 +90,7 @@ impl Default for Settings {
             // before these became settings.
             watch_delay_seconds: 10,
             rescan_seconds: 60,
+            keep_versions_days: 30,
             update_check: true,
             last_update_check: 0,
         }
@@ -91,7 +102,7 @@ impl Settings {
     pub fn load(dir: &Path) -> Self {
         match fs::read(dir.join(SETTINGS_FILE)) {
             Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
-                eprintln!("could not read the settings, using defaults: {e}");
+                diag!("could not read the settings, using defaults: {e}");
                 Self::default()
             }),
             Err(_) => Self::default(),
@@ -102,10 +113,10 @@ impl Settings {
         match serde_json::to_vec_pretty(self) {
             Ok(bytes) => {
                 if let Err(e) = fs::write(dir.join(SETTINGS_FILE), bytes) {
-                    eprintln!("could not save the settings: {e}");
+                    diag!("could not save the settings: {e}");
                 }
             }
-            Err(e) => eprintln!("could not serialize the settings: {e}"),
+            Err(e) => diag!("could not serialize the settings: {e}"),
         }
     }
 
@@ -133,6 +144,7 @@ impl Settings {
         self.rescan_seconds = self
             .rescan_seconds
             .clamp(RESCAN_SECONDS_RANGE.0, RESCAN_SECONDS_RANGE.1);
+        self.keep_versions_days = self.keep_versions_days.clamp(0, KEEP_VERSIONS_DAYS_MAX);
         // A clock that went backwards, or a hand-edited file, must not park the next check
         // in the future forever.
         if self.last_update_check < 0 || self.last_update_check > now_millis() {
@@ -217,7 +229,7 @@ pub fn save_session(dir: &Path, key: &[u8; KEY_LEN], days: i32) {
     };
     let path = session_path(dir);
     if let Err(e) = fs::write(&path, bytes) {
-        eprintln!("could not save the session: {e}");
+        diag!("could not save the session: {e}");
         return;
     }
     restrict_permissions(&path);
@@ -228,7 +240,7 @@ pub fn clear_session(dir: &Path) {
     let path = session_path(dir);
     if path.exists() {
         if let Err(e) = fs::remove_file(&path) {
-            eprintln!("could not delete the session: {e}");
+            diag!("could not delete the session: {e}");
         }
     }
 }
@@ -238,7 +250,7 @@ pub fn clear_session(dir: &Path) {
 fn restrict_permissions(path: &Path) {
     use std::os::unix::fs::PermissionsExt;
     if let Err(e) = fs::set_permissions(path, fs::Permissions::from_mode(0o600)) {
-        eprintln!("could not set the session file permissions: {e}");
+        diag!("could not set the session file permissions: {e}");
     }
 }
 
@@ -298,6 +310,7 @@ mod tests {
             // watch delay would have Syncthing shipping half-written logs.
             watch_delay_seconds: 0,
             rescan_seconds: 1,
+            keep_versions_days: 9_999,
             update_check: true,
             // A timestamp from the future, as a clock that went backwards would leave.
             last_update_check: i64::MAX,
@@ -314,6 +327,7 @@ mod tests {
         assert_eq!(s.merge_seconds, MERGE_SECONDS_RANGE.0);
         assert_eq!(s.watch_delay_seconds, WATCH_DELAY_RANGE.0);
         assert_eq!(s.rescan_seconds, RESCAN_SECONDS_RANGE.0);
+        assert_eq!(s.keep_versions_days, KEEP_VERSIONS_DAYS_MAX);
     }
 
     #[test]
