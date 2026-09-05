@@ -9,6 +9,11 @@
 # paths of its own. Without a Windows job, a break in either is invisible until someone
 # pushes a tag — which is how the uninstaller bug in 1.0.0 reached a release.
 #
+# Both jobs open by recording the version they are building onto the run summary, so an old
+# run can still answer "which version was this?" — and the Linux one warns when Cargo.toml and
+# apps/mobile/pubspec.yaml have drifted apart, which otherwise only surfaces when a tag is
+# pushed and release.yml rejects it.
+#
 # Only GitHub-owned actions (actions/*) are used, so this still runs under a policy that
 # blocks third-party ones. The toolchain is the runner's built-in rustup.
 
@@ -29,6 +34,39 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # What this run was actually building, on the run's own summary page rather than
+      # somewhere in cargo's output. A CI run outlives the branch it came from, and "which
+      # version was that?" is the first thing anyone asks of an old one.
+      #
+      # It is also the only place the two version numbers are compared before a tag exists.
+      # They have to move together — release.yml refuses a tag that disagrees with Cargo.toml,
+      # and Android's versionCode may only ever grow — and finding that out at tag time means
+      # deleting the tag and pushing it again. A warning here is on the pull request instead.
+      # It warns rather than fails on purpose: a version that has not been bumped yet is the
+      # normal state of most branches, and this is a note to whoever bumps it, not a gate.
+      - name: Record the version
+        shell: bash
+        run: |
+          crate=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          pubspec=$(grep -m1 '^version:' apps/mobile/pubspec.yaml | awk '{print $2}')
+          echo "workspace: $crate"
+          echo "pubspec:   $pubspec"
+          {
+            echo "### \`$crate\` — ${{ runner.os }}"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| workspace (\`Cargo.toml\`) | \`$crate\` |"
+            echo "| mobile (\`pubspec.yaml\`) | \`$pubspec\` |"
+            echo "| commit | \`${GITHUB_SHA:0:12}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # The +N on the pubspec side is Android's versionCode and moves on its own.
+          if [ "${pubspec%%+*}" != "$crate" ]; then
+            echo "::warning::apps/mobile/pubspec.yaml is $pubspec but Cargo.toml is $crate; the two are bumped together, and release.yml checks the tag against Cargo.toml."
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "> **The two versions disagree.** \`pubspec.yaml\` is \`$pubspec\`, \`Cargo.toml\` is \`$crate\`." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       # Slint's dependencies need edition2024, and some clippy lints need current stable.
       - run: rustup update stable
@@ -67,6 +105,22 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      # The same line on this job's summary. `shell: bash` because the runner has Git Bash and
+      # one script beats the same six lines written twice, once in PowerShell.
+      - name: Record the version
+        shell: bash
+        run: |
+          crate=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          echo "workspace: $crate"
+          {
+            echo "### \`$crate\` — ${{ runner.os }}"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| workspace (\`Cargo.toml\`) | \`$crate\` |"
+            echo "| commit | \`${GITHUB_SHA:0:12}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - run: rustup update stable
       - run: rustup component add clippy
