@@ -1,5 +1,6 @@
 package dev.ymemo.ymemo_mobile.widget
 
+import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
 import android.widget.RemoteViews
@@ -9,19 +10,40 @@ import dev.ymemo.ymemo_mobile.R
 /** Supplies the rows of [MemoListWidget]; the launcher binds to it to scroll the list. */
 class MemoListService : RemoteViewsService() {
     override fun onGetViewFactory(intent: Intent): RemoteViewsFactory =
-        MemoListFactory(applicationContext)
+        MemoListFactory(
+            applicationContext,
+            intent.getIntExtra(
+                AppWidgetManager.EXTRA_APPWIDGET_ID,
+                AppWidgetManager.INVALID_APPWIDGET_ID,
+            ),
+        )
 }
 
-private class MemoListFactory(private val context: Context) : RemoteViewsService.RemoteViewsFactory {
+/**
+ * One list widget's rows.
+ *
+ * The widget id matters now that a widget can be set to a folder and a color: two list
+ * widgets on the same home screen are two factories, told apart by the data uri
+ * `MemoListWidget` puts on the intent, and each reads its own settings here.
+ */
+private class MemoListFactory(
+    private val context: Context,
+    private val widgetId: Int,
+) : RemoteViewsService.RemoteViewsFactory {
 
     /** Read once per `notifyAppWidgetViewDataChanged`, so a row cannot change mid-scroll. */
     private var rows: List<Pair<Boolean, Entry>> = emptyList()
+    private var chrome: Chrome = Chrome.of(context, WidgetStore.THEME_COLOR)
 
     override fun onCreate() = onDataSetChanged()
 
     override fun onDataSetChanged() {
         val snapshot = WidgetStore.read(context)
-        rows = if (snapshot.hidden) emptyList() else snapshot.rows
+        val folder = snapshot.resolveFolder(WidgetStore.listFolder(context, widgetId))
+        rows = if (snapshot.hidden) emptyList() else snapshot.rows(folder)
+        // Re-read with the rows: a color chosen from the gear arrives as a data-set change,
+        // and rows drawn in the old ink would sit on the new paper until something else moved.
+        chrome = Chrome.of(context, WidgetStore.listColor(context, widgetId))
     }
 
     override fun onDestroy() {
@@ -40,6 +62,8 @@ private class MemoListFactory(private val context: Context) : RemoteViewsService
             R.id.row_icon,
             if (isFolder) R.drawable.ic_widget_folder else R.drawable.ic_widget_note,
         )
+        views.setTextColor(R.id.row_title, chrome.ink)
+        views.setTextColor(R.id.row_body, chrome.muted)
         views.setTextViewText(
             R.id.row_title,
             entry.title.ifEmpty { context.getString(R.string.widget_untitled) },

@@ -30,4 +30,21 @@
     <string name="shortcut_new_memo_long">새 메모 쓰기</string>
     <string name="shortcut_photo_memo_short">사진 메모</string>
     <string name="shortcut_photo_memo_long">사진과 함께 새 메모</string>
+
+    <!-- 목록 위젯 자체 설정: 어떤 폴더를 그릴지, 어떻게 보일지. -->
+    <string name="widget_list_settings">위젯 설정</string>
+    <string name="widget_list_configure_title">이 위젯에 무엇을 보여줄까요?</string>
+    <string name="widget_list_configure_source">메모</string>
+    <string name="widget_list_configure_everything">전체</string>
+    <string name="widget_list_configure_background">배경</string>
+    <string name="widget_list_configure_theme">시스템 설정 따르기</string>
+    <string name="widget_list_configure_opacity">투명도</string>
+    <string name="widget_list_configure_percent">%1$d%%</string>
+    <string name="widget_list_configure_done">완료</string>
+
+    <string name="widget_color_yellow">노랑</string>
+    <string name="widget_color_pink">분홍</string>
+    <string name="widget_color_green">초록</string>
+    <string name="widget_color_blue">파랑</string>
+    <string name="widget_color_purple">보라</string>
 </resources>

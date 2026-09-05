@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- configure + configuration_optional: on Android 12 and up the widget is placed straight
+     away, drawing everything the way it always has, and the settings are there for whoever
+     wants them (launcher long-press, or the gear on the widget). Below 12 the flag is
+     ignored and the screen is shown when the widget is added, which is why every setting on
+     it starts on the answer that reproduces the old behaviour.
+
+     reconfigurable puts "reconfigure" in the launcher's own long-press menu. The gear on the
+     header stays regardless: that menu is Android 12 and up. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:configure="dev.ymemo.ymemo_mobile.widget.ListConfigureActivity"
     android:description="@string/widget_list_description"
     android:initialLayout="@layout/widget_list"
     android:minHeight="110dp"
@@ -12,4 +21,5 @@
     android:targetCellHeight="2"
     android:targetCellWidth="4"
     android:updatePeriodMillis="0"
-    android:widgetCategory="home_screen" />
+    android:widgetCategory="home_screen"
+    android:widgetFeatures="reconfigurable|configuration_optional" />
