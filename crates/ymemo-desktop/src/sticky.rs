@@ -177,9 +177,21 @@ pub(crate) fn raise_sticky(window: &StickyWindow) {
 /// can end up behind another window, and with the stickies out of the taskbar there is no
 /// button to click to get it back. Notes are only raised, never opened — the tray must not
 /// decide which memos the user wanted on the desk.
+///
+/// **Only the ones on screen**, which is not the same as "everything in the map". A memo
+/// deleted on another device leaves its window hidden but still in there (see the merge
+/// timer in `sync.rs`), and so does a close, until the timer that removes it runs. Raising
+/// those would put a note back on the desk that the user deleted, or one they just closed —
+/// and would count towards the return value, so the tray would not fall back to opening the
+/// list when the desk is in fact empty. `snap_tick` skips them for the same reason.
 pub(crate) fn raise_open(ctx: &Ctx) -> usize {
-    let windows: Vec<StickyWindow> =
-        ctx.stickies.borrow().values().map(|e| e.window.clone_strong()).collect();
+    let windows: Vec<StickyWindow> = ctx
+        .stickies
+        .borrow()
+        .values()
+        .filter(|e| e.window.window().is_visible())
+        .map(|e| e.window.clone_strong())
+        .collect();
     for window in &windows {
         raise_sticky(window);
     }

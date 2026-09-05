@@ -41,6 +41,7 @@
 
             <!-- What to show -->
             <TextView
+                android:id="@+id/configure_source_label"
                 style="@style/WidgetConfigureSection"
                 android:text="@string/widget_list_configure_source" />
 

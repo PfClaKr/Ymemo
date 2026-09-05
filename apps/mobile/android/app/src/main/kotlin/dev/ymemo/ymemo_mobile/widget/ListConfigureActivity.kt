@@ -35,6 +35,16 @@ class ListConfigureActivity : Activity() {
     private val folderIds = mutableListOf<String>()
     private val colorKeys = mutableListOf<String>()
 
+    /**
+     * Whether the folder question could be asked at all.
+     *
+     * False while the vault is closed: there is no published folder list then, so the screen
+     * cannot offer the folder this widget is already set to — and saving what it *could*
+     * offer would quietly reset the widget to "everything". Someone who opened this on a
+     * locked phone to change the colour must not lose the folder as the price.
+     */
+    private var foldersOffered = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -70,15 +80,21 @@ class ListConfigureActivity : Activity() {
      */
     private fun fillFolders(snapshot: Snapshot) {
         val group = findViewById<RadioGroup>(R.id.configure_folders)
-        val chosen = snapshot.resolveFolder(WidgetStore.listFolder(this, widgetId))
 
-        addChoice(group, folderIds, WidgetStore.EVERYTHING,
-            getString(R.string.widget_list_configure_everything), chosen)
-
+        // Locked, or never unlocked on this device: no folder list to choose from. Say so and
+        // leave the question out entirely rather than offering the one answer that happens to
+        // need no data — see [foldersOffered].
         if (snapshot.hidden) {
             findViewById<TextView>(R.id.configure_empty).visibility = View.VISIBLE
+            group.visibility = View.GONE
+            findViewById<TextView>(R.id.configure_source_label).visibility = View.GONE
             return
         }
+        foldersOffered = true
+
+        val chosen = snapshot.resolveFolder(WidgetStore.listFolder(this, widgetId))
+        addChoice(group, folderIds, WidgetStore.EVERYTHING,
+            getString(R.string.widget_list_configure_everything), chosen)
 
         // Walk from the root down, so a child is never offered before its parent. A folder
         // whose ancestry loops is published with an empty parent by the app, so it lands at
@@ -159,9 +175,12 @@ class ListConfigureActivity : Activity() {
     }
 
     private fun save() {
-        val folder = chosenValue(
-            findViewById(R.id.configure_folders), folderIds, WidgetStore.EVERYTHING,
-        )
+        // Keep what the widget already showed when the question could not be asked.
+        val folder = if (foldersOffered) {
+            chosenValue(findViewById(R.id.configure_folders), folderIds, WidgetStore.EVERYTHING)
+        } else {
+            WidgetStore.listFolder(this, widgetId)
+        }
         val color = chosenValue(
             findViewById(R.id.configure_colors), colorKeys, WidgetStore.THEME_COLOR,
         )
