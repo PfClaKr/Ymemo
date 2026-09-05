@@ -25,6 +25,13 @@ pub const MERGE_SECONDS_RANGE: (i32, i32) = (3, 3600);
 pub const UNLOCK_DAYS_MAX: i32 = 365;
 /// Maximum idle auto-lock in minutes; 0 disables it.
 pub const IDLE_MINUTES_MAX: i32 = 1440;
+/// Bounds for Syncthing's watch delay in seconds. One second is as eager as the daemon will
+/// usefully go — below that it starts shipping half-written files and undoing itself — and a
+/// minute is already slower than anyone would sit through.
+pub const WATCH_DELAY_RANGE: (i32, i32) = (1, 60);
+/// Bounds for the fallback rescan in seconds. Syncthing's own floor is a minute; an hour is
+/// its default, and there is no point offering less often than the thing it is a fallback for.
+pub const RESCAN_SECONDS_RANGE: (i32, i32) = (60, 3600);
 /// Gap between automatic update checks. Daily is often enough for a release cadence measured
 /// in weeks, and it keeps the request rare enough to be unremarkable.
 const UPDATE_CHECK_INTERVAL_MS: i64 = 24 * 60 * 60 * 1000;
@@ -45,6 +52,14 @@ pub struct Settings {
     pub default_opacity: i32,
     /// How often other devices' changes are pulled in, in seconds.
     pub merge_seconds: i32,
+    /// How long Syncthing waits after a write before it ships the file, in seconds.
+    ///
+    /// The other half of how quickly a memo appears elsewhere: what a user notices is this
+    /// **plus** [`Settings::merge_seconds`] on the receiving device. Lower is faster and
+    /// costs more wakeups; see `ymemo_core::sync::Syncthing::set_folder_timing`.
+    pub watch_delay_seconds: i32,
+    /// How often Syncthing sweeps the vault for changes its watcher missed, in seconds.
+    pub rescan_seconds: i32,
     /// Whether to ask GitHub about newer releases. The app's only outbound request, so it is
     /// the user's to refuse; see `ymemo_core::update`.
     pub update_check: bool,
@@ -61,6 +76,10 @@ impl Default for Settings {
             default_color: "yellow".into(),
             default_opacity: 100,
             merge_seconds: 15,
+            // Syncthing's own defaults, so an existing install behaves exactly as it did
+            // before these became settings.
+            watch_delay_seconds: 10,
+            rescan_seconds: 60,
             update_check: true,
             last_update_check: 0,
         }
@@ -108,6 +127,12 @@ impl Settings {
         self.merge_seconds = self
             .merge_seconds
             .clamp(MERGE_SECONDS_RANGE.0, MERGE_SECONDS_RANGE.1);
+        self.watch_delay_seconds = self
+            .watch_delay_seconds
+            .clamp(WATCH_DELAY_RANGE.0, WATCH_DELAY_RANGE.1);
+        self.rescan_seconds = self
+            .rescan_seconds
+            .clamp(RESCAN_SECONDS_RANGE.0, RESCAN_SECONDS_RANGE.1);
         // A clock that went backwards, or a hand-edited file, must not park the next check
         // in the future forever.
         if self.last_update_check < 0 || self.last_update_check > now_millis() {
@@ -269,6 +294,10 @@ mod tests {
             default_color: "chartreuse".into(),
             default_opacity: 1,
             merge_seconds: 0,
+            // Both out of range on the low side, where clamping matters most: a zero-second
+            // watch delay would have Syncthing shipping half-written logs.
+            watch_delay_seconds: 0,
+            rescan_seconds: 1,
             update_check: true,
             // A timestamp from the future, as a clock that went backwards would leave.
             last_update_check: i64::MAX,
@@ -283,6 +312,8 @@ mod tests {
         assert!(s.update_check_due());
         assert!(s.default_opacity >= 20); // raised to the core's MIN_OPACITY
         assert_eq!(s.merge_seconds, MERGE_SECONDS_RANGE.0);
+        assert_eq!(s.watch_delay_seconds, WATCH_DELAY_RANGE.0);
+        assert_eq!(s.rescan_seconds, RESCAN_SECONDS_RANGE.0);
     }
 
     #[test]

@@ -228,6 +228,39 @@ impl Syncthing {
         Ok(())
     }
 
+    /// How fast a change on one device becomes a change on the others.
+    ///
+    /// Two numbers, and the delay a user actually notices is their **sum with the merge
+    /// interval on the receiving side**: Syncthing waits `watch_delay_s` after a write
+    /// before it acts on it, ships the file, and the other app then picks it up on its own
+    /// timer. With the defaults (10 + 15) a memo takes up to twenty-odd seconds to appear.
+    ///
+    /// `rescan_s` is the fallback sweep for changes the filesystem watcher missed, which is
+    /// rare on a directory this app writes itself; it exists because a watcher can drop
+    /// events under load or on filesystems that do not support them.
+    ///
+    /// Separate from [`Syncthing::ensure_folder`] because that one returns early on a folder
+    /// that already exists — every device but a brand-new one. This is what a settings
+    /// change has to go through to reach a folder that is already registered.
+    pub fn set_folder_timing(&self, folder_id: &str, watch_delay_s: i32, rescan_s: i32) -> Result<()> {
+        let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
+        let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
+        let mut folder: serde_json::Value = res.body_mut().read_json()?;
+
+        // Nothing to say if the daemon already agrees: a PUT restarts the folder, which
+        // interrupts a transfer in progress, and this is called on every settings save.
+        let same = folder["fsWatcherDelayS"].as_i64() == Some(watch_delay_s as i64)
+            && folder["rescanIntervalS"].as_i64() == Some(rescan_s as i64);
+        if same {
+            return Ok(());
+        }
+        folder["fsWatcherEnabled"] = serde_json::json!(true);
+        folder["fsWatcherDelayS"] = serde_json::json!(watch_delay_s);
+        folder["rescanIntervalS"] = serde_json::json!(rescan_s);
+        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
+        Ok(())
+    }
+
     /// Turns on Syncthing's file versioning for the vault folder, if it has none.
     ///
     /// **This is a backup, not the history.** A memo's past lives in the change logs and is

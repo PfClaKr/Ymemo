@@ -241,6 +241,18 @@ Future<String> syncStart(
 Future<void> syncEnsureFolder({required String vaultDir}) =>
     RustLib.instance.api.crateApiSyncEnsureFolder(vaultDir: vaultDir);
 
+/// Applies the sync timings to the vault folder of the running daemon.
+///
+/// Separate from [`sync_ensure_folder`] for the reason the core keeps them apart: that one
+/// returns early on a folder that already exists — every device after its first run — so a
+/// settings change would never reach the daemon through it.
+///
+/// Doing nothing while the daemon is down is correct; Dart calls this again once it is up.
+Future<void> syncSetTiming(
+        {required int watchDelaySeconds, required int rescanSeconds}) =>
+    RustLib.instance.api.crateApiSyncSetTiming(
+        watchDelaySeconds: watchDelaySeconds, rescanSeconds: rescanSeconds);
+
 /// Stops the daemon. Safe to call when it is not running.
 Future<void> syncStop() => RustLib.instance.api.crateApiSyncStop();
 
@@ -586,6 +598,20 @@ class FfiSettings {
   /// Close the vault when the app leaves the foreground.
   final bool lockOnBackground;
 
+  /// How often other devices' changes are pulled in, in seconds.
+  ///
+  /// Was fixed at 15 in Dart before it became a setting; the default keeps that.
+  final int mergeSeconds;
+
+  /// How long Syncthing waits after a write before it ships the file, in seconds.
+  ///
+  /// The delay a user notices is this **plus** [`FfiSettings::merge_seconds`] on the other
+  /// device; see `ymemo_core::sync::Syncthing::set_folder_timing`.
+  final int watchDelaySeconds;
+
+  /// How often Syncthing sweeps the vault for changes its watcher missed, in seconds.
+  final int rescanSeconds;
+
   /// Android only: reopen the vault with the device's fingerprint instead of the password.
   ///
   /// The core has no part in this beyond remembering the answer — biometrics cannot derive
@@ -604,6 +630,9 @@ class FfiSettings {
     required this.lang,
     required this.unlockDays,
     required this.lockOnBackground,
+    required this.mergeSeconds,
+    required this.watchDelaySeconds,
+    required this.rescanSeconds,
     required this.biometricUnlock,
     required this.updateCheck,
     required this.lastUpdateCheck,
@@ -617,6 +646,9 @@ class FfiSettings {
       lang.hashCode ^
       unlockDays.hashCode ^
       lockOnBackground.hashCode ^
+      mergeSeconds.hashCode ^
+      watchDelaySeconds.hashCode ^
+      rescanSeconds.hashCode ^
       biometricUnlock.hashCode ^
       updateCheck.hashCode ^
       lastUpdateCheck.hashCode;
@@ -629,6 +661,9 @@ class FfiSettings {
           lang == other.lang &&
           unlockDays == other.unlockDays &&
           lockOnBackground == other.lockOnBackground &&
+          mergeSeconds == other.mergeSeconds &&
+          watchDelaySeconds == other.watchDelaySeconds &&
+          rescanSeconds == other.rescanSeconds &&
           biometricUnlock == other.biometricUnlock &&
           updateCheck == other.updateCheck &&
           lastUpdateCheck == other.lastUpdateCheck;
@@ -687,6 +722,15 @@ class FfiStrings {
   final String language;
   final String languageAuto;
   final String lockNow;
+  final String advanced;
+  final String advancedHint;
+  final String mergeSeconds;
+  final String mergeSecondsHint;
+  final String watchDelay;
+  final String watchDelayHint;
+  final String rescan;
+  final String rescanHint;
+  final String secondsUnit;
   final String biometricFailed;
   final String biometricPrompt;
   final String biometricUnavailable;
@@ -805,6 +849,15 @@ class FfiStrings {
     required this.language,
     required this.languageAuto,
     required this.lockNow,
+    required this.advanced,
+    required this.advancedHint,
+    required this.mergeSeconds,
+    required this.mergeSecondsHint,
+    required this.watchDelay,
+    required this.watchDelayHint,
+    required this.rescan,
+    required this.rescanHint,
+    required this.secondsUnit,
     required this.biometricFailed,
     required this.biometricPrompt,
     required this.biometricUnavailable,
@@ -925,6 +978,15 @@ class FfiStrings {
       language.hashCode ^
       languageAuto.hashCode ^
       lockNow.hashCode ^
+      advanced.hashCode ^
+      advancedHint.hashCode ^
+      mergeSeconds.hashCode ^
+      mergeSecondsHint.hashCode ^
+      watchDelay.hashCode ^
+      watchDelayHint.hashCode ^
+      rescan.hashCode ^
+      rescanHint.hashCode ^
+      secondsUnit.hashCode ^
       biometricFailed.hashCode ^
       biometricPrompt.hashCode ^
       biometricUnavailable.hashCode ^
@@ -1047,6 +1109,15 @@ class FfiStrings {
           language == other.language &&
           languageAuto == other.languageAuto &&
           lockNow == other.lockNow &&
+          advanced == other.advanced &&
+          advancedHint == other.advancedHint &&
+          mergeSeconds == other.mergeSeconds &&
+          mergeSecondsHint == other.mergeSecondsHint &&
+          watchDelay == other.watchDelay &&
+          watchDelayHint == other.watchDelayHint &&
+          rescan == other.rescan &&
+          rescanHint == other.rescanHint &&
+          secondsUnit == other.secondsUnit &&
           biometricFailed == other.biometricFailed &&
           biometricPrompt == other.biometricPrompt &&
           biometricUnavailable == other.biometricUnavailable &&

@@ -231,6 +231,15 @@ fn main() -> Result<()> {
 
     let mut loaded = Settings::load(&dir);
     loaded.sanitize();
+    // `ensure_folder` above only configures a folder it had to create, so on every run after
+    // the first this is what carries the user's timings to the daemon.
+    if let Some(st) = syncthing.borrow().as_ref() {
+        if let Err(e) =
+            st.set_folder_timing(SYNC_FOLDER_ID, loaded.watch_delay_seconds, loaded.rescan_seconds)
+        {
+            eprintln!("could not apply the sync timing: {e}");
+        }
+    }
     let ctx = Ctx {
         vault: Rc::new(RefCell::new(None)),
         model: Rc::new(VecModel::from(Vec::<ListRow>::new())),
@@ -673,6 +682,7 @@ fn main() -> Result<()> {
         let security_weak = security_win.as_weak();
         let history_weak = history_win.as_weak();
         let approve_weak = approve_win.as_weak();
+        let syncthing_for_settings = syncthing.clone();
         settings_win.on_apply(move || {
             let Some(w) = win.upgrade() else { return };
             let (Some(lock), Some(list)) = (lock_weak.upgrade(), list_weak.upgrade()) else {
@@ -687,6 +697,8 @@ fn main() -> Result<()> {
                 default_color: w.get_default_color().to_string(),
                 default_opacity: w.get_default_opacity(),
                 merge_seconds: w.get_merge_seconds(),
+                watch_delay_seconds: w.get_watch_delay_seconds(),
+                rescan_seconds: w.get_rescan_seconds(),
                 update_check: w.get_update_check(),
                 // Not a user-visible field: keep whatever the last check recorded, so saving
                 // settings does not silently schedule another request.
@@ -712,6 +724,17 @@ fn main() -> Result<()> {
                 t.refresh();
             }
             start_merge_timer(&merge_timer, &ctx, list.as_weak());
+            // The watch delay lives in Syncthing's folder config, not ours, so saving has to
+            // push it across; `set_folder_timing` does nothing when the daemon already agrees.
+            if let Some(st) = syncthing_for_settings.borrow().as_ref() {
+                if let Err(e) = st.set_folder_timing(
+                    SYNC_FOLDER_ID,
+                    next.watch_delay_seconds,
+                    next.rescan_seconds,
+                ) {
+                    eprintln!("could not apply the sync timing: {e}");
+                }
+            }
 
             // Shortening or disabling the stay-unlocked window leaves an existing session in
             // violation of it, so drop the session and ask for the password next time.

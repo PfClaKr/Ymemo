@@ -49,10 +49,16 @@ Future<void> main() async {
     code: settings.value.lang == 'auto' ? Platform.localeName : settings.value.lang,
   );
 
-  final sync = SyncController(SyncPaths(
-    homeDir: '${docs.path}/syncthing',
-    vaultDir: '${docs.path}/vault',
-  ));
+  final sync = SyncController(
+    SyncPaths(
+      homeDir: '${docs.path}/syncthing',
+      vaultDir: '${docs.path}/vault',
+    ),
+    readTiming: () => (
+      watchDelaySeconds: settings.value.watchDelaySeconds,
+      rescanSeconds: settings.value.rescanSeconds,
+    ),
+  );
 
   runApp(YmemoApp(
     strings: await mobileStrings(),
@@ -719,9 +725,14 @@ class MemoListScreen extends StatefulWidget {
 }
 
 class _MemoListScreenState extends State<MemoListScreen> {
-  /// How often logs that have arrived are merged in, matching the desktop's timer. The
-  /// daemon delivers files whenever it likes; this is what turns them into memos on screen.
-  static const _mergeInterval = Duration(seconds: 15);
+  /// How often logs that have arrived are merged in — the settings screen's "pull
+  /// interval", which was fixed at 15 seconds before it became one. The daemon delivers
+  /// files whenever it likes; this is what turns them into memos on screen.
+  ///
+  /// Only half of how long a change takes to appear: the *other* device's watch delay comes
+  /// first, and the two add up. Both are in Settings > Advanced.
+  Duration get _mergeInterval =>
+      Duration(seconds: widget.settings.value.mergeSeconds);
 
   List<FfiMemo> _memos = [];
   List<FfiGroup> _folders = [];
@@ -2516,6 +2527,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// harder to tap and able to produce values Rust would only clamp away again.
   static const _dayChoices = [0, 1, 7, 30, 90, 365];
 
+  /// The advanced timings, same reasoning. Each list starts at what the core clamps to and
+  /// ends where going further stops being useful.
+  static const _mergeChoices = [3, 5, 10, 15, 30, 60, 300];
+  static const _watchChoices = [1, 2, 5, 10, 20, 60];
+  static const _rescanChoices = [60, 300, 900, 3600];
+
   /// What the last check concluded. Kept as state rather than as a finished sentence: a
   /// rendered string would still be in the old language after the language is changed.
   _UpdateState _updateState = _UpdateState.idle;
@@ -2532,6 +2549,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     bool? lockOnBackground,
     bool? biometricUnlock,
     bool? updateCheck,
+    int? mergeSeconds,
+    int? watchDelaySeconds,
+    int? rescanSeconds,
   }) async {
     await widget.settings.save(FfiSettings(
       lang: lang ?? _s.lang,
@@ -2539,8 +2559,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
       lockOnBackground: lockOnBackground ?? _s.lockOnBackground,
       biometricUnlock: biometricUnlock ?? _s.biometricUnlock,
       updateCheck: updateCheck ?? _s.updateCheck,
+      mergeSeconds: mergeSeconds ?? _s.mergeSeconds,
+      watchDelaySeconds: watchDelaySeconds ?? _s.watchDelaySeconds,
+      rescanSeconds: rescanSeconds ?? _s.rescanSeconds,
       lastUpdateCheck: _s.lastUpdateCheck,
     ));
+    // The watch delay is Syncthing's, not ours, so saving has to push it across. It is a
+    // no-op while the daemon is down; sync.dart applies it again when it comes up.
+    if (watchDelaySeconds != null || rescanSeconds != null) {
+      try {
+        await syncSetTiming(
+          watchDelaySeconds: _s.watchDelaySeconds,
+          rescanSeconds: _s.rescanSeconds,
+        );
+      } catch (e) {
+        debugPrint('could not apply the sync timing: $e');
+      }
+    }
     // One switch, two protections: closing the vault and keeping the memos out of the app
     // switcher. Someone who turned it off chose convenience, and hiding their thumbnail
     // anyway would be deciding for them.
@@ -2601,6 +2636,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
     await _save(biometricUnlock: true);
+  }
+
+  /// One "N seconds" dropdown. A value outside the offered list — a hand-edited
+  /// settings.json, or a list that shrank between versions — still shows, rather than
+  /// snapping to something the user never chose.
+  Widget _seconds(String label, String hint, List<int> choices, int value,
+      void Function(int) onPick) {
+    final items = choices.contains(value) ? choices : [value, ...choices]..sort();
+    return ListTile(
+      title: Text(label),
+      subtitle: Text(hint),
+      trailing: DropdownButton<int>(
+        value: value,
+        onChanged: (v) => v == null ? null : onPick(v),
+        items: [
+          for (final n in items)
+            DropdownMenuItem(value: n, child: Text('$n ${widget.strings.secondsUnit}')),
+        ],
+      ),
+    );
   }
 
   void _say(String message) => ScaffoldMessenger.of(context).showSnackBar(
@@ -2714,6 +2769,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             )),
           ),
+
+          const Divider(),
+          _header(s.advanced),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(s.advancedHint, style: Theme.of(context).textTheme.bodySmall),
+          ),
+          // The three together are what decides how fast a change appears: the sending
+          // device's watch delay plus the receiving one's pull interval. Splitting them
+          // across the screen would hide that they add up.
+          _seconds(s.watchDelay, s.watchDelayHint, _watchChoices, _s.watchDelaySeconds,
+              (v) => _save(watchDelaySeconds: v)),
+          _seconds(s.mergeSeconds, s.mergeSecondsHint, _mergeChoices, _s.mergeSeconds,
+              (v) => _save(mergeSeconds: v)),
+          _seconds(s.rescan, s.rescanHint, _rescanChoices, _s.rescanSeconds,
+              (v) => _save(rescanSeconds: v)),
 
           const Divider(),
           _header(s.updateSection),

@@ -237,8 +237,15 @@ Two of the plugins reach into the platform side, so a change there can break the
   long pairing code (copyable), QR scanning, and the paired devices with their connection
   state.
 - **Settings** — language, locking (including the fingerprint switch, which is where the key
-  it releases is stored), updates, and the running version. Everything applies as it is
-  changed; Rust sanitizes on write and the screen shows what was actually kept.
+  it releases is stored), updates, the running version, and an **Advanced** section holding
+  the three timings that decide how fast a change appears elsewhere. Everything applies as it
+  is changed; Rust sanitizes on write and the screen shows what was actually kept.
+
+  The three belong together because they add up: the sending device's watch delay (Syncthing
+  waiting before it hands the file over) plus the receiving one's pull interval. With the
+  defaults that is about twenty seconds. The watch delay is Syncthing's own folder setting,
+  so `sync_set_timing` pushes it over REST after every daemon start and on every save —
+  `sync_ensure_folder` cannot, because it returns early on a folder that already exists.
 
 ## Home-screen widgets
 

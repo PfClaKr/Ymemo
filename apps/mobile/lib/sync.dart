@@ -39,7 +39,14 @@ class SyncPaths {
 /// A [ChangeNotifier] rather than anything larger: three screens read it and nothing else in
 /// the app has state worth a framework.
 class SyncController extends ChangeNotifier with WidgetsBindingObserver {
-  SyncController(this.paths);
+  SyncController(this.paths, {this.readTiming});
+
+  /// Where the sync timings come from, read at the moment the daemon comes up.
+  ///
+  /// A callback rather than two numbers, because the settings can change while the app runs
+  /// and the daemon restarts every time the app returns to the foreground; reading them at
+  /// the moment of use is what keeps the two from drifting apart.
+  final ({int watchDelaySeconds, int rescanSeconds}) Function()? readTiming;
 
   /// How long a join broadcasts before giving up. Each attempt costs both sides an Argon2
   /// derivation, so this is a handful of retries, not a busy loop.
@@ -124,6 +131,9 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
         vaultDir: paths.vaultDir,
       );
       _error = null;
+      // Syncthing's own config, so it has to be pushed after every start — the daemon is a
+      // fresh process each time and only remembers what its config.xml already said.
+      await _applyTiming();
       _startPendingPoll();
     } catch (e) {
       _code = null;
@@ -131,6 +141,21 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
     } finally {
       _starting = false;
       notifyListeners();
+    }
+  }
+
+  /// Hands the daemon the watch delay and rescan interval. Best effort: a failure here
+  /// costs slower sync, never a start.
+  Future<void> _applyTiming() async {
+    final t = readTiming?.call();
+    if (t == null) return;
+    try {
+      await ffi.syncSetTiming(
+        watchDelaySeconds: t.watchDelaySeconds,
+        rescanSeconds: t.rescanSeconds,
+      );
+    } catch (e) {
+      debugPrint('could not apply the sync timing: $e');
     }
   }
 

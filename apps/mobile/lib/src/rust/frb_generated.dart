@@ -68,7 +68,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -1967235946;
+  int get rustContentHash => 882587836;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -182,6 +182,9 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiSyncRejectDevice({required String deviceId});
 
   Future<bool> crateApiSyncRunning();
+
+  Future<void> crateApiSyncSetTiming(
+      {required int watchDelaySeconds, required int rescanSeconds});
 
   Future<String> crateApiSyncStart(
       {required String binaryPath,
@@ -1275,6 +1278,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiSyncSetTiming(
+      {required int watchDelaySeconds, required int rescanSeconds}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_i_32(watchDelaySeconds, serializer);
+        sse_encode_i_32(rescanSeconds, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 43, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateApiSyncSetTimingConstMeta,
+      argValues: [watchDelaySeconds, rescanSeconds],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiSyncSetTimingConstMeta => const TaskConstMeta(
+        debugName: "sync_set_timing",
+        argNames: ["watchDelaySeconds", "rescanSeconds"],
+      );
+
+  @override
   Future<String> crateApiSyncStart(
       {required String binaryPath,
       required String homeDir,
@@ -1286,7 +1315,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(homeDir, serializer);
         sse_encode_String(vaultDir, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 43, port: port_);
+            funcId: 44, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -1309,7 +1338,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 44, port: port_);
+            funcId: 45, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1333,7 +1362,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(deviceId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 45, port: port_);
+            funcId: 46, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1357,7 +1386,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(peerDeviceId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 46, port: port_);
+            funcId: 47, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -1381,7 +1410,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 47, port: port_);
+            funcId: 48, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_box_autoadd_ffi_release,
@@ -1407,7 +1436,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(current, serializer);
         sse_encode_String(newPassword, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 48, port: port_);
+            funcId: 49, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1431,7 +1460,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 49, port: port_);
+            funcId: 50, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1455,7 +1484,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(vaultDir, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 50, port: port_);
+            funcId: 51, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -1479,7 +1508,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(vaultDir, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 51, port: port_);
+            funcId: 52, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -1503,7 +1532,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 52, port: port_);
+            funcId: 53, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -1527,7 +1556,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 53, port: port_);
+            funcId: 54, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_prim_u_8_strict,
@@ -1550,7 +1579,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 54, port: port_);
+            funcId: 55, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -1579,7 +1608,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(cacheDbPath, serializer);
         sse_encode_String(password, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 55, port: port_);
+            funcId: 56, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1608,7 +1637,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(cacheDbPath, serializer);
         sse_encode_list_prim_u_8_loose(key, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 56, port: port_);
+            funcId: 57, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1634,7 +1663,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(vaultDir, serializer);
         sse_encode_String(cacheDbPath, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 57, port: port_);
+            funcId: 58, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1663,7 +1692,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(code, serializer);
         sse_encode_String(newPassword, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 58, port: port_);
+            funcId: 59, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1688,7 +1717,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(name, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 59, port: port_);
+            funcId: 60, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -1820,15 +1849,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FfiSettings dco_decode_ffi_settings(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return FfiSettings(
       lang: dco_decode_String(arr[0]),
       unlockDays: dco_decode_i_32(arr[1]),
       lockOnBackground: dco_decode_bool(arr[2]),
-      biometricUnlock: dco_decode_bool(arr[3]),
-      updateCheck: dco_decode_bool(arr[4]),
-      lastUpdateCheck: dco_decode_i_64(arr[5]),
+      mergeSeconds: dco_decode_i_32(arr[3]),
+      watchDelaySeconds: dco_decode_i_32(arr[4]),
+      rescanSeconds: dco_decode_i_32(arr[5]),
+      biometricUnlock: dco_decode_bool(arr[6]),
+      updateCheck: dco_decode_bool(arr[7]),
+      lastUpdateCheck: dco_decode_i_64(arr[8]),
     );
   }
 
@@ -1849,9 +1881,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FfiStrings dco_decode_ffi_strings(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 116)
+    if (arr.length != 125)
       throw Exception(
-          'unexpected arr length: expect 116 but see ${arr.length}');
+          'unexpected arr length: expect 125 but see ${arr.length}');
     return FfiStrings(
       addPhoto: dco_decode_String(arr[0]),
       bodyHint: dco_decode_String(arr[1]),
@@ -1871,104 +1903,113 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       language: dco_decode_String(arr[15]),
       languageAuto: dco_decode_String(arr[16]),
       lockNow: dco_decode_String(arr[17]),
-      biometricFailed: dco_decode_String(arr[18]),
-      biometricPrompt: dco_decode_String(arr[19]),
-      biometricUnavailable: dco_decode_String(arr[20]),
-      biometricUnlock: dco_decode_String(arr[21]),
-      biometricUnlockHint: dco_decode_String(arr[22]),
-      lockOnBackground: dco_decode_String(arr[23]),
-      lockOnBackgroundHint: dco_decode_String(arr[24]),
-      lockSection: dco_decode_String(arr[25]),
-      saved: dco_decode_String(arr[26]),
-      settings: dco_decode_String(arr[27]),
-      unlockDays: dco_decode_String(arr[28]),
-      unlockDaysHint: dco_decode_String(arr[29]),
-      setupQuestion: dco_decode_String(arr[30]),
-      setupNewTitle: dco_decode_String(arr[31]),
-      setupNewDetail: dco_decode_String(arr[32]),
-      setupLinkTitle: dco_decode_String(arr[33]),
-      setupLinkDetail: dco_decode_String(arr[34]),
-      renameVault: dco_decode_String(arr[35]),
-      vaultName: dco_decode_String(arr[36]),
-      updateAvailable: dco_decode_String(arr[37]),
-      updateCheck: dco_decode_String(arr[38]),
-      updateCheckHint: dco_decode_String(arr[39]),
-      updateChecking: dco_decode_String(arr[40]),
-      updateLatest: dco_decode_String(arr[41]),
-      updateNow: dco_decode_String(arr[42]),
-      updateOpen: dco_decode_String(arr[43]),
-      updateSection: dco_decode_String(arr[44]),
-      version: dco_decode_String(arr[45]),
-      cancel: dco_decode_String(arr[46]),
-      delete: dco_decode_String(arr[47]),
-      deleteGroupHint: dco_decode_String(arr[48]),
-      emptyFolder: dco_decode_String(arr[49]),
-      folderName: dco_decode_String(arr[50]),
-      moveTo: dco_decode_String(arr[51]),
-      newGroup: dco_decode_String(arr[52]),
-      ok: dco_decode_String(arr[53]),
-      rename: dco_decode_String(arr[54]),
-      rootFolder: dco_decode_String(arr[55]),
-      listTitle: dco_decode_String(arr[56]),
-      masterPassword: dco_decode_String(arr[57]),
-      myCode: dco_decode_String(arr[58]),
-      newMemo: dco_decode_String(arr[59]),
-      noDevices: dco_decode_String(arr[60]),
-      opening: dco_decode_String(arr[61]),
-      photoCamera: dco_decode_String(arr[62]),
-      photoGallery: dco_decode_String(arr[63]),
-      photoMissing: dco_decode_String(arr[64]),
-      photoRemove: dco_decode_String(arr[65]),
-      photoSize: dco_decode_String(arr[66]),
-      save: dco_decode_String(arr[67]),
-      scanHint: dco_decode_String(arr[68]),
-      scanQr: dco_decode_String(arr[69]),
-      syncDevices: dco_decode_String(arr[70]),
-      syncNow: dco_decode_String(arr[71]),
-      syncStarting: dco_decode_String(arr[72]),
-      syncUnavailable: dco_decode_String(arr[73]),
-      titleHint: dco_decode_String(arr[74]),
-      unlock: dco_decode_String(arr[75]),
-      unpair: dco_decode_String(arr[76]),
-      color: dco_decode_String(arr[77]),
-      changePassword: dco_decode_String(arr[78]),
-      confirmPassword: dco_decode_String(arr[79]),
-      createVault: dco_decode_String(arr[80]),
-      currentPassword: dco_decode_String(arr[81]),
-      forgotPassword: dco_decode_String(arr[82]),
-      issueRecovery: dco_decode_String(arr[83]),
-      newPassword: dco_decode_String(arr[84]),
-      newVaultHint: dco_decode_String(arr[85]),
-      noRecovery: dco_decode_String(arr[86]),
-      passwordChanged: dco_decode_String(arr[87]),
-      passwordHint: dco_decode_String(arr[88]),
-      passwordMismatch: dco_decode_String(arr[89]),
-      recoveryAbsent: dco_decode_String(arr[90]),
-      recoveryAck: dco_decode_String(arr[91]),
-      recoveryCode: dco_decode_String(arr[92]),
-      recoveryHint: dco_decode_String(arr[93]),
-      recoveryIssued: dco_decode_String(arr[94]),
-      recoveryPresent: dco_decode_String(arr[95]),
-      recoveryPrompt: dco_decode_String(arr[96]),
-      recoveryWarning: dco_decode_String(arr[97]),
-      reissueRecovery: dco_decode_String(arr[98]),
-      resetDone: dco_decode_String(arr[99]),
-      resetPassword: dco_decode_String(arr[100]),
-      resetVault: dco_decode_String(arr[101]),
-      resetVaultConfirm: dco_decode_String(arr[102]),
-      resetVaultHint: dco_decode_String(arr[103]),
-      securitySection: dco_decode_String(arr[104]),
-      allow: dco_decode_String(arr[105]),
-      deviceId: dco_decode_String(arr[106]),
-      pairCancelWait: dco_decode_String(arr[107]),
-      pairConnected: dco_decode_String(arr[108]),
-      pairRequest: dco_decode_String(arr[109]),
-      pairRequestHint: dco_decode_String(arr[110]),
-      pairVerification: dco_decode_String(arr[111]),
-      pairVerify: dco_decode_String(arr[112]),
-      pairWaiting: dco_decode_String(arr[113]),
-      pairWaitingHint: dco_decode_String(arr[114]),
-      reject: dco_decode_String(arr[115]),
+      advanced: dco_decode_String(arr[18]),
+      advancedHint: dco_decode_String(arr[19]),
+      mergeSeconds: dco_decode_String(arr[20]),
+      mergeSecondsHint: dco_decode_String(arr[21]),
+      watchDelay: dco_decode_String(arr[22]),
+      watchDelayHint: dco_decode_String(arr[23]),
+      rescan: dco_decode_String(arr[24]),
+      rescanHint: dco_decode_String(arr[25]),
+      secondsUnit: dco_decode_String(arr[26]),
+      biometricFailed: dco_decode_String(arr[27]),
+      biometricPrompt: dco_decode_String(arr[28]),
+      biometricUnavailable: dco_decode_String(arr[29]),
+      biometricUnlock: dco_decode_String(arr[30]),
+      biometricUnlockHint: dco_decode_String(arr[31]),
+      lockOnBackground: dco_decode_String(arr[32]),
+      lockOnBackgroundHint: dco_decode_String(arr[33]),
+      lockSection: dco_decode_String(arr[34]),
+      saved: dco_decode_String(arr[35]),
+      settings: dco_decode_String(arr[36]),
+      unlockDays: dco_decode_String(arr[37]),
+      unlockDaysHint: dco_decode_String(arr[38]),
+      setupQuestion: dco_decode_String(arr[39]),
+      setupNewTitle: dco_decode_String(arr[40]),
+      setupNewDetail: dco_decode_String(arr[41]),
+      setupLinkTitle: dco_decode_String(arr[42]),
+      setupLinkDetail: dco_decode_String(arr[43]),
+      renameVault: dco_decode_String(arr[44]),
+      vaultName: dco_decode_String(arr[45]),
+      updateAvailable: dco_decode_String(arr[46]),
+      updateCheck: dco_decode_String(arr[47]),
+      updateCheckHint: dco_decode_String(arr[48]),
+      updateChecking: dco_decode_String(arr[49]),
+      updateLatest: dco_decode_String(arr[50]),
+      updateNow: dco_decode_String(arr[51]),
+      updateOpen: dco_decode_String(arr[52]),
+      updateSection: dco_decode_String(arr[53]),
+      version: dco_decode_String(arr[54]),
+      cancel: dco_decode_String(arr[55]),
+      delete: dco_decode_String(arr[56]),
+      deleteGroupHint: dco_decode_String(arr[57]),
+      emptyFolder: dco_decode_String(arr[58]),
+      folderName: dco_decode_String(arr[59]),
+      moveTo: dco_decode_String(arr[60]),
+      newGroup: dco_decode_String(arr[61]),
+      ok: dco_decode_String(arr[62]),
+      rename: dco_decode_String(arr[63]),
+      rootFolder: dco_decode_String(arr[64]),
+      listTitle: dco_decode_String(arr[65]),
+      masterPassword: dco_decode_String(arr[66]),
+      myCode: dco_decode_String(arr[67]),
+      newMemo: dco_decode_String(arr[68]),
+      noDevices: dco_decode_String(arr[69]),
+      opening: dco_decode_String(arr[70]),
+      photoCamera: dco_decode_String(arr[71]),
+      photoGallery: dco_decode_String(arr[72]),
+      photoMissing: dco_decode_String(arr[73]),
+      photoRemove: dco_decode_String(arr[74]),
+      photoSize: dco_decode_String(arr[75]),
+      save: dco_decode_String(arr[76]),
+      scanHint: dco_decode_String(arr[77]),
+      scanQr: dco_decode_String(arr[78]),
+      syncDevices: dco_decode_String(arr[79]),
+      syncNow: dco_decode_String(arr[80]),
+      syncStarting: dco_decode_String(arr[81]),
+      syncUnavailable: dco_decode_String(arr[82]),
+      titleHint: dco_decode_String(arr[83]),
+      unlock: dco_decode_String(arr[84]),
+      unpair: dco_decode_String(arr[85]),
+      color: dco_decode_String(arr[86]),
+      changePassword: dco_decode_String(arr[87]),
+      confirmPassword: dco_decode_String(arr[88]),
+      createVault: dco_decode_String(arr[89]),
+      currentPassword: dco_decode_String(arr[90]),
+      forgotPassword: dco_decode_String(arr[91]),
+      issueRecovery: dco_decode_String(arr[92]),
+      newPassword: dco_decode_String(arr[93]),
+      newVaultHint: dco_decode_String(arr[94]),
+      noRecovery: dco_decode_String(arr[95]),
+      passwordChanged: dco_decode_String(arr[96]),
+      passwordHint: dco_decode_String(arr[97]),
+      passwordMismatch: dco_decode_String(arr[98]),
+      recoveryAbsent: dco_decode_String(arr[99]),
+      recoveryAck: dco_decode_String(arr[100]),
+      recoveryCode: dco_decode_String(arr[101]),
+      recoveryHint: dco_decode_String(arr[102]),
+      recoveryIssued: dco_decode_String(arr[103]),
+      recoveryPresent: dco_decode_String(arr[104]),
+      recoveryPrompt: dco_decode_String(arr[105]),
+      recoveryWarning: dco_decode_String(arr[106]),
+      reissueRecovery: dco_decode_String(arr[107]),
+      resetDone: dco_decode_String(arr[108]),
+      resetPassword: dco_decode_String(arr[109]),
+      resetVault: dco_decode_String(arr[110]),
+      resetVaultConfirm: dco_decode_String(arr[111]),
+      resetVaultHint: dco_decode_String(arr[112]),
+      securitySection: dco_decode_String(arr[113]),
+      allow: dco_decode_String(arr[114]),
+      deviceId: dco_decode_String(arr[115]),
+      pairCancelWait: dco_decode_String(arr[116]),
+      pairConnected: dco_decode_String(arr[117]),
+      pairRequest: dco_decode_String(arr[118]),
+      pairRequestHint: dco_decode_String(arr[119]),
+      pairVerification: dco_decode_String(arr[120]),
+      pairVerify: dco_decode_String(arr[121]),
+      pairWaiting: dco_decode_String(arr[122]),
+      pairWaitingHint: dco_decode_String(arr[123]),
+      reject: dco_decode_String(arr[124]),
     );
   }
 
@@ -2188,6 +2229,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_lang = sse_decode_String(deserializer);
     var var_unlockDays = sse_decode_i_32(deserializer);
     var var_lockOnBackground = sse_decode_bool(deserializer);
+    var var_mergeSeconds = sse_decode_i_32(deserializer);
+    var var_watchDelaySeconds = sse_decode_i_32(deserializer);
+    var var_rescanSeconds = sse_decode_i_32(deserializer);
     var var_biometricUnlock = sse_decode_bool(deserializer);
     var var_updateCheck = sse_decode_bool(deserializer);
     var var_lastUpdateCheck = sse_decode_i_64(deserializer);
@@ -2195,6 +2239,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         lang: var_lang,
         unlockDays: var_unlockDays,
         lockOnBackground: var_lockOnBackground,
+        mergeSeconds: var_mergeSeconds,
+        watchDelaySeconds: var_watchDelaySeconds,
+        rescanSeconds: var_rescanSeconds,
         biometricUnlock: var_biometricUnlock,
         updateCheck: var_updateCheck,
         lastUpdateCheck: var_lastUpdateCheck);
@@ -2231,6 +2278,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_language = sse_decode_String(deserializer);
     var var_languageAuto = sse_decode_String(deserializer);
     var var_lockNow = sse_decode_String(deserializer);
+    var var_advanced = sse_decode_String(deserializer);
+    var var_advancedHint = sse_decode_String(deserializer);
+    var var_mergeSeconds = sse_decode_String(deserializer);
+    var var_mergeSecondsHint = sse_decode_String(deserializer);
+    var var_watchDelay = sse_decode_String(deserializer);
+    var var_watchDelayHint = sse_decode_String(deserializer);
+    var var_rescan = sse_decode_String(deserializer);
+    var var_rescanHint = sse_decode_String(deserializer);
+    var var_secondsUnit = sse_decode_String(deserializer);
     var var_biometricFailed = sse_decode_String(deserializer);
     var var_biometricPrompt = sse_decode_String(deserializer);
     var var_biometricUnavailable = sse_decode_String(deserializer);
@@ -2348,6 +2404,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         language: var_language,
         languageAuto: var_languageAuto,
         lockNow: var_lockNow,
+        advanced: var_advanced,
+        advancedHint: var_advancedHint,
+        mergeSeconds: var_mergeSeconds,
+        mergeSecondsHint: var_mergeSecondsHint,
+        watchDelay: var_watchDelay,
+        watchDelayHint: var_watchDelayHint,
+        rescan: var_rescan,
+        rescanHint: var_rescanHint,
+        secondsUnit: var_secondsUnit,
         biometricFailed: var_biometricFailed,
         biometricPrompt: var_biometricPrompt,
         biometricUnavailable: var_biometricUnavailable,
@@ -2685,6 +2750,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.lang, serializer);
     sse_encode_i_32(self.unlockDays, serializer);
     sse_encode_bool(self.lockOnBackground, serializer);
+    sse_encode_i_32(self.mergeSeconds, serializer);
+    sse_encode_i_32(self.watchDelaySeconds, serializer);
+    sse_encode_i_32(self.rescanSeconds, serializer);
     sse_encode_bool(self.biometricUnlock, serializer);
     sse_encode_bool(self.updateCheck, serializer);
     sse_encode_i_64(self.lastUpdateCheck, serializer);
@@ -2720,6 +2788,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.language, serializer);
     sse_encode_String(self.languageAuto, serializer);
     sse_encode_String(self.lockNow, serializer);
+    sse_encode_String(self.advanced, serializer);
+    sse_encode_String(self.advancedHint, serializer);
+    sse_encode_String(self.mergeSeconds, serializer);
+    sse_encode_String(self.mergeSecondsHint, serializer);
+    sse_encode_String(self.watchDelay, serializer);
+    sse_encode_String(self.watchDelayHint, serializer);
+    sse_encode_String(self.rescan, serializer);
+    sse_encode_String(self.rescanHint, serializer);
+    sse_encode_String(self.secondsUnit, serializer);
     sse_encode_String(self.biometricFailed, serializer);
     sse_encode_String(self.biometricPrompt, serializer);
     sse_encode_String(self.biometricUnavailable, serializer);
