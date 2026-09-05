@@ -75,6 +75,14 @@ pub struct Settings {
     pub update_check: bool,
     /// When that last happened (epoch millis), so a restart does not mean another request.
     pub last_update_check: i64,
+    /// Ids of the memos whose sticky window must **not** stay above other windows.
+    ///
+    /// The exceptions, not the pinned ones: a sticky is on top by default, as every sticky
+    /// always has been, so an existing install and a memo this device has never seen both
+    /// behave the way they did before there was a pin. Device-local on purpose — which
+    /// window covers which is a property of a desktop, not of a memo, and syncing it would
+    /// also put one log entry per pin toggle in front of every other device.
+    pub unpinned_memos: Vec<String>,
 }
 
 impl Default for Settings {
@@ -93,6 +101,7 @@ impl Default for Settings {
             keep_versions_days: 30,
             update_check: true,
             last_update_check: 0,
+            unpinned_memos: Vec::new(),
         }
     }
 }
@@ -150,6 +159,27 @@ impl Settings {
         if self.last_update_check < 0 || self.last_update_check > now_millis() {
             self.last_update_check = 0;
         }
+        // A hand-edited file, or a memo unpinned on two runs before the first save landed.
+        self.unpinned_memos.sort();
+        self.unpinned_memos.dedup();
+    }
+
+    /// Whether this memo's sticky stays above other windows.
+    pub fn memo_pinned(&self, id: &str) -> bool {
+        !self.unpinned_memos.iter().any(|m| m == id)
+    }
+
+    /// Records the pin state of one memo. Returns whether anything changed.
+    pub fn set_memo_pinned(&mut self, id: &str, pinned: bool) -> bool {
+        if pinned == self.memo_pinned(id) {
+            return false;
+        }
+        if pinned {
+            self.unpinned_memos.retain(|m| m != id);
+        } else {
+            self.unpinned_memos.push(id.to_string());
+        }
+        true
     }
 
     /// Whether an update check is due: enabled, and not already done today.
@@ -314,8 +344,11 @@ mod tests {
             update_check: true,
             // A timestamp from the future, as a clock that went backwards would leave.
             last_update_check: i64::MAX,
+            // The same memo twice, as two runs racing to save the same unpin would leave.
+            unpinned_memos: vec!["b".into(), "a".into(), "b".into()],
         };
         s.sanitize();
+        assert_eq!(s.unpinned_memos, vec!["a".to_string(), "b".to_string()]);
         assert_eq!(s.lang, "auto");
         assert_eq!(s.unlock_days, UNLOCK_DAYS_MAX);
         assert_eq!(s.idle_lock_minutes, 0);
@@ -328,6 +361,25 @@ mod tests {
         assert_eq!(s.watch_delay_seconds, WATCH_DELAY_RANGE.0);
         assert_eq!(s.rescan_seconds, RESCAN_SECONDS_RANGE.0);
         assert_eq!(s.keep_versions_days, KEEP_VERSIONS_DAYS_MAX);
+    }
+
+    // A sticky is on top unless this device says otherwise, so a memo nobody has touched
+    // behaves as every sticky did before the pin existed.
+    #[test]
+    fn memos_are_pinned_until_this_device_says_otherwise() {
+        let mut s = Settings::default();
+        assert!(s.memo_pinned("m1"));
+
+        assert!(s.set_memo_pinned("m1", false));
+        assert!(!s.memo_pinned("m1"));
+        assert!(s.memo_pinned("m2"));
+        // Already unpinned: nothing to write, so nothing to save.
+        assert!(!s.set_memo_pinned("m1", false));
+
+        assert!(s.set_memo_pinned("m1", true));
+        assert!(s.memo_pinned("m1"));
+        assert!(s.unpinned_memos.is_empty());
+        assert!(!s.set_memo_pinned("m1", true));
     }
 
     #[test]

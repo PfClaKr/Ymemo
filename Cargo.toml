@@ -36,6 +36,10 @@ rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "a
 #  - Windows: tray-icon (Shell_NotifyIcon); default features off to drop gtk/libxdo
 ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
 tray-icon = { version = "0.24", default-features = false }
+# Keeping the sticky windows out of the taskbar on X11 (`_NET_WM_STATE_SKIP_TASKBAR`), which
+# winit exposes no API for. Already in the tree — winit's own X11 backend is built on it — so
+# this only makes an existing crate reachable from our code.
+x11rb = "0.13"
 
 # Storage and data
 rusqlite = { version = "0.32", features = ["bundled"] } # compiled from source, no system libsqlite3

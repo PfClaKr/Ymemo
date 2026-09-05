@@ -6,7 +6,7 @@ import { Palette, Glyph } from "theme.slint";
 // Sticky window: one frameless window per memo.
 //  - Drag the title bar to move it (handled by Rust, with snapping on X11).
 //  - Double-click the title bar to fold it to a thin bar.
-//  - Palette, new memo, and close (which does not delete).
+//  - Palette, new memo, pin (stay on top), and close (which does not delete).
 // ---------------------------------------------------------------------------
 /// One photo on a sticky, filled in by Rust.
 ///
@@ -318,7 +318,10 @@ component NotePad {
 export component StickyWindow inherits Window {
     title: root.memo-title == "" ? Strings.ui_sticky_window_title : root.memo-title;
     no-frame: true;
-    always-on-top: true;
+    // Per note, not per app: a reminder wants to sit over everything, a long note being
+    // written next to a browser does not. Slint reapplies the window level when this
+    // changes, so the pin takes effect without reopening the window.
+    always-on-top: root.pinned;
     background: #0000;
     // A sticky is a scrap of paper, not a document window: it opens the size of the note it
     // usually holds and is pulled bigger when one outgrows it. Anything larger simply covers
@@ -334,6 +337,9 @@ export component StickyWindow inherits Window {
     in property <string> sticky-color: "yellow";
     // Window opacity in percent; in-out because the slider previews it live.
     in-out property <float> sticky-opacity: 100;
+    // Stay above other windows. Device-local (settings.json), never synced: which windows
+    // cover which is a property of this desktop, not of the memo.
+    in property <bool> pinned: true;
     in property <bool> collapsed: false;
     in property <[PhotoRow]> photos: [];
     // True while a photo is being dragged or resized. Rust reads it before pushing a merged
@@ -349,6 +355,7 @@ export component StickyWindow inherits Window {
     callback remove-photo(string);
     callback close-requested();
     callback new-memo();
+    callback toggle-pin();
     callback set-color(string);
     callback set-opacity(float);
     callback toggle-collapse();
@@ -390,8 +397,16 @@ export component StickyWindow inherits Window {
         border-width: 1px;
         border-color: Palette.edge(root.sticky-color);
         clip: true;
-        // Fade the whole window, text included, so the desktop shows through.
-        opacity: root.sticky-opacity / 100;
+        // Fade the whole window, text included, so the desktop shows through — except while
+        // the note is being written in. A note at 40% is a note you can see past, which is
+        // the point of the setting and useless the moment you are trying to read your own
+        // sentence through it, so the caret takes the fade off and leaving puts it back.
+        //
+        // The trigger is the caret and not the pointer or the window's own focus: dragging
+        // the title bar or reaching for the palette is not writing, and the opacity slider
+        // sits below with the focus on itself, so it still previews what it is setting.
+        opacity: body.has-focus ? 1.0 : root.sticky-opacity / 100;
+        animate opacity { duration: 120ms; }
 
         VerticalLayout {
             // ---- Title bar: drag handle and fold toggle ----
@@ -438,7 +453,7 @@ export component StickyWindow inherits Window {
                     // Folded, the window is one bar tall and everything these buttons open —
                     // the file dialog, the history window, the colour panel — either lands on
                     // a note that is not there or reopens it behind the user's back. Only the
-                    // unfold (double-click) and the close stay.
+                    // unfold (double-click), the pin and the close stay.
                     if !root.collapsed: photo-ta := TouchArea {
                         width: 20px;
                         // Drawn, not 📎: an emoji needs an emoji font, and where there is
@@ -502,24 +517,39 @@ export component StickyWindow inherits Window {
                         rest-opacity: 0.55;
                         clicked => { root.new-memo(); }
                     }
-                    // Close: the one button that must never be hunted for. The ink alone
-                    // disappeared into the pastel bar, so it sits on a chip of its own —
-                    // dark at rest, red under the pointer, white glyph on both.
+                    // Stay on top, or drop back among the ordinary windows. Kept while
+                    // folded, unlike the buttons above: a folded sticky is exactly the one
+                    // that is being left in view, and this opens nothing that a note which
+                    // is not on screen could be missing. The struck-through pin is the
+                    // state, not the action — it shows what the window is doing now.
+                    BarButton {
+                        icon: root.pinned ? "pin" : "pin-off";
+                        color-key: root.sticky-color;
+                        icon-size: 13px;
+                        rest-opacity: root.pinned ? 0.85 : 0.45;
+                        clicked => { root.toggle-pin(); }
+                    }
+                    // Close. It used to sit on a chip of the title bar's own ink, which on a
+                    // pale note is a near-black dot and the loudest thing in the window — on
+                    // a scrap of paper this small, louder than the writing. It is the bar's
+                    // colour at rest now, drawn like its neighbours, and only turns into a
+                    // red chip under the pointer, where the warning is worth something.
                     close-ta := TouchArea {
                         width: 22px;
                         Rectangle {
                             width: 17px;
                             height: 17px;
                             border-radius: 9px;
-                            background: close-ta.has-hover ? #d64541 : Palette.ink(root.sticky-color);
+                            background: close-ta.has-hover ? #d64541 : Palette.bar(root.sticky-color);
                             Glyph {
                                 x: (parent.width - self.width) / 2;
                                 y: (parent.height - self.height) / 2;
                                 width: 11px;
                                 height: 11px;
                                 name: "close";
-                                stroke: #ffffff;
+                                stroke: close-ta.has-hover ? #ffffff : Palette.ink(root.sticky-color);
                                 stroke-width: 1.6px;
+                                opacity: close-ta.has-hover ? 1 : 0.6;
                             }
                         }
                         clicked => { root.close-requested(); }

@@ -544,6 +544,13 @@ fn main() -> Result<()> {
             }
             if !is_group {
                 close_sticky(&ctx.stickies, id.as_str()); // clean up an open sticky
+                // Drop its pin too, or settings.json accumulates the ids of memos that no
+                // longer exist. Only a local delete can do this; one that arrives over sync
+                // leaves its entry behind, which costs a string and nothing else.
+                let mut settings = ctx.settings.borrow_mut();
+                if settings.set_memo_pinned(id.as_str(), true) {
+                    settings.save(&ctx.dir);
+                }
             }
         });
     }
@@ -719,6 +726,9 @@ fn main() -> Result<()> {
                 // Not a user-visible field: keep whatever the last check recorded, so saving
                 // settings does not silently schedule another request.
                 last_update_check: ctx.settings.borrow().last_update_check,
+                // Likewise: the pins belong to the sticky windows, not to this dialog, and
+                // rebuilding the struct from it would unpin every note that is open.
+                unpinned_memos: ctx.settings.borrow().unpinned_memos.clone(),
             };
             next.sanitize();
             let prev_unlock_days = ctx.settings.borrow().unlock_days;

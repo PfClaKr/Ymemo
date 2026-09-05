@@ -7026,6 +7026,7 @@ dependencies = [
  "tray-icon",
  "windows-sys 0.61.2",
  "winresource",
+ "x11rb",
  "ymemo-core",
  "ymemo-i18n",
 ]
