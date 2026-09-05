@@ -242,7 +242,7 @@ mod tests {
             "ymemo-0.10.0-android-armeabi-v7a.apk",
             "ymemo-0.10.0-android-x86_64.apk",
             "ymemo-ffi-ios.zip",
-            "ymemo-setup-x86_64.exe",
+            "ymemo-0.10.0-setup-x86_64.exe",
             "ymemo_0.10.0_amd64.deb",
         ];
         serde_json::json!({
@@ -264,7 +264,7 @@ mod tests {
             "ymemo-0.10.0-android-armeabi-v7a.apk",
             "ymemo-0.10.0-android-x86_64.apk",
             "ymemo-ffi-ios.zip",
-            "ymemo-setup-x86_64.exe",
+            "ymemo-0.10.0-setup-x86_64.exe",
             "ymemo_0.10.0_amd64.deb",
         ];
         // Whatever this test is compiled for, at most one name may match — two would make

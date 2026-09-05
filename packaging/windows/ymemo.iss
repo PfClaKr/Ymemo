@@ -37,7 +37,10 @@ DefaultGroupName=Ymemo
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\Ymemo.exe
 UninstallDisplayName=Ymemo
-OutputBaseFilename=ymemo-setup-x86_64
+; Versioned like every other artifact (ymemo-<ver>-...): a setup.exe saved to a downloads
+; folder is otherwise the one file on the release page that cannot say which release it
+; came from. `update.rs` matches on the `-setup-x86_64.exe` suffix, so this stays found.
+OutputBaseFilename=ymemo-{#AppVersion}-setup-x86_64
 Compression=lzma2/max
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible

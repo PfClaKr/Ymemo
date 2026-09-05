@@ -4,7 +4,7 @@
 # Artifacts:
 #  - ymemo_<ver>_amd64.deb         Debian/Ubuntu package, syncthing included and removed with it
 #  - ymemo-<ver>-1.fc*.x86_64.rpm  Fedora package, likewise
-#  - ymemo-setup-x86_64.exe        Windows installer, likewise
+#  - ymemo-<ver>-setup-x86_64.exe  Windows installer, likewise
 #  - ymemo-<ver>-android-<abi>.apk Android app, one per ABI (see below)
 #  - ymemo-ffi-ios.zip             aarch64 device and simulator .a
 #
@@ -167,11 +167,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
           Remove-Item -Force "$PWD/cert.pfx" -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item packaging/windows/Output/ymemo-setup-x86_64.exe dist/
+          Copy-Item "packaging/windows/Output/ymemo-$version-setup-x86_64.exe" dist/
       - uses: actions/upload-artifact@v4
         with:
           name: windows-desktop
-          path: dist/ymemo-setup-x86_64.exe
+          path: dist/ymemo-*-setup-x86_64.exe
 
   android-app:
     needs: test
@@ -334,6 +334,6 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
             ymemo_*_amd64.deb \
             ymemo-*.rpm \
-            ymemo-setup-x86_64.exe \
+            ymemo-*-setup-x86_64.exe \
             ymemo-*-android-*.apk \
             ymemo-ffi-ios.zip
