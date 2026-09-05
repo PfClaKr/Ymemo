@@ -14,6 +14,11 @@ end-to-end encrypted, with **no server of anyone's in between**, and no account 
   never leaves it at all.
 - **Nothing is lost** — two devices edited at once merge into one note instead of one winning.
 
+![A memo typed on one device appearing on the other](docs/screenshots/sync.gif)
+
+*Two paired devices, one vault, nothing in between. The pause is shortened here: with the
+default settings a change reaches the other device in about twenty seconds.*
+
 ## Getting it
 
 | | Download | Notes |

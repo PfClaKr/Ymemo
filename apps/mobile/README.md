@@ -418,11 +418,6 @@ new device is supposed to get the memos.
 
 ## Remaining work
 
-- [ ] **Verify sync on real hardware.** Locking, biometric unlock, settings, updates and the
-      widgets have all been run on an emulator (see above), but the daemon and pairing have
-      not: an emulator sits behind NAT, so it cannot exchange LAN broadcasts with anything,
-      and a checkout without `libsyncthing.so` has no daemon to run. Two real devices, or a
-      device and the desktop, are what is left.
 - [ ] Show this device's pairing code as a QR too, so the desktop is not left with typing.
 - [ ] cargokit integration, so gradle and Xcode build the Rust automatically.
 - [ ] Idle auto-lock while the app is open (the desktop's `idle_lock_minutes`) — **decided
