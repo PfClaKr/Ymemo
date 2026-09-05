@@ -14,7 +14,7 @@
 //! <data_dir>/ymemo.log.1   the one before it
 //! ```
 //!
-//! Two files of [`MAX_BYTES`] each, so the thing meant to help diagnose a full disk can never
+//! Two files of `MAX_BYTES` each, so the thing meant to help diagnose a full disk can never
 //! cause one. Nothing here returns an error or panics: a diagnostic that can break the app it
 //! is diagnosing is worse than no diagnostic.
 //!
