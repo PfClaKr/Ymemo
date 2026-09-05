@@ -73,6 +73,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_Security",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
+    # WS_EX_TOOLWINDOW on the sticky windows: the shell's own "not an application", and the
+    # only way to keep it from handing one a taskbar button in the first place.
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 # Flutter binding runtime. The runtime, the codegen CLI and the Dart package must all be

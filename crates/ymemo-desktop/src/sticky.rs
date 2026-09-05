@@ -154,7 +154,7 @@ pub(crate) fn new_memo(ctx: &Ctx) {
 /// very next `show`. See [`crate::window::skip_taskbar`].
 pub(crate) fn present_sticky(window: &StickyWindow) {
     present(window);
-    skip_taskbar(window.window());
+    skip_taskbar(window);
 }
 
 /// Brings one sticky to the front, showing it first if it is not on screen.
@@ -164,7 +164,7 @@ pub(crate) fn raise_sticky(window: &StickyWindow) {
         // repaint, and a note already on screen has nothing to repaint — the jolt would be
         // the only thing the user saw, times every note on the desk. The taskbar hint is
         // still re-applied, since it is one call and the shell is generous with buttons.
-        skip_taskbar(window.window());
+        skip_taskbar(window);
     } else {
         present_sticky(window);
     }

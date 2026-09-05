@@ -548,7 +548,7 @@ fn main() -> Result<()> {
                 // longer exist. Only a local delete can do this; one that arrives over sync
                 // leaves its entry behind, which costs a string and nothing else.
                 let mut settings = ctx.settings.borrow_mut();
-                if settings.set_memo_pinned(id.as_str(), true) {
+                if settings.set_memo_pinned(id.as_str(), false) {
                     settings.save(&ctx.dir);
                 }
             }
@@ -728,7 +728,7 @@ fn main() -> Result<()> {
                 last_update_check: ctx.settings.borrow().last_update_check,
                 // Likewise: the pins belong to the sticky windows, not to this dialog, and
                 // rebuilding the struct from it would unpin every note that is open.
-                unpinned_memos: ctx.settings.borrow().unpinned_memos.clone(),
+                pinned_memos: ctx.settings.borrow().pinned_memos.clone(),
             };
             next.sanitize();
             let prev_unlock_days = ctx.settings.borrow().unlock_days;
