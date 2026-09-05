@@ -138,6 +138,26 @@ pub(crate) fn skip_taskbar<T: ComponentHandle + 'static>(component: &T) {
     });
 }
 
+/// Re-applies [`skip_taskbar`] after the window level has been changed.
+///
+/// winit keeps its own `WindowFlags` and rebuilds the **whole** ex-style from them whenever
+/// one of them changes (`WindowFlags::to_window_styles`) — `WS_EX_APPWINDOW` back on, and
+/// anything added by hand gone. Pinning a note is exactly such a change, so pinning put the
+/// note straight back in the taskbar: measured on Windows, `0x00000190` before the pin and
+/// `0x00040118` after it.
+///
+/// Slint applies the changed property on the next turn of the event loop, so the hint is
+/// re-asserted on the turn after that. It cannot be done in the same breath as the toggle,
+/// because at that moment winit has not clobbered it yet.
+pub(crate) fn reassert_taskbar<T: ComponentHandle + 'static>(component: &T) {
+    let weak = component.as_weak();
+    slint::Timer::single_shot(Duration::ZERO, move || {
+        if let Some(component) = weak.upgrade() {
+            skip_taskbar(&component);
+        }
+    });
+}
+
 /// Raises a window above the others and gives it the keyboard focus.
 ///
 /// `present` only makes a window visible; a window that is already visible but buried stays
@@ -155,14 +175,21 @@ mod windows_impl {
     use i_slint_backend_winit::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use i_slint_backend_winit::winit::window::Window;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_TOOLWINDOW,
+        GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
     };
 
     /// Marks a window as a tool window, which is the shell's own idea of "not an application":
-    /// no taskbar button and no place in Alt+Tab.
+    /// no taskbar button, and no place in Alt+Tab either — the same statement.
     ///
-    /// Safe to call on a window that already has the style — the read-modify-write leaves it
-    /// exactly as it was, and every `present` comes back through here.
+    /// **Both halves are needed.** The shell's rule is that a window gets a button if it has
+    /// `WS_EX_APPWINDOW`, *or* it is top-level and unowned without `WS_EX_TOOLWINDOW` — so
+    /// `WS_EX_APPWINDOW` wins over the tool-window style, and winit puts it on every window it
+    /// creates. Adding one flag without clearing the other leaves the button exactly where it
+    /// was, which is measurable: the sticky came back reading `exstyle=0x00040190`, tool window
+    /// and app window at once.
+    ///
+    /// Safe to call on a window already in this state — the read-modify-write leaves it as it
+    /// was, and every `present` comes back through here.
     pub(super) fn tool_window(window: &Window) {
         let Ok(handle) = window.window_handle() else { return };
         let RawWindowHandle::Win32(win32) = handle.as_raw() else { return };
@@ -171,7 +198,10 @@ mod windows_impl {
         // the length of this call, and GWL_EXSTYLE is an isize on every supported target.
         unsafe {
             let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_TOOLWINDOW as isize);
+            let wanted = (style | WS_EX_TOOLWINDOW as isize) & !(WS_EX_APPWINDOW as isize);
+            if wanted != style {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, wanted);
+            }
         }
     }
 }

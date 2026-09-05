@@ -518,6 +518,9 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
                 settings.save(&ctx.dir);
             }
             w.set_pinned(pinned);
+            // Changing the level makes winit rebuild the ex-style from its own flags, which
+            // undoes the taskbar hint; see `window::reassert_taskbar`.
+            crate::window::reassert_taskbar(&w);
         });
     }
 
