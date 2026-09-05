@@ -17,10 +17,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// How long old file versions are kept: 30 days, after which staggered versioning drops
-/// them. Long enough to notice a vault that lost records, short enough to bound the disk.
-const MAX_VERSION_AGE_SECONDS: u64 = 30 * 24 * 60 * 60;
-
 /// How long to wait for a first start, key generation included.
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -186,7 +182,36 @@ impl Syncthing {
             }
             std::thread::sleep(Duration::from_millis(200));
         }
+
+        // Best effort: a daemon that will not take this still syncs, and refusing to start
+        // over a privacy default we merely prefer would be the wrong trade.
+        if let Err(e) = st.disable_crash_reporting() {
+            crate::diag!("could not turn syncthing's crash reporting off: {e}");
+        }
         Ok(st)
+    }
+
+    /// Turns off Syncthing's own crash reporting.
+    ///
+    /// **Not a setting, a correction.** Syncthing enables it by default and posts crashes to
+    /// `crash.syncthing.net`, which is a third party this app never told anyone about — and
+    /// an app whose whole claim is that nothing of yours leaves your devices cannot ship a
+    /// component that quietly phones home. Nobody would turn this back on, so it is not
+    /// offered as a choice.
+    ///
+    /// It runs at the end of [`Syncthing::spawn`], which leaves a window: a crash during
+    /// those first few seconds is still reportable. Closing that would mean writing
+    /// `config.xml` before the daemon's first start, and the daemon is what creates it.
+    fn disable_crash_reporting(&self) -> Result<()> {
+        let url = format!("{}/rest/config/options", self.base_url);
+        let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
+        let mut options: serde_json::Value = res.body_mut().read_json()?;
+        if options["crashReportingEnabled"] == serde_json::json!(false) {
+            return Ok(()); // already off, and a PUT here restarts more than it needs to
+        }
+        options["crashReportingEnabled"] = serde_json::json!(false);
+        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&options)?;
+        Ok(())
     }
 
     fn ping(&self) -> Result<()> {
@@ -228,7 +253,59 @@ impl Syncthing {
         Ok(())
     }
 
-    /// Turns on Syncthing's file versioning for the vault folder, if it has none.
+    /// How fast a change on one device becomes a change on the others.
+    ///
+    /// Two numbers, and the delay a user actually notices is their **sum with the merge
+    /// interval on the receiving side**: Syncthing waits `watch_delay_s` after a write
+    /// before it acts on it, ships the file, and the other app then picks it up on its own
+    /// timer. With the defaults (10 + 15) a memo takes up to twenty-odd seconds to appear.
+    ///
+    /// `rescan_s` is the fallback sweep for changes the filesystem watcher missed, which is
+    /// rare on a directory this app writes itself; it exists because a watcher can drop
+    /// events under load or on filesystems that do not support them.
+    ///
+    /// Separate from [`Syncthing::ensure_folder`] because that one returns early on a folder
+    /// that already exists — every device but a brand-new one. This is what a settings
+    /// change has to go through to reach a folder that is already registered.
+    pub fn set_folder_timing(&self, folder_id: &str, watch_delay_s: i32, rescan_s: i32) -> Result<()> {
+        let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
+        let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
+        let mut folder: serde_json::Value = res.body_mut().read_json()?;
+
+        // Nothing to say if the daemon already agrees: a PUT restarts the folder, which
+        // interrupts a transfer in progress, and this is called on every settings save.
+        let same = folder["fsWatcherDelayS"].as_i64() == Some(watch_delay_s as i64)
+            && folder["rescanIntervalS"].as_i64() == Some(rescan_s as i64);
+        if same {
+            return Ok(());
+        }
+        folder["fsWatcherEnabled"] = serde_json::json!(true);
+        folder["fsWatcherDelayS"] = serde_json::json!(watch_delay_s);
+        folder["rescanIntervalS"] = serde_json::json!(rescan_s);
+        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
+        Ok(())
+    }
+
+    /// Pauses or resumes the vault folder.
+    ///
+    /// Pausing stops file transfer while leaving the daemon and its device connections up, so
+    /// pairing still works and syncing resumes the instant it is lifted. That is the right
+    /// granularity for "only on Wi-Fi": stopping the daemon instead would drop the
+    /// connections and make coming back slow, for a saving of a few keepalive bytes.
+    pub fn set_folder_paused(&self, folder_id: &str, paused: bool) -> Result<()> {
+        let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
+        let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
+        let mut folder: serde_json::Value = res.body_mut().read_json()?;
+        if folder["paused"] == serde_json::json!(paused) {
+            return Ok(()); // a PUT restarts the folder; this is called on every network change
+        }
+        folder["paused"] = serde_json::json!(paused);
+        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
+        Ok(())
+    }
+
+    /// Sets how long Syncthing keeps its own copies of replaced files, in days; 0 turns the
+    /// copies off entirely.
     ///
     /// **This is a backup, not the history.** A memo's past lives in the change logs and is
     /// read from there ([`crate::history`]). What this protects against is the other kind of
@@ -237,26 +314,37 @@ impl Syncthing {
     /// back from that.
     ///
     /// Staggered rather than the simpler schemes, because logs are appended to constantly:
-    /// every sync of a changed log would archive the version before it, and a scheme that
-    /// keeps them all would outgrow the vault. Staggered thins as versions age — hourly for
-    /// a day, daily for a month — so the cost stays bounded.
+    /// every sync of a changed log would otherwise archive the version before it, and a scheme
+    /// that keeps them all would outgrow the vault. Staggered thins as versions age — hourly
+    /// for a day, daily for a month — so the cost stays bounded but is **not small**: the
+    /// archive is a series of snapshots of a file that only ever grows, which is why how long
+    /// to keep them is the user's call and not a constant.
     ///
     /// Versions live in `.stversions` inside the folder, which Syncthing does not sync, so
     /// each device keeps its own and nothing new travels between them.
-    pub fn ensure_versioning(&self, folder_id: &str) -> Result<()> {
+    pub fn set_folder_versioning(&self, folder_id: &str, keep_days: i32) -> Result<()> {
         let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
         let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
         let mut folder: serde_json::Value = res.body_mut().read_json()?;
 
-        // Leave a configuration the user chose alone; only an unset one is filled in.
-        if folder["versioning"]["type"].as_str().is_some_and(|t| !t.is_empty()) {
+        let want = if keep_days <= 0 {
+            serde_json::json!({ "type": "", "params": {}, "cleanupIntervalS": 3600 })
+        } else {
+            let max_age = keep_days as u64 * 24 * 60 * 60;
+            serde_json::json!({
+                "type": "staggered",
+                "params": { "maxAge": max_age.to_string() },
+                "cleanupIntervalS": 3600,
+            })
+        };
+        // Skip the PUT when it already matches: this runs on every settings save, and a PUT
+        // restarts the folder.
+        if folder["versioning"]["type"] == want["type"]
+            && folder["versioning"]["params"]["maxAge"] == want["params"]["maxAge"]
+        {
             return Ok(());
         }
-        folder["versioning"] = serde_json::json!({
-            "type": "staggered",
-            "params": { "maxAge": MAX_VERSION_AGE_SECONDS.to_string() },
-            "cleanupIntervalS": 3600,
-        });
+        folder["versioning"] = want;
         ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
         Ok(())
     }

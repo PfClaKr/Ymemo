@@ -132,6 +132,11 @@ class SettingsStore {
       lockOnBackground: s.lockOnBackground,
       biometricUnlock: s.biometricUnlock,
       updateCheck: s.updateCheck,
+      mergeSeconds: s.mergeSeconds,
+      watchDelaySeconds: s.watchDelaySeconds,
+      rescanSeconds: s.rescanSeconds,
+      keepVersionsDays: s.keepVersionsDays,
+      wifiOnlySync: s.wifiOnlySync,
       lastUpdateCheck: DateTime.now().millisecondsSinceEpoch,
     ));
   }

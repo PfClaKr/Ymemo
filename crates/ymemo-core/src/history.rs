@@ -15,7 +15,7 @@
 //!
 //! Syncthing's versioning is still worth having, for a different job: an own log truncated
 //! by a full disk or a crash syncs that truncation everywhere, and a kept copy is the only
-//! way back. [`crate::sync::Syncthing::ensure_versioning`] turns it on for that reason, and
+//! way back. [`crate::sync::Syncthing::set_folder_versioning`] turns it on for that reason, and
 //! calls it what it is — a backup, not a history.
 //!
 //! ## How it is read

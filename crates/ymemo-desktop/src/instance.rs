@@ -20,6 +20,7 @@
 //! rather than a fixed one. The data directory is per-user, so two users on one machine each
 //! get their own channel instead of racing for the same port.
 
+use ymemo_core::diag;
 use std::net::{Ipv4Addr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -57,19 +58,19 @@ pub(crate) fn serve(dir: &Path) {
     let sock = match UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("the control channel could not be opened, continuing without it: {e}");
+            diag!("the control channel could not be opened, continuing without it: {e}");
             return;
         }
     };
     match sock.local_addr() {
         Ok(addr) => {
             if let Err(e) = std::fs::write(port_file(dir), addr.port().to_string()) {
-                eprintln!("could not record the control port: {e}");
+                diag!("could not record the control port: {e}");
                 return;
             }
         }
         Err(e) => {
-            eprintln!("could not read the control port: {e}");
+            diag!("could not read the control port: {e}");
             return;
         }
     }
@@ -83,7 +84,7 @@ pub(crate) fn serve(dir: &Path) {
                 Ok((n, _)) if &buf[..n] == MSG_QUIT => crate::tray::request_quit(),
                 Ok(_) => {}
                 Err(e) => {
-                    eprintln!("the control channel stopped: {e}");
+                    diag!("the control channel stopped: {e}");
                     return;
                 }
             }

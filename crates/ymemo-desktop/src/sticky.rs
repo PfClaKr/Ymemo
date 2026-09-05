@@ -4,6 +4,7 @@
 //! only works where window coordinates can be read and written (X11, Windows); elsewhere
 //! (native Wayland) it silently does nothing.
 
+use ymemo_core::diag;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -80,7 +81,7 @@ pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) {
     memo.body = text.to_string();
     memo.updated_at = now_millis();
     if let Err(e) = v.upsert(&memo) {
-        eprintln!("could not save the memo: {e}");
+        diag!("could not save the memo: {e}");
         return;
     }
     refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
@@ -134,13 +135,13 @@ pub(crate) fn new_memo(ctx: &Ctx) {
         let mut guard = ctx.vault.borrow_mut();
         let Some(v) = guard.as_mut() else { return };
         if let Err(e) = v.upsert(&memo) {
-            eprintln!("could not create the memo: {e}");
+            diag!("could not create the memo: {e}");
             return;
         }
         refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
     }
     if let Err(e) = open_sticky(ctx, &memo, true) {
-        eprintln!("could not open the sticky window: {e}");
+        diag!("could not open the sticky window: {e}");
     }
 }
 
@@ -167,7 +168,7 @@ pub(crate) fn photo_rows(v: &Vault, memo_id: &str) -> Vec<PhotoRow> {
     let list = match v.store().attachments_of(memo_id) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("could not read the attachments: {e}");
+            diag!("could not read the attachments: {e}");
             return Vec::new();
         }
     };
@@ -274,7 +275,7 @@ fn pick_photo(title: &str) -> Option<PhotoPick> {
     let bytes = match std::fs::read(&path) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("could not read the photo: {e}");
+            diag!("could not read the photo: {e}");
             return None;
         }
     };
@@ -303,7 +304,7 @@ fn attach_photo(memo_id: &str, pick: PhotoPick) {
         let Some(v) = guard.as_mut() else { return };
         if let Err(e) = v.attach(memo_id, &pick.bytes, &pick.name, pick.mime, pick.width, pick.height)
         {
-            eprintln!("could not attach the photo: {e}");
+            diag!("could not attach the photo: {e}");
             return;
         }
     }
@@ -382,7 +383,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
                     (y_frac as f64 * 1000.0).round() as i64,
                     em_milli,
                 ) {
-                    eprintln!("could not move the photo: {e}");
+                    diag!("could not move the photo: {e}");
                 }
             }
             refresh_photos(&ctx, &id);
@@ -399,7 +400,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
                 let mut guard = ctx.vault.borrow_mut();
                 let Some(v) = guard.as_mut() else { return };
                 if let Err(e) = v.detach(photo_id.as_str()) {
-                    eprintln!("could not remove the photo: {e}");
+                    diag!("could not remove the photo: {e}");
                 }
             }
             refresh_photos(&ctx, &id);
@@ -474,7 +475,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
                 m.color = key.to_string();
                 m.updated_at = now_millis();
                 if let Err(e) = v.upsert(&m) {
-                    eprintln!("could not change the color: {e}");
+                    diag!("could not change the color: {e}");
                     return;
                 }
                 refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
@@ -501,7 +502,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
             m.opacity = pct;
             m.updated_at = now_millis();
             if let Err(e) = v.upsert(&m) {
-                eprintln!("could not change the opacity: {e}");
+                diag!("could not change the opacity: {e}");
             }
         });
     }

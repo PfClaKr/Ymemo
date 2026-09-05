@@ -12,6 +12,7 @@
 //!   window of its own because the app lives in the tray: a request that only appeared inside
 //!   the pairing panel would go unseen by anyone who had closed it.
 
+use ymemo_core::diag;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -301,7 +302,7 @@ pub(crate) fn wire(
             let Some(st) = guard.as_ref() else { return };
             let devices = match st.shared_devices(SYNC_FOLDER_ID) {
                 Ok(list) => list,
-                Err(e) => return eprintln!("could not list the shared devices: {e}"),
+                Err(e) => return diag!("could not list the shared devices: {e}"),
             };
 
             // Has the device we asked let us in yet? It has to look connected on
@@ -382,7 +383,7 @@ pub(crate) fn wire(
             let mut pending = match st.pending_devices() {
                 Ok(p) => p,
                 // Offline or shutting down: not worth a message on a window nobody asked for.
-                Err(e) => return eprintln!("could not read the pending devices: {e}"),
+                Err(e) => return diag!("could not read the pending devices: {e}"),
             };
             pending.retain(|d| !rejected.borrow().contains(&d.id));
 

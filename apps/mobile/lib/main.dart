@@ -41,6 +41,22 @@ Future<void> main() async {
   // shared between the two: it is what the daemon syncs and what the vault is opened from,
   // and two spellings of it would mean syncing one directory while reading another.
   final docs = await getApplicationDocumentsDirectory();
+
+  // The core writes its failures to <docs>/ymemo.log from here on. Android sends a process's
+  // stderr to /dev/null, so before this every `diag!` in Rust was simply lost on the one
+  // platform a bug report comes from. Flutter's own errors go to the same file: `debugPrint`
+  // is a swappable function pointer, and everything in the framework routes through it.
+  await diagInit(dir: docs.path);
+  final flutterPrint = debugPrint;
+  debugPrint = (String? message, {int? wrapWidth}) {
+    flutterPrint(message, wrapWidth: wrapWidth);
+    if (message == null) return;
+    // Swallowed on purpose: an error escaping here would be reported through `debugPrint`,
+    // which is this function, and a log that cannot write would spin instead of failing
+    // quietly. Framework errors need no separate hook — `presentError` prints through this.
+    unawaited(diagLog(message: message).catchError((_) {}));
+  };
+
   final settings = await SettingsStore.load('${docs.path}/settings.json');
 
   // Language before anything is drawn, so the core's error messages and the screens speak
@@ -49,10 +65,18 @@ Future<void> main() async {
     code: settings.value.lang == 'auto' ? Platform.localeName : settings.value.lang,
   );
 
-  final sync = SyncController(SyncPaths(
-    homeDir: '${docs.path}/syncthing',
-    vaultDir: '${docs.path}/vault',
-  ));
+  final sync = SyncController(
+    SyncPaths(
+      homeDir: '${docs.path}/syncthing',
+      vaultDir: '${docs.path}/vault',
+    ),
+    readTiming: () => (
+      watchDelaySeconds: settings.value.watchDelaySeconds,
+      rescanSeconds: settings.value.rescanSeconds,
+      keepVersionsDays: settings.value.keepVersionsDays,
+    ),
+    readWifiOnly: () => settings.value.wifiOnlySync,
+  );
 
   runApp(YmemoApp(
     strings: await mobileStrings(),
@@ -719,9 +743,14 @@ class MemoListScreen extends StatefulWidget {
 }
 
 class _MemoListScreenState extends State<MemoListScreen> {
-  /// How often logs that have arrived are merged in, matching the desktop's timer. The
-  /// daemon delivers files whenever it likes; this is what turns them into memos on screen.
-  static const _mergeInterval = Duration(seconds: 15);
+  /// How often logs that have arrived are merged in — the settings screen's "pull
+  /// interval", which was fixed at 15 seconds before it became one. The daemon delivers
+  /// files whenever it likes; this is what turns them into memos on screen.
+  ///
+  /// Only half of how long a change takes to appear: the *other* device's watch delay comes
+  /// first, and the two add up. Both are in Settings > Advanced.
+  Duration get _mergeInterval =>
+      Duration(seconds: widget.settings.value.mergeSeconds);
 
   List<FfiMemo> _memos = [];
   List<FfiGroup> _folders = [];
@@ -1102,6 +1131,7 @@ class _MemoListScreenState extends State<MemoListScreen> {
                 builder: (_) => SettingsScreen(
                   strings: widget.strings,
                   settings: widget.settings,
+                  sync: widget.sync,
                   vaultDir: widget.sync.paths.vaultDir,
                   onLock: widget.onLock,
                   onLanguageChanged: widget.onLanguageChanged,
@@ -2104,6 +2134,17 @@ class _SyncScreenState extends State<SyncScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // A folder held back by "Wi-Fi only" looks exactly like sync being broken, so the
+        // reason is said here rather than left to be guessed at.
+        if (sync.pausedForMetered)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(children: [
+              const Icon(Icons.pause_circle_outline, size: 18),
+              const SizedBox(width: 8),
+              Expanded(child: Text(widget.strings.pausedMetered)),
+            ]),
+          ),
         Text(widget.strings.myCode, style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
         SelectableText(code, style: const TextStyle(fontFamily: 'monospace')),
@@ -2492,6 +2533,7 @@ class SettingsScreen extends StatefulWidget {
     super.key,
     required this.strings,
     required this.settings,
+    required this.sync,
     required this.vaultDir,
     required this.onLock,
     required this.onLanguageChanged,
@@ -2499,6 +2541,9 @@ class SettingsScreen extends StatefulWidget {
 
   final FfiStrings strings;
   final SettingsStore settings;
+
+  /// Only for the Wi-Fi switch: flipping it has to reach the running daemon now.
+  final SyncController sync;
 
   /// Passed through to the security screen, which asks `vault.json` itself whether a
   /// recovery code exists.
@@ -2516,6 +2561,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// harder to tap and able to produce values Rust would only clamp away again.
   static const _dayChoices = [0, 1, 7, 30, 90, 365];
 
+  /// The advanced timings, same reasoning. Each list starts at what the core clamps to and
+  /// ends where going further stops being useful.
+  static const _mergeChoices = [3, 5, 10, 15, 30, 60, 300];
+  static const _watchChoices = [1, 2, 5, 10, 20, 60];
+  static const _rescanChoices = [60, 300, 900, 3600];
+
+  /// Retention is in days rather than seconds, and 0 is a real answer: keep nothing.
+  static const _keepChoices = [0, 1, 7, 30, 90, 365];
+
   /// What the last check concluded. Kept as state rather than as a finished sentence: a
   /// rendered string would still be in the old language after the language is changed.
   _UpdateState _updateState = _UpdateState.idle;
@@ -2532,6 +2586,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     bool? lockOnBackground,
     bool? biometricUnlock,
     bool? updateCheck,
+    int? mergeSeconds,
+    int? watchDelaySeconds,
+    int? rescanSeconds,
+    int? keepVersionsDays,
+    bool? wifiOnlySync,
   }) async {
     await widget.settings.save(FfiSettings(
       lang: lang ?? _s.lang,
@@ -2539,8 +2598,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
       lockOnBackground: lockOnBackground ?? _s.lockOnBackground,
       biometricUnlock: biometricUnlock ?? _s.biometricUnlock,
       updateCheck: updateCheck ?? _s.updateCheck,
+      mergeSeconds: mergeSeconds ?? _s.mergeSeconds,
+      watchDelaySeconds: watchDelaySeconds ?? _s.watchDelaySeconds,
+      rescanSeconds: rescanSeconds ?? _s.rescanSeconds,
+      keepVersionsDays: keepVersionsDays ?? _s.keepVersionsDays,
+      wifiOnlySync: wifiOnlySync ?? _s.wifiOnlySync,
       lastUpdateCheck: _s.lastUpdateCheck,
     ));
+    // Flipping the switch has to take effect now, not at the next daemon start.
+    if (wifiOnlySync != null) {
+      await widget.sync.applyNetworkPolicy();
+    }
+    // The watch delay is Syncthing's, not ours, so saving has to push it across. It is a
+    // no-op while the daemon is down; sync.dart applies it again when it comes up.
+    if (watchDelaySeconds != null || rescanSeconds != null) {
+      try {
+        await syncSetTiming(
+          watchDelaySeconds: _s.watchDelaySeconds,
+          rescanSeconds: _s.rescanSeconds,
+        );
+      } catch (e) {
+        debugPrint('could not apply the sync timing: $e');
+      }
+    }
+    if (keepVersionsDays != null) {
+      try {
+        await syncSetVersioning(keepDays: _s.keepVersionsDays);
+      } catch (e) {
+        debugPrint('could not apply the version retention: $e');
+      }
+    }
     // One switch, two protections: closing the vault and keeping the memos out of the app
     // switcher. Someone who turned it off chose convenience, and hiding their thumbnail
     // anyway would be deciding for them.
@@ -2601,6 +2688,67 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
     await _save(biometricUnlock: true);
+  }
+
+  /// One "N seconds" dropdown. A value outside the offered list — a hand-edited
+  /// settings.json, or a list that shrank between versions — still shows, rather than
+  /// snapping to something the user never chose.
+  Widget _seconds(String label, String hint, List<int> choices, int value,
+      void Function(int) onPick) {
+    // A growable copy, always: `..sort()` binds to the whole conditional, so returning the
+    // const list on the common path and sorting it threw "cannot modify an unmodifiable list".
+    final items = [...choices];
+    if (!items.contains(value)) {
+      items.add(value);
+      items.sort();
+    }
+    return ListTile(
+      title: Text(label),
+      subtitle: Text(hint),
+      trailing: DropdownButton<int>(
+        value: value,
+        onChanged: (v) => v == null ? null : onPick(v),
+        items: [
+          for (final n in items)
+            DropdownMenuItem(value: n, child: Text('$n ${widget.strings.secondsUnit}')),
+        ],
+      ),
+    );
+  }
+
+  /// Shows the tail of the problem log, with one button that puts it on the clipboard —
+  /// which is the whole point: a bug report someone can paste rather than describe.
+  Future<void> _showLog() async {
+    final s = widget.strings;
+    final text = await diagTail(maxBytes: 64 * 1024);
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(s.log),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              text.isEmpty ? s.logEmpty : text,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+            ),
+          ),
+        ),
+        actions: [
+          if (text.isNotEmpty)
+            TextButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: text));
+                if (context.mounted) Navigator.pop(context);
+                if (mounted) _say(s.copied);
+              },
+              child: Text(s.copy),
+            ),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(s.ok)),
+        ],
+      ),
+    );
   }
 
   void _say(String message) => ScaffoldMessenger.of(context).showSnackBar(
@@ -2713,6 +2861,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 vaultDir: widget.vaultDir,
               ),
             )),
+          ),
+
+          const Divider(),
+          _header(s.advanced),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(s.advancedHint, style: Theme.of(context).textTheme.bodySmall),
+          ),
+          // The three together are what decides how fast a change appears: the sending
+          // device's watch delay plus the receiving one's pull interval. Splitting them
+          // across the screen would hide that they add up.
+          _seconds(s.watchDelay, s.watchDelayHint, _watchChoices, _s.watchDelaySeconds,
+              (v) => _save(watchDelaySeconds: v)),
+          _seconds(s.mergeSeconds, s.mergeSecondsHint, _mergeChoices, _s.mergeSeconds,
+              (v) => _save(mergeSeconds: v)),
+          _seconds(s.rescan, s.rescanHint, _rescanChoices, _s.rescanSeconds,
+              (v) => _save(rescanSeconds: v)),
+          SwitchListTile(
+            value: _s.wifiOnlySync,
+            onChanged: (v) => _save(wifiOnlySync: v),
+            title: Text(s.wifiOnly),
+            subtitle: Text(s.wifiOnlyHint),
+          ),
+          ListTile(
+            title: Text(s.keepVersions),
+            subtitle: Text(s.keepVersionsHint),
+            trailing: DropdownButton<int>(
+              value: _keepChoices.contains(_s.keepVersionsDays) ? _s.keepVersionsDays : 30,
+              onChanged: (v) => v == null ? null : _save(keepVersionsDays: v),
+              items: [
+                for (final days in _keepChoices)
+                  DropdownMenuItem(value: days, child: Text('$days ${s.daysUnit}')),
+              ],
+            ),
+          ),
+          // A phone has no file manager worth sending someone to, so the log is shown here
+          // and offered for copying rather than pointed at.
+          ListTile(
+            title: Text(s.log),
+            subtitle: Text(s.logHint),
+            trailing: TextButton(onPressed: _showLog, child: Text(s.logView)),
           ),
 
           const Divider(),

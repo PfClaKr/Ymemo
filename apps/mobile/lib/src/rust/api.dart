@@ -241,6 +241,33 @@ Future<String> syncStart(
 Future<void> syncEnsureFolder({required String vaultDir}) =>
     RustLib.instance.api.crateApiSyncEnsureFolder(vaultDir: vaultDir);
 
+/// Applies the sync timings to the vault folder of the running daemon.
+///
+/// Separate from [`sync_ensure_folder`] for the reason the core keeps them apart: that one
+/// returns early on a folder that already exists — every device after its first run — so a
+/// settings change would never reach the daemon through it.
+///
+/// Doing nothing while the daemon is down is correct; Dart calls this again once it is up.
+Future<void> syncSetTiming(
+        {required int watchDelaySeconds, required int rescanSeconds}) =>
+    RustLib.instance.api.crateApiSyncSetTiming(
+        watchDelaySeconds: watchDelaySeconds, rescanSeconds: rescanSeconds);
+
+/// Applies the `.stversions` retention to the vault folder of the running daemon.
+///
+/// Kept apart from [`sync_set_timing`] because the two are different questions — how fast
+/// syncing is versus how much disk it may keep — and a phone is where the second one bites.
+Future<void> syncSetVersioning({required int keepDays}) =>
+    RustLib.instance.api.crateApiSyncSetVersioning(keepDays: keepDays);
+
+/// Holds or releases file transfer, for "sync only on Wi-Fi".
+///
+/// The daemon keeps running either way: paused only stops the vault folder, so a device can
+/// still be paired over mobile data and starts catching up the moment the phone is back on
+/// an unmetered network.
+Future<void> syncSetPaused({required bool paused}) =>
+    RustLib.instance.api.crateApiSyncSetPaused(paused: paused);
+
 /// Stops the daemon. Safe to call when it is not running.
 Future<void> syncStop() => RustLib.instance.api.crateApiSyncStop();
 
@@ -351,6 +378,23 @@ Future<String> appVersion() => RustLib.instance.api.crateApiAppVersion();
 /// The **only** request the app makes to anyone's server, which is why it sits behind a
 /// setting; see `ymemo_core::update` for what it does and does not send.
 Future<FfiRelease?> updateCheck() => RustLib.instance.api.crateApiUpdateCheck();
+
+/// Points the diagnostic log at the app's private directory and writes the opening line.
+///
+/// Android sends a process's stderr to `/dev/null`, so every `diag!` in the core — a log that
+/// would not decrypt, a daemon that would not start — was invisible on the phone. Call this
+/// once, before anything else, and the same messages land in `<dir>/ymemo.log`.
+Future<void> diagInit({required String dir}) =>
+    RustLib.instance.api.crateApiDiagInit(dir: dir);
+
+/// One line into the log, for the Dart side to funnel its own errors through.
+Future<void> diagLog({required String message}) =>
+    RustLib.instance.api.crateApiDiagLog(message: message);
+
+/// The tail of the log, for the settings screen to show and offer to copy. A phone has no
+/// file manager worth sending someone to, so this is how a bug report gets one.
+Future<String> diagTail({required int maxBytes}) =>
+    RustLib.instance.api.crateApiDiagTail(maxBytes: maxBytes);
 
 /// A photo attachment as handed to Dart.
 ///
@@ -586,6 +630,33 @@ class FfiSettings {
   /// Close the vault when the app leaves the foreground.
   final bool lockOnBackground;
 
+  /// How often other devices' changes are pulled in, in seconds.
+  ///
+  /// Was fixed at 15 in Dart before it became a setting; the default keeps that.
+  final int mergeSeconds;
+
+  /// How long Syncthing waits after a write before it ships the file, in seconds.
+  ///
+  /// The delay a user notices is this **plus** [`FfiSettings::merge_seconds`] on the other
+  /// device; see `ymemo_core::sync::Syncthing::set_folder_timing`.
+  final int watchDelaySeconds;
+
+  /// How often Syncthing sweeps the vault for changes its watcher missed, in seconds.
+  final int rescanSeconds;
+
+  /// Days a replaced file's previous copy is kept in `.stversions`; 0 keeps none.
+  ///
+  /// **Not** where the memo history comes from — that is read back out of the logs. This is
+  /// the backstop for a log file that got truncated, and on a phone it is also the one
+  /// advanced setting that costs storage rather than battery.
+  final int keepVersionsDays;
+
+  /// Android only: hold syncing while the phone is on a metered network.
+  ///
+  /// Off by default, so an update never silently stops syncing for someone who was happy
+  /// with it. Memos are tiny; what this really guards is photos.
+  final bool wifiOnlySync;
+
   /// Android only: reopen the vault with the device's fingerprint instead of the password.
   ///
   /// The core has no part in this beyond remembering the answer — biometrics cannot derive
@@ -604,6 +675,11 @@ class FfiSettings {
     required this.lang,
     required this.unlockDays,
     required this.lockOnBackground,
+    required this.mergeSeconds,
+    required this.watchDelaySeconds,
+    required this.rescanSeconds,
+    required this.keepVersionsDays,
+    required this.wifiOnlySync,
     required this.biometricUnlock,
     required this.updateCheck,
     required this.lastUpdateCheck,
@@ -617,6 +693,11 @@ class FfiSettings {
       lang.hashCode ^
       unlockDays.hashCode ^
       lockOnBackground.hashCode ^
+      mergeSeconds.hashCode ^
+      watchDelaySeconds.hashCode ^
+      rescanSeconds.hashCode ^
+      keepVersionsDays.hashCode ^
+      wifiOnlySync.hashCode ^
       biometricUnlock.hashCode ^
       updateCheck.hashCode ^
       lastUpdateCheck.hashCode;
@@ -629,6 +710,11 @@ class FfiSettings {
           lang == other.lang &&
           unlockDays == other.unlockDays &&
           lockOnBackground == other.lockOnBackground &&
+          mergeSeconds == other.mergeSeconds &&
+          watchDelaySeconds == other.watchDelaySeconds &&
+          rescanSeconds == other.rescanSeconds &&
+          keepVersionsDays == other.keepVersionsDays &&
+          wifiOnlySync == other.wifiOnlySync &&
           biometricUnlock == other.biometricUnlock &&
           updateCheck == other.updateCheck &&
           lastUpdateCheck == other.lastUpdateCheck;
@@ -684,9 +770,27 @@ class FfiStrings {
   final String lanPairing;
   final String lanSearching;
   final String daysUnit;
+  final String keepVersions;
+  final String keepVersionsHint;
+  final String log;
+  final String logHint;
+  final String logView;
+  final String logEmpty;
   final String language;
   final String languageAuto;
   final String lockNow;
+  final String advanced;
+  final String advancedHint;
+  final String mergeSeconds;
+  final String mergeSecondsHint;
+  final String watchDelay;
+  final String watchDelayHint;
+  final String rescan;
+  final String rescanHint;
+  final String secondsUnit;
+  final String wifiOnly;
+  final String wifiOnlyHint;
+  final String pausedMetered;
   final String biometricFailed;
   final String biometricPrompt;
   final String biometricUnavailable;
@@ -802,9 +906,27 @@ class FfiStrings {
     required this.lanPairing,
     required this.lanSearching,
     required this.daysUnit,
+    required this.keepVersions,
+    required this.keepVersionsHint,
+    required this.log,
+    required this.logHint,
+    required this.logView,
+    required this.logEmpty,
     required this.language,
     required this.languageAuto,
     required this.lockNow,
+    required this.advanced,
+    required this.advancedHint,
+    required this.mergeSeconds,
+    required this.mergeSecondsHint,
+    required this.watchDelay,
+    required this.watchDelayHint,
+    required this.rescan,
+    required this.rescanHint,
+    required this.secondsUnit,
+    required this.wifiOnly,
+    required this.wifiOnlyHint,
+    required this.pausedMetered,
     required this.biometricFailed,
     required this.biometricPrompt,
     required this.biometricUnavailable,
@@ -922,9 +1044,27 @@ class FfiStrings {
       lanPairing.hashCode ^
       lanSearching.hashCode ^
       daysUnit.hashCode ^
+      keepVersions.hashCode ^
+      keepVersionsHint.hashCode ^
+      log.hashCode ^
+      logHint.hashCode ^
+      logView.hashCode ^
+      logEmpty.hashCode ^
       language.hashCode ^
       languageAuto.hashCode ^
       lockNow.hashCode ^
+      advanced.hashCode ^
+      advancedHint.hashCode ^
+      mergeSeconds.hashCode ^
+      mergeSecondsHint.hashCode ^
+      watchDelay.hashCode ^
+      watchDelayHint.hashCode ^
+      rescan.hashCode ^
+      rescanHint.hashCode ^
+      secondsUnit.hashCode ^
+      wifiOnly.hashCode ^
+      wifiOnlyHint.hashCode ^
+      pausedMetered.hashCode ^
       biometricFailed.hashCode ^
       biometricPrompt.hashCode ^
       biometricUnavailable.hashCode ^
@@ -1044,9 +1184,27 @@ class FfiStrings {
           lanPairing == other.lanPairing &&
           lanSearching == other.lanSearching &&
           daysUnit == other.daysUnit &&
+          keepVersions == other.keepVersions &&
+          keepVersionsHint == other.keepVersionsHint &&
+          log == other.log &&
+          logHint == other.logHint &&
+          logView == other.logView &&
+          logEmpty == other.logEmpty &&
           language == other.language &&
           languageAuto == other.languageAuto &&
           lockNow == other.lockNow &&
+          advanced == other.advanced &&
+          advancedHint == other.advancedHint &&
+          mergeSeconds == other.mergeSeconds &&
+          mergeSecondsHint == other.mergeSecondsHint &&
+          watchDelay == other.watchDelay &&
+          watchDelayHint == other.watchDelayHint &&
+          rescan == other.rescan &&
+          rescanHint == other.rescanHint &&
+          secondsUnit == other.secondsUnit &&
+          wifiOnly == other.wifiOnly &&
+          wifiOnlyHint == other.wifiOnlyHint &&
+          pausedMetered == other.pausedMetered &&
           biometricFailed == other.biometricFailed &&
           biometricPrompt == other.biometricPrompt &&
           biometricUnavailable == other.biometricUnavailable &&

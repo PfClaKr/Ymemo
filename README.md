@@ -17,7 +17,8 @@ end-to-end encrypted, with **no server of anyone's in between**, and no account 
 ![A memo typed on one device appearing on the other](docs/screenshots/sync.gif)
 
 *Two paired devices, one vault, nothing in between. The pause is shortened here: with the
-default settings a change reaches the other device in about twenty seconds.*
+default settings a change reaches the other device in about twenty seconds, and
+Settings > Advanced trades battery for speed.*
 
 ## Getting it
 

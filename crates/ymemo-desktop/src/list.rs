@@ -1,6 +1,7 @@
 //! Model for the memo list window: flattens the group tree into rows and applies dragged
 //! rows back to the core.
 
+use ymemo_core::diag;
 use std::collections::{HashMap, HashSet};
 
 use slint::{ComponentHandle, SharedString, VecModel};
@@ -17,7 +18,7 @@ pub(crate) fn refresh_list(vault: &Vault, model: &VecModel<ListRow>, collapsed: 
     let (groups, memos) = match (vault.store().list_groups(), vault.store().list()) {
         (Ok(g), Ok(m)) => (g, m),
         (Err(e), _) | (_, Err(e)) => {
-            eprintln!("could not read the list: {e}");
+            diag!("could not read the list: {e}");
             return;
         }
     };
@@ -65,7 +66,7 @@ pub(crate) fn move_row(ctx: &Ctx, src: i32, dst: i32) {
         let groups = match v.store().list_groups() {
             Ok(g) => g,
             Err(e) => {
-                eprintln!("could not read the groups: {e}");
+                diag!("could not read the groups: {e}");
                 return;
             }
         };
@@ -91,7 +92,7 @@ pub(crate) fn move_row(ctx: &Ctx, src: i32, dst: i32) {
         }
     };
     if let Err(e) = res {
-        eprintln!("move failed: {e}");
+        diag!("move failed: {e}");
         return;
     }
     refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
@@ -158,7 +159,7 @@ pub(crate) fn set_row_color(ctx: &Ctx, id: &str, is_group: bool, color: &str) {
         }
     };
     if let Err(e) = result {
-        eprintln!("could not change the colour: {e}");
+        diag!("could not change the colour: {e}");
         return;
     }
     refresh_list(v, &ctx.model, &ctx.collapsed.borrow());

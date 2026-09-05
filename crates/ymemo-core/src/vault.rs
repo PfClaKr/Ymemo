@@ -549,14 +549,14 @@ impl Vault {
             let records = match ChangeLog::open(&path, self.key.clone()).read_all() {
                 Ok(r) => r,
                 Err(e) => {
-                    eprintln!("skipping log (decrypt failed) {}: {e}", path.display());
+                    crate::diag!("skipping log (decrypt failed) {}: {e}", path.display());
                     continue;
                 }
             };
             for record in records {
                 match Change::from_bytes(record) {
                     Ok(c) => changes.push(c),
-                    Err(e) => eprintln!("skipping change (parse failed) {}: {e}", path.display()),
+                    Err(e) => crate::diag!("skipping change (parse failed) {}: {e}", path.display()),
                 }
             }
         }
@@ -750,12 +750,12 @@ fn heal_divergent_log(
         let Ok(old_key) = unlock_header(&header, password) else { continue };
         if ChangeLog::open(&own_path, old_key.clone()).read_all().is_ok() {
             reencrypt_log(&own_path, &old_key, canonical_key)?;
-            eprintln!("diverged vault key: re-encrypted our log under the canonical key");
+            crate::diag!("diverged vault key: re-encrypted our log under the canonical key");
             return Ok(());
         }
     }
     // Not found: rebuild will just skip this log and merge the others.
-    eprintln!(
+    crate::diag!(
         "warning: no key opens our log ({}) — vault.json may have changed unexpectedly",
         own_path.display()
     );

@@ -156,9 +156,27 @@ pub struct FfiStrings {
     pub lan_pairing: String,
     pub lan_searching: String,
     pub days_unit: String,
+    pub keep_versions: String,
+    pub keep_versions_hint: String,
+    pub log: String,
+    pub log_hint: String,
+    pub log_view: String,
+    pub log_empty: String,
     pub language: String,
     pub language_auto: String,
     pub lock_now: String,
+    pub advanced: String,
+    pub advanced_hint: String,
+    pub merge_seconds: String,
+    pub merge_seconds_hint: String,
+    pub watch_delay: String,
+    pub watch_delay_hint: String,
+    pub rescan: String,
+    pub rescan_hint: String,
+    pub seconds_unit: String,
+    pub wifi_only: String,
+    pub wifi_only_hint: String,
+    pub paused_metered: String,
     pub biometric_failed: String,
     pub biometric_prompt: String,
     pub biometric_unavailable: String,
@@ -282,9 +300,27 @@ pub fn mobile_strings() -> FfiStrings {
         lan_pairing: t!("mobile.lan_pairing"),
         lan_searching: t!("mobile.lan_searching"),
         days_unit: t!("mobile.days_unit"),
+        keep_versions: t!("mobile.keep_versions"),
+        keep_versions_hint: t!("mobile.keep_versions_hint"),
+        log: t!("mobile.log"),
+        log_hint: t!("mobile.log_hint"),
+        log_view: t!("mobile.log_view"),
+        log_empty: t!("mobile.log_empty"),
         language: t!("mobile.language"),
         language_auto: t!("mobile.language_auto"),
         lock_now: t!("mobile.lock_now"),
+        advanced: t!("mobile.advanced"),
+        advanced_hint: t!("mobile.advanced_hint"),
+        merge_seconds: t!("mobile.merge_seconds"),
+        merge_seconds_hint: t!("mobile.merge_seconds_hint"),
+        watch_delay: t!("mobile.watch_delay"),
+        watch_delay_hint: t!("mobile.watch_delay_hint"),
+        rescan: t!("mobile.rescan"),
+        rescan_hint: t!("mobile.rescan_hint"),
+        seconds_unit: t!("mobile.seconds_unit"),
+        wifi_only: t!("mobile.wifi_only"),
+        wifi_only_hint: t!("mobile.wifi_only_hint"),
+        paused_metered: t!("mobile.paused_metered"),
         biometric_failed: t!("mobile.biometric_failed"),
         biometric_prompt: t!("mobile.biometric_prompt"),
         biometric_unavailable: t!("mobile.biometric_unavailable"),
@@ -820,6 +856,40 @@ pub fn sync_ensure_folder(vault_dir: String) -> Result<()> {
     st.ensure_folder(VAULT_FOLDER_ID, "Ymemo Vault", Path::new(&vault_dir))
 }
 
+/// Applies the sync timings to the vault folder of the running daemon.
+///
+/// Separate from [`sync_ensure_folder`] for the reason the core keeps them apart: that one
+/// returns early on a folder that already exists — every device after its first run — so a
+/// settings change would never reach the daemon through it.
+///
+/// Doing nothing while the daemon is down is correct; Dart calls this again once it is up.
+pub fn sync_set_timing(watch_delay_seconds: i32, rescan_seconds: i32) -> Result<()> {
+    let guard = sync_lock()?;
+    let Some(st) = guard.as_ref() else { return Ok(()) };
+    st.set_folder_timing(VAULT_FOLDER_ID, watch_delay_seconds, rescan_seconds)
+}
+
+/// Applies the `.stversions` retention to the vault folder of the running daemon.
+///
+/// Kept apart from [`sync_set_timing`] because the two are different questions — how fast
+/// syncing is versus how much disk it may keep — and a phone is where the second one bites.
+pub fn sync_set_versioning(keep_days: i32) -> Result<()> {
+    let guard = sync_lock()?;
+    let Some(st) = guard.as_ref() else { return Ok(()) };
+    st.set_folder_versioning(VAULT_FOLDER_ID, keep_days)
+}
+
+/// Holds or releases file transfer, for "sync only on Wi-Fi".
+///
+/// The daemon keeps running either way: paused only stops the vault folder, so a device can
+/// still be paired over mobile data and starts catching up the moment the phone is back on
+/// an unmetered network.
+pub fn sync_set_paused(paused: bool) -> Result<()> {
+    let guard = sync_lock()?;
+    let Some(st) = guard.as_ref() else { return Ok(()) };
+    st.set_folder_paused(VAULT_FOLDER_ID, paused)
+}
+
 /// Stops the daemon. Safe to call when it is not running.
 pub fn sync_stop() -> Result<()> {
     // Dropping it shuts the daemon down over REST, then kills it if it will not go.
@@ -1187,6 +1257,28 @@ pub struct FfiSettings {
     pub unlock_days: i32,
     /// Close the vault when the app leaves the foreground.
     pub lock_on_background: bool,
+    /// How often other devices' changes are pulled in, in seconds.
+    ///
+    /// Was fixed at 15 in Dart before it became a setting; the default keeps that.
+    pub merge_seconds: i32,
+    /// How long Syncthing waits after a write before it ships the file, in seconds.
+    ///
+    /// The delay a user notices is this **plus** [`FfiSettings::merge_seconds`] on the other
+    /// device; see `ymemo_core::sync::Syncthing::set_folder_timing`.
+    pub watch_delay_seconds: i32,
+    /// How often Syncthing sweeps the vault for changes its watcher missed, in seconds.
+    pub rescan_seconds: i32,
+    /// Days a replaced file's previous copy is kept in `.stversions`; 0 keeps none.
+    ///
+    /// **Not** where the memo history comes from — that is read back out of the logs. This is
+    /// the backstop for a log file that got truncated, and on a phone it is also the one
+    /// advanced setting that costs storage rather than battery.
+    pub keep_versions_days: i32,
+    /// Android only: hold syncing while the phone is on a metered network.
+    ///
+    /// Off by default, so an update never silently stops syncing for someone who was happy
+    /// with it. Memos are tiny; what this really guards is photos.
+    pub wifi_only_sync: bool,
     /// Android only: reopen the vault with the device's fingerprint instead of the password.
     ///
     /// The core has no part in this beyond remembering the answer — biometrics cannot derive
@@ -1206,6 +1298,12 @@ impl Default for FfiSettings {
             lang: "auto".into(),
             unlock_days: 0,
             lock_on_background: true,
+            merge_seconds: 15,
+            // Syncthing's own defaults, so an existing install behaves as it did before.
+            watch_delay_seconds: 10,
+            rescan_seconds: 60,
+            keep_versions_days: 30,
+            wifi_only_sync: false,
             biometric_unlock: false,
             update_check: true,
             last_update_check: 0,
@@ -1221,6 +1319,12 @@ impl FfiSettings {
             self.lang = "auto".into();
         }
         self.unlock_days = self.unlock_days.clamp(0, UNLOCK_DAYS_MAX);
+        self.merge_seconds = self.merge_seconds.clamp(MERGE_SECONDS_RANGE.0, MERGE_SECONDS_RANGE.1);
+        self.watch_delay_seconds =
+            self.watch_delay_seconds.clamp(WATCH_DELAY_RANGE.0, WATCH_DELAY_RANGE.1);
+        self.rescan_seconds =
+            self.rescan_seconds.clamp(RESCAN_SECONDS_RANGE.0, RESCAN_SECONDS_RANGE.1);
+        self.keep_versions_days = self.keep_versions_days.clamp(0, KEEP_VERSIONS_DAYS_MAX);
         if self.last_update_check < 0 || self.last_update_check > now_millis() {
             self.last_update_check = 0;
         }
@@ -1229,6 +1333,12 @@ impl FfiSettings {
 
 /// Longest stay-unlocked window, matching the desktop's.
 pub const UNLOCK_DAYS_MAX: i32 = 365;
+/// The three timing bounds, matching the desktop's so the two UIs offer the same range.
+pub const MERGE_SECONDS_RANGE: (i32, i32) = (3, 3600);
+pub const WATCH_DELAY_RANGE: (i32, i32) = (1, 60);
+pub const RESCAN_SECONDS_RANGE: (i32, i32) = (60, 3600);
+/// Longest a replaced file's previous copy is kept; 0 turns versioning off entirely.
+pub const KEEP_VERSIONS_DAYS_MAX: i32 = 365;
 
 /// Reads the settings; a missing or damaged file gives the defaults rather than an error,
 /// since preferences must never be what stops the app from starting.
@@ -1314,4 +1424,25 @@ pub fn update_check() -> Result<Option<FfiRelease>> {
             FfiRelease { version: r.version, url, file: r.asset_name }
         }),
     )
+}
+
+/// Points the diagnostic log at the app's private directory and writes the opening line.
+///
+/// Android sends a process's stderr to `/dev/null`, so every `diag!` in the core — a log that
+/// would not decrypt, a daemon that would not start — was invisible on the phone. Call this
+/// once, before anything else, and the same messages land in `<dir>/ymemo.log`.
+pub fn diag_init(dir: String) {
+    ymemo_core::diag::init(Path::new(&dir));
+    ymemo_core::diag!("--- ymemo {} starting on android ---", env!("CARGO_PKG_VERSION"));
+}
+
+/// One line into the log, for the Dart side to funnel its own errors through.
+pub fn diag_log(message: String) {
+    ymemo_core::diag::write(&message);
+}
+
+/// The tail of the log, for the settings screen to show and offer to copy. A phone has no
+/// file manager worth sending someone to, so this is how a bug report gets one.
+pub fn diag_tail(max_bytes: u32) -> String {
+    ymemo_core::diag::tail(max_bytes as usize)
 }

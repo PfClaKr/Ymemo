@@ -26,6 +26,25 @@ component SettingRow inherits VerticalLayout {
     @children
 }
 
+component SectionHeader inherits VerticalLayout {
+    in property <string> label;
+    in property <string> hint;
+    spacing: 2px;
+    Rectangle { height: 1px; background: #3a352c; }
+    Text {
+        text: root.label;
+        font-size: 11px;
+        font-weight: 700;
+        color: #d8c765;
+    }
+    if root.hint != "": Text {
+        text: root.hint;
+        font-size: 10px;
+        color: #a8a294;
+        wrap: word-wrap;
+    }
+}
+
 export component SettingsWindow inherits Window {
     title: Strings.ui_settings_window_title;
     preferred-width: 400px;
@@ -44,6 +63,9 @@ export component SettingsWindow inherits Window {
     in-out property <string> default-color: "yellow";
     in-out property <int> default-opacity: 100;
     in-out property <int> merge-seconds: 15;
+    in-out property <int> watch-delay-seconds: 10;
+    in-out property <int> rescan-seconds: 60;
+    in-out property <int> keep-versions-days: 30;
     // One-line status, e.g. the result of a save.
     in property <string> status;
     // Whether the vault is unlocked; locking again is meaningless when it is not.
@@ -68,6 +90,7 @@ export component SettingsWindow inherits Window {
     // they are the only things on this screen that are not device-local settings.
     callback open-security();
     callback check-update();
+    callback open-log();
     callback open-update();
 
     VerticalLayout {
@@ -190,7 +213,23 @@ export component SettingsWindow inherits Window {
                     }
                 }
 
-                // ---- Sync ----
+                // ---- Advanced ----
+                // The three timings live together because that is how they behave: the delay
+                // a user sees is the sending device's watch delay plus the receiving one's
+                // merge interval, and tuning either alone disappoints.
+                SectionHeader {
+                    label: Strings.ui_settings_advanced;
+                    hint: Strings.ui_settings_advanced_hint;
+                }
+                SettingRow {
+                    label: Strings.ui_settings_watch_delay;
+                    hint: Strings.ui_settings_watch_delay_hint;
+                    SpinBox {
+                        minimum: 1;
+                        maximum: 60;
+                        value <=> root.watch-delay-seconds;
+                    }
+                }
                 SettingRow {
                     label: Strings.ui_settings_merge_seconds;
                     hint: Strings.ui_settings_merge_seconds_hint;
@@ -198,6 +237,38 @@ export component SettingsWindow inherits Window {
                         minimum: 3;
                         maximum: 3600;
                         value <=> root.merge-seconds;
+                    }
+                }
+                SettingRow {
+                    label: Strings.ui_settings_rescan;
+                    hint: Strings.ui_settings_rescan_hint;
+                    SpinBox {
+                        minimum: 60;
+                        maximum: 3600;
+                        value <=> root.rescan-seconds;
+                    }
+                }
+                SettingRow {
+                    label: Strings.ui_settings_keep_versions;
+                    hint: Strings.ui_settings_keep_versions_hint;
+                    SpinBox {
+                        minimum: 0;
+                        maximum: 365;
+                        value <=> root.keep-versions-days;
+                    }
+                }
+
+                // Last in Advanced because it is the row someone is sent to rather than one
+                // they go looking for: a button, not a value.
+                SettingRow {
+                    label: Strings.ui_settings_log;
+                    hint: Strings.ui_settings_log_hint;
+                    HorizontalLayout {
+                        Button {
+                            text: Strings.ui_settings_log_open;
+                            clicked => { root.open-log(); }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
                     }
                 }
 
