@@ -1,5 +1,8 @@
 package dev.ymemo.ymemo_mobile.widget
 
+import android.content.Context
+import dev.ymemo.ymemo_mobile.R
+
 /**
  * The sticky palette, for the one place it has to exist outside Dart.
  *
@@ -48,5 +51,46 @@ internal object Palette {
         "blue" -> 0xFF7DB8EC.toInt()
         "purple" -> 0xFFB98FE0.toInt()
         else -> 0xFFFFE15C.toInt()
+    }
+}
+
+/**
+ * The colors one list widget is drawn in, once its own setting has been taken into account.
+ *
+ * Left on [WidgetStore.THEME_COLOR] a widget follows the *system's* light/dark setting, the
+ * way the widget chrome in `values/colors.xml` always has — a home screen is the launcher's
+ * screen, not the app's. Choosing a paper color takes it out of that, and the ink then has to
+ * come from the paper: `values-night`'s pale ink on a pastel card would be white on cream.
+ */
+internal data class Chrome(
+    val card: Int,
+    val ink: Int,
+    val muted: Int,
+    val divider: Int,
+    val icon: Int,
+) {
+    companion object {
+        fun of(context: Context, key: String): Chrome {
+            if (key == WidgetStore.THEME_COLOR) {
+                fun color(id: Int) = context.resources.getColor(id, context.theme)
+                return Chrome(
+                    card = color(R.color.widget_surface),
+                    ink = color(R.color.widget_ink),
+                    muted = color(R.color.widget_muted),
+                    divider = color(R.color.widget_divider),
+                    icon = color(R.color.widget_accent),
+                )
+            }
+            val ink = Palette.ink(key)
+            return Chrome(
+                card = Palette.bg(key),
+                ink = ink,
+                muted = alpha(ink, 0x9E),
+                divider = alpha(ink, 0x2E),
+                icon = ink,
+            )
+        }
+
+        private fun alpha(color: Int, a: Int): Int = (color and 0x00FFFFFF) or (a shl 24)
     }
 }

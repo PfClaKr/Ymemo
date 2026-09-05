@@ -24,7 +24,7 @@ Settings > Advanced trades battery for speed.*
 
 | | Download | Notes |
 |---|---|---|
-| **Windows** | `ymemo-setup-x86_64.exe` | Installer; adds the tray app and its firewall rules. |
+| **Windows** | `ymemo-<version>-setup-x86_64.exe` | Installer; adds the tray app and its firewall rules. |
 | **Debian / Ubuntu** | `ymemo_<version>_amd64.deb` | `sudo apt install ./ymemo_<version>_amd64.deb` |
 | **Fedora** | `ymemo-<version>-*.x86_64.rpm` | `sudo dnf install ./ymemo-<version>-*.rpm` |
 | **Android** | `ymemo-<version>-android-arm64-v8a.apk` | Most phones are `arm64-v8a`. Sideloaded, so Android asks once for permission to install it. |

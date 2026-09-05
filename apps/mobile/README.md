@@ -265,10 +265,45 @@ Three, in `android/app/src/main/kotlin/dev/ymemo/ymemo_mobile/widget/`:
 |---|---|---|
 | **Quick note** | 4x1 | A write bar. Tapping it opens a new memo with the keyboard up; the camera button opens one straight into the photo picker. |
 | **Sticky** | 2x2, resizable | One memo, in its own paper colour. Which one is asked when it is added (`NoteConfigureActivity`) and changed again from the "..." on the widget; the default is "whatever was edited last". |
-| **Memos** | 4x2, resizable | The folders, then every memo, most recently edited first. Tapping a row opens that memo or folder; the header adds one. |
+| **Memos** | 4x2, resizable | The folders, then every memo, most recently edited first. Tapping a row opens that memo or folder; the header adds one. Configurable (`ListConfigureActivity`) — see below. |
 
 Long-pressing the launcher icon offers the same two "new memo" actions as shortcuts
 (`res/xml/shortcuts.xml`), for people who would rather not give up a home-screen row.
+
+### What a Memos widget can be set to
+
+The gear on its header — or the launcher's own "reconfigure", on Android 12 and up — opens
+`ListConfigureActivity`, which asks three things:
+
+| | Choices | Default |
+|---|---|---|
+| **Memos** | everything, or one folder | everything |
+| **Background** | follow the system, or one of the five paper colours | follow the system |
+| **Opacity** | 20-100% | 100% |
+
+Every default is the answer that draws exactly what this widget drew before it could be
+configured, which is what lets `widget_list_info.xml` carry `configuration_optional`: on
+Android 12 and up the widget is placed straight away and the screen is only opened by someone
+who wants it. Below 12 that flag is ignored and the screen is shown when the widget is added,
+so it has to be answerable in one tap — hence a **Done** button rather than "tap a row and it
+closes", which is also the only shape that fits three questions.
+
+The settings are **per widget** (two Memos widgets can show two different folders) and stored
+in `WidgetStore`, the same private SharedPreferences file as the snapshot. They never go near
+the vault: a home screen belongs to one device, arranged the way that device's owner wants,
+and syncing it would only pick a fight with the other device's arrangement. `onDeleted` drops
+them, because Android keeps no per-widget storage of its own.
+
+Two things follow from the folder choice:
+
+- The snapshot publishes **every** folder with its `parent`, and each memo with the folder it
+  is in, so the screen can offer the whole tree. "Everything" is still not the same as picking
+  the top-level folder: it is the top-level folders **plus every memo wherever it is filed**,
+  which is what a shortcut surface wants and what this widget has always drawn.
+- Choosing a paper colour takes the widget out of the system's light/dark chrome, so the ink
+  has to come from the paper too — `values-night`'s pale ink on a pastel card would be white
+  on cream. `Chrome.of` in `Palette.kt` is where that fork lives, and both the frame and the
+  rows read it.
 
 ### Why the widgets read a copy
 
@@ -285,6 +320,9 @@ one published. Three consequences worth knowing:
 - It is a **second plaintext copy** of titles and body previews, next to the plaintext cache.
   It is emptied whenever the vault closes, so a locked app leaves nothing on the home screen —
   see SECURITY.md.
+- The JSON shape is `publishWidgets` in `lib/home_widgets.dart`, and the parser tolerates a
+  snapshot missing a field: `parent` was added when the Memos widget learned about folders,
+  and reading it as `""` leaves an old snapshot showing exactly what it showed before.
 - `updatePeriodMillis` is `0` on all three. Android's own period is capped at half an hour and
   would wake the app to redraw something that has not changed; the app says when instead.
   `WidgetRefreshReceiver` covers the two cases it cannot: the app being replaced (which

@@ -141,6 +141,19 @@
                 <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE"/>
             </intent-filter>
         </activity>
+
+        <!-- The same for the list widget: which folder, what color, how solid. Exported for
+             the same reason, and answering the same nothing — it reads the private
+             SharedPreferences file the widgets read and writes back to it. -->
+        <activity
+            android:name=".widget.ListConfigureActivity"
+            android:exported="true"
+            android:label="@string/widget_list_label"
+            android:theme="@style/WidgetConfigureTheme">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE"/>
+            </intent-filter>
+        </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

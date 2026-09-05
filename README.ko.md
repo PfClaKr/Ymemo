@@ -24,7 +24,7 @@
 
 | | 내려받을 파일 | 참고 |
 |---|---|---|
-| **Windows** | `ymemo-setup-x86_64.exe` | 설치 프로그램. 트레이 앱과 방화벽 규칙을 함께 등록합니다. |
+| **Windows** | `ymemo-<version>-setup-x86_64.exe` | 설치 프로그램. 트레이 앱과 방화벽 규칙을 함께 등록합니다. |
 | **Debian / Ubuntu** | `ymemo_<version>_amd64.deb` | `sudo apt install ./ymemo_<version>_amd64.deb` |
 | **Fedora** | `ymemo-<version>-*.x86_64.rpm` | `sudo dnf install ./ymemo-<version>-*.rpm` |
 | **Android** | `ymemo-<version>-android-arm64-v8a.apk` | 대부분의 휴대폰이 `arm64-v8a`입니다. 스토어를 거치지 않으므로 설치 권한을 한 번 물어봅니다. |

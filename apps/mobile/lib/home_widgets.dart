@@ -78,21 +78,38 @@ String? _published;
 
 /// Publishes what the widgets draw. Called after anything that changes a memo or folder.
 ///
-/// The list is deliberately not the app's root screen. That screen shows the top level only,
-/// which on a home screen would hide every memo ever filed in a folder; a widget is a
-/// shortcut surface, so it gets the folders to go into and then every memo, most recently
-/// edited first.
+/// A list widget left at its default is deliberately not the app's root screen. That screen
+/// shows the top level only, which on a home screen would hide every memo ever filed in a
+/// folder; a widget is a shortcut surface, so it gets the folders to go into and then every
+/// memo, most recently edited first.
+///
+/// **Every** folder is published, not only the top-level ones, and each memo says which
+/// folder it is in — so a list widget can be set to one folder instead
+/// (`ListConfigureActivity`). The default view still draws the top level, by filtering on
+/// `parent` over there; publishing the whole tree only makes the choice available.
 Future<void> publishWidgets() async {
   try {
-    final folders = await groupChildren(parentId: '');
+    // Two calls, not one per folder: `groupList` is every folder, and `groupChildren('')` is
+    // the top level **as the core resolves it** — a folder whose parent was deleted on
+    // another device, or whose ancestry loops, surfaces there rather than nowhere. Keeping
+    // the core's answer for that one question is why both are asked.
+    final all = await groupList();
+    final atRoot = {for (final folder in await groupChildren(parentId: '')) folder.id};
+    final known = {for (final folder in all) folder.id};
     final memos = await memoList(); // already most recently updated first
     final name = await vaultName();
     await _publish(jsonEncode({
       'vault': name,
       'hidden': false,
       'folders': [
-        for (final folder in folders)
-          {'id': folder.id, 'title': folder.name, 'preview': '', 'color': folder.color},
+        for (final folder in all)
+          {
+            'id': folder.id,
+            'title': folder.name,
+            'preview': '',
+            'color': folder.color,
+            'parent': atRoot.contains(folder.id) ? '' : folder.parentId,
+          },
       ],
       'memos': [
         for (final memo in memos.take(_memoLimit))
@@ -101,6 +118,9 @@ Future<void> publishWidgets() async {
             'title': memo.title,
             'preview': _preview(memo.body),
             'color': memo.color,
+            // A memo whose folder is gone belongs to the top level, which is where the app's
+            // own folder screen puts it (`memos_in_group`). Anything else reads as data loss.
+            'parent': known.contains(memo.groupId) ? memo.groupId : '',
           },
       ],
     }));

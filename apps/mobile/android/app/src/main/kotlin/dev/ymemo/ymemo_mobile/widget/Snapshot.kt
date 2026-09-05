@@ -24,6 +24,11 @@ internal data class Entry(
     val title: String,
     val preview: String,
     val color: String,
+    /**
+     * The folder this sits in — a folder's parent, a memo's folder — and `""` for the top
+     * level. Published for one reason: a list widget can be pointed at a single folder.
+     */
+    val parent: String,
 )
 
 internal data class Snapshot(
@@ -35,9 +40,39 @@ internal data class Snapshot(
     /** Every memo, most recently edited first. */
     val memos: List<Entry>,
 ) {
-    /** Folders first, then memos — the order the app's own list draws them in. */
-    val rows: List<Pair<Boolean, Entry>>
-        get() = folders.map { true to it } + memos.map { false to it }
+    /**
+     * The rows one list widget draws: folders first, then memos, the order the app's own
+     * list uses.
+     *
+     * [WidgetStore.EVERYTHING] is what a widget nobody has configured shows, and it is not
+     * the same as picking the top-level folder: it is the **top-level folders plus every
+     * memo**, wherever it is filed, which is what this widget has always drawn and what a
+     * shortcut surface wants. Naming a folder narrows it to that folder's own subfolders and
+     * its own memos, which is what the app's folder screen shows.
+     */
+    fun rows(folder: String): List<Pair<Boolean, Entry>> {
+        if (folder == WidgetStore.EVERYTHING) {
+            return folders.filter { it.parent.isEmpty() }.map { true to it } +
+                memos.map { false to it }
+        }
+        return folders.filter { it.parent == folder }.map { true to it } +
+            memos.filter { it.parent == folder }.map { false to it }
+    }
+
+    /**
+     * What a widget set to `id` is actually showing.
+     *
+     * A folder deleted on another device leaves a widget pointing at nothing, and an empty
+     * square forever is the worst answer to that; it falls back to the whole vault, which is
+     * also what the widget looked like before anyone configured it.
+     */
+    fun resolveFolder(id: String): String =
+        if (id == WidgetStore.EVERYTHING || folders.any { it.id == id }) id
+        else WidgetStore.EVERYTHING
+
+    /** The chosen folder itself, or null for [WidgetStore.EVERYTHING] and a deleted one. */
+    fun folder(id: String): Entry? =
+        if (id == WidgetStore.EVERYTHING) null else folders.firstOrNull { it.id == id }
 
     companion object {
         /** What a device that has never unlocked the app shows. */
@@ -56,9 +91,28 @@ internal object WidgetStore {
     private const val PREFS = "dev.ymemo.widget"
     private const val KEY_SNAPSHOT = "snapshot"
     private const val KEY_NOTE_PREFIX = "note_memo_"
+    private const val KEY_LIST_FOLDER_PREFIX = "list_folder_"
+    private const val KEY_LIST_COLOR_PREFIX = "list_color_"
+    private const val KEY_LIST_ALPHA_PREFIX = "list_alpha_"
 
     /** The memo id a sticky widget follows the most recent memo under. */
     const val MOST_RECENT = ""
+
+    /**
+     * A list widget showing the whole vault rather than one folder.
+     *
+     * `"*"` and not `""`, because `""` is a real answer here — it is the top level, and a
+     * widget set to it should show the top level's own memos and nothing else. This is the
+     * default, so a widget placed before there was anything to configure keeps drawing what
+     * it always drew.
+     */
+    const val EVERYTHING = "*"
+
+    /** A list widget drawn in the launcher's own light/dark chrome rather than a paper color. */
+    const val THEME_COLOR = ""
+
+    /** Below this a widget is a smudge on the wallpaper rather than a widget. */
+    const val MIN_ALPHA = 20
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -90,6 +144,9 @@ internal object WidgetStore {
                     title = o.optString("title"),
                     preview = o.optString("preview"),
                     color = o.optString("color", "yellow"),
+                    // Absent in a snapshot written before folders could be picked; the top
+                    // level is the reading that keeps such a widget showing what it showed.
+                    parent = o.optString("parent"),
                 )
             }
         }
@@ -111,5 +168,33 @@ internal object WidgetStore {
     /** Android does not clean these up when a widget is removed, so the provider does. */
     fun forgetNote(context: Context, widgetId: Int) {
         prefs(context).edit().remove(KEY_NOTE_PREFIX + widgetId).apply()
+    }
+
+    // ---- One list widget's settings: which folder, what color, how solid. ----
+
+    fun listFolder(context: Context, widgetId: Int): String =
+        prefs(context).getString(KEY_LIST_FOLDER_PREFIX + widgetId, EVERYTHING) ?: EVERYTHING
+
+    fun listColor(context: Context, widgetId: Int): String =
+        prefs(context).getString(KEY_LIST_COLOR_PREFIX + widgetId, THEME_COLOR) ?: THEME_COLOR
+
+    /** Percent, [MIN_ALPHA]..100. */
+    fun listAlpha(context: Context, widgetId: Int): Int =
+        prefs(context).getInt(KEY_LIST_ALPHA_PREFIX + widgetId, 100).coerceIn(MIN_ALPHA, 100)
+
+    fun setList(context: Context, widgetId: Int, folder: String, color: String, alpha: Int) {
+        prefs(context).edit()
+            .putString(KEY_LIST_FOLDER_PREFIX + widgetId, folder)
+            .putString(KEY_LIST_COLOR_PREFIX + widgetId, color)
+            .putInt(KEY_LIST_ALPHA_PREFIX + widgetId, alpha.coerceIn(MIN_ALPHA, 100))
+            .apply()
+    }
+
+    fun forgetList(context: Context, widgetId: Int) {
+        prefs(context).edit()
+            .remove(KEY_LIST_FOLDER_PREFIX + widgetId)
+            .remove(KEY_LIST_COLOR_PREFIX + widgetId)
+            .remove(KEY_LIST_ALPHA_PREFIX + widgetId)
+            .apply()
     }
 }
