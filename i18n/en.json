@@ -210,6 +210,7 @@
   "tray.lock": "Lock",
   "tray.memo_list": "Memo list",
   "tray.quit": "Quit",
+  "tray.raise_notes": "Bring notes to front",
   "ui.approve_allow": "Allow",
   "ui.approve_device_id": "Device ID",
   "ui.approve_device_name": "Device name",

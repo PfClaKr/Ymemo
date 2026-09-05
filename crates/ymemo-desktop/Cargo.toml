@@ -23,6 +23,8 @@ serde_json.workspace = true
 # Tray backend differs per platform; matches the cfg split in src/tray.rs.
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni.workspace = true
+# The `_NET_WM_STATE_SKIP_TASKBAR` hint on X11 (src/window.rs).
+x11rb.workspace = true
 
 # flock for the single-instance lock (src/instance.rs).
 [target.'cfg(unix)'.dependencies]

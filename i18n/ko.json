@@ -210,6 +210,7 @@
   "tray.lock": "잠금",
   "tray.memo_list": "메모 목록",
   "tray.quit": "종료",
+  "tray.raise_notes": "열린 메모 앞으로",
   "ui.approve_allow": "허용",
   "ui.approve_device_id": "기기 ID",
   "ui.approve_device_name": "기기 이름",

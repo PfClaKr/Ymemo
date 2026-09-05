@@ -58,13 +58,21 @@ the memos, so every device you connect shows the same one.
 
 ### Notes that behave like notes
 
-The tray icon toggles the list, and each memo opens as a small frameless sticky. Typing saves
-it — there is no save button, and nothing to lose by closing the window. Double-click the title
-bar to fold a note down to that bar; drag it and it snaps to the screen edges and to the other
-notes, so a wall of them stays a wall rather than a pile.
+The tray icon brings your open notes forward, and each memo opens as a small frameless sticky.
+Typing saves it — there is no save button, and nothing to lose by closing the window.
+Double-click the title bar to fold a note down to that bar; drag it and it snaps to the screen
+edges and to the other notes, so a wall of them stays a wall rather than a pile.
+
+Notes stay out of the taskbar, because a desk with eight notes on it is not eight
+applications. The **pin** on the title bar decides whether a note floats above your other
+windows or sits among them, and the tray is how you get one back after it has slipped behind
+something. (Keeping notes out of the taskbar needs Windows or X11; a native Wayland session
+has no way to ask for it, so there they keep their buttons.)
 
 Each note carries its own **colour** and **opacity**, and both travel with it: a note you
-turned blue on the desktop is blue on the phone.
+turned blue on the desktop is blue on the phone. The fade lifts while you are writing in a
+note and comes back when you leave it, so you are never reading your own sentence through
+the desktop.
 
 ### Photos on the paper
 

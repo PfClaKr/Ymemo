@@ -18,7 +18,33 @@ use crate::lock::lock_now;
 use crate::state::{touch, APP};
 use crate::window::present;
 
-/// Tray click or menu: raise the lock window while locked, otherwise toggle the list. The
+/// Tray click: bring the open memos forward.
+///
+/// The stickies are not in the taskbar any more (see [`crate::window::skip_taskbar`]), and an
+/// unpinned one sits with the ordinary windows, so this is how a note that ended up behind a
+/// browser comes back. It only ever raises: "show me my notes" has no opposite to toggle
+/// into, and hiding the desk on a stray click would be the worse half of a toggle.
+///
+/// With nothing open there is nothing to raise, so it falls back to what a tray click has
+/// always done and opens the list — a click that does nothing at all reads as a broken tray.
+pub(crate) fn request_raise_notes() {
+    let _ = slint::invoke_from_event_loop(|| {
+        APP.with(|a| {
+            let borrow = a.borrow();
+            let Some(app) = borrow.as_ref() else { return };
+            touch(&app.ctx);
+            if !app.unlocked.get() {
+                present(&app.lock);
+                return;
+            }
+            if crate::sticky::raise_open(&app.ctx) == 0 {
+                present(&app.list);
+            }
+        });
+    });
+}
+
+/// Tray menu "memo list": raise the lock window while locked, otherwise toggle the list. The
 /// call is handed to the event loop first, whatever thread it came from.
 pub(crate) fn request_toggle() {
     let _ = slint::invoke_from_event_loop(|| {
@@ -87,7 +113,7 @@ pub(crate) fn request_quit() {
 // ===========================================================================
 #[cfg(target_os = "linux")]
 mod imp {
-    use super::{request_lock, request_quit, request_toggle};
+    use super::{request_lock, request_quit, request_raise_notes, request_toggle};
     use crate::icon::tray_icon_rgba;
     use ymemo_i18n::t;
 
@@ -124,12 +150,21 @@ mod imp {
         }
 
         fn activate(&mut self, _x: i32, _y: i32) {
-            request_toggle();
+            request_raise_notes();
         }
 
         fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
             use ksni::menu::*;
             vec![
+                // First, and duplicated by the left click: on several Linux panels a click on
+                // a StatusNotifierItem opens this menu instead of calling `activate`, so the
+                // way back to a buried note cannot live in the click alone.
+                StandardItem {
+                    label: t!("tray.raise_notes"),
+                    activate: Box::new(|_| request_raise_notes()),
+                    ..Default::default()
+                }
+                .into(),
                 StandardItem {
                     label: t!("tray.memo_list"),
                     activate: Box::new(|_| request_toggle()),
@@ -187,7 +222,7 @@ mod imp {
     use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
     use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
-    use super::{request_lock, request_quit, request_toggle};
+    use super::{request_lock, request_quit, request_raise_notes, request_toggle};
     use crate::icon::tray_icon_rgba;
     use ymemo_i18n::t;
 
@@ -203,7 +238,7 @@ mod imp {
     impl TrayHandle {
         /// Rewrites the labels in the current language, in start()'s append order.
         pub fn refresh(&self) {
-            let labels = [t!("tray.memo_list"), t!("tray.lock"),
+            let labels = [t!("tray.raise_notes"), t!("tray.memo_list"), t!("tray.lock"),
                           t!("tray.quit")];
             for (item, label) in self.items.iter().zip(labels) {
                 item.set_text(label);
@@ -212,10 +247,12 @@ mod imp {
     }
 
     pub fn start() -> TrayHandle {
-        // Menu: list, lock, separator, quit. Events are dispatched by item id.
+        // Menu: notes, list, lock, separator, quit. Events are dispatched by item id.
+        let raise_item = MenuItem::new(t!("tray.raise_notes"), true, None);
         let list_item = MenuItem::new(t!("tray.memo_list"), true, None);
         let lock_item = MenuItem::new(t!("tray.lock"), true, None);
         let quit_item = MenuItem::new(t!("tray.quit"), true, None);
+        let raise_id: MenuId = raise_item.id().clone();
         let list_id: MenuId = list_item.id().clone();
         let lock_id: MenuId = lock_item.id().clone();
         let quit_id: MenuId = quit_item.id().clone();
@@ -223,6 +260,7 @@ mod imp {
         let menu = Menu::new();
         // append returns muda's Result (tray_icon::menu), not tray_icon::Result.
         let build_menu = || -> tray_icon::menu::Result<()> {
+            menu.append(&raise_item)?;
             menu.append(&list_item)?;
             menu.append(&lock_item)?;
             menu.append(&PredefinedMenuItem::separator())?;
@@ -258,7 +296,9 @@ mod imp {
         let poll = slint::Timer::default();
         poll.start(slint::TimerMode::Repeated, Duration::from_millis(120), move || {
             while let Ok(ev) = MenuEvent::receiver().try_recv() {
-                if ev.id == list_id {
+                if ev.id == raise_id {
+                    request_raise_notes();
+                } else if ev.id == list_id {
                     request_toggle();
                 } else if ev.id == lock_id {
                     request_lock();
@@ -267,14 +307,14 @@ mod imp {
                 }
             }
             while let Ok(ev) = TrayIconEvent::receiver().try_recv() {
-                // One left click, on release, toggles the list.
+                // One left click, on release, brings the open notes forward.
                 if let TrayIconEvent::Click {
                     button: MouseButton::Left,
                     button_state: MouseButtonState::Up,
                     ..
                 } = ev
                 {
-                    request_toggle();
+                    request_raise_notes();
                 }
             }
         });
@@ -282,7 +322,7 @@ mod imp {
         TrayHandle {
             _tray: tray,
             _poll: poll,
-            items: vec![list_item, lock_item, quit_item],
+            items: vec![raise_item, list_item, lock_item, quit_item],
         }
     }
 }

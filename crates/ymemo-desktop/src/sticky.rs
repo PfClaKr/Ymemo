@@ -22,7 +22,7 @@ use ymemo_i18n::t;
 
 use crate::list::refresh_list;
 use crate::state::{touch, Ctx, StickyEntry, Stickies, APP};
-use crate::window::present;
+use crate::window::{present, raise, skip_taskbar};
 use crate::{apply_strings, PhotoRow, StickyWindow, Strings};
 
 /// Body font size (logical px) that photo sizes in em are measured against.
@@ -147,6 +147,45 @@ pub(crate) fn new_memo(ctx: &Ctx) {
 
 /// Hides a sticky and schedules its removal from the registry; dropping the window inside
 /// its own callback is unsafe, so it waits for the next event-loop turn.
+/// `present`, plus the taskbar hint a sticky wants.
+///
+/// The two go together every time, not once when the window is built: on Windows the shell
+/// hands a window a fresh taskbar button whenever it is shown, so hiding it is undone by the
+/// very next `show`. See [`crate::window::skip_taskbar`].
+pub(crate) fn present_sticky(window: &StickyWindow) {
+    present(window);
+    skip_taskbar(window.window());
+}
+
+/// Brings one sticky to the front, showing it first if it is not on screen.
+pub(crate) fn raise_sticky(window: &StickyWindow) {
+    if window.window().is_visible() {
+        // Deliberately not `present`: that resizes the window a pixel and back to force a
+        // repaint, and a note already on screen has nothing to repaint — the jolt would be
+        // the only thing the user saw, times every note on the desk. The taskbar hint is
+        // still re-applied, since it is one call and the shell is generous with buttons.
+        skip_taskbar(window.window());
+    } else {
+        present_sticky(window);
+    }
+    raise(window);
+}
+
+/// Brings every open sticky to the front. Returns how many there were.
+///
+/// This is the whole reason the tray has something to activate: a note that is not pinned
+/// can end up behind another window, and with the stickies out of the taskbar there is no
+/// button to click to get it back. Notes are only raised, never opened — the tray must not
+/// decide which memos the user wanted on the desk.
+pub(crate) fn raise_open(ctx: &Ctx) -> usize {
+    let windows: Vec<StickyWindow> =
+        ctx.stickies.borrow().values().map(|e| e.window.clone_strong()).collect();
+    for window in &windows {
+        raise_sticky(window);
+    }
+    windows.len()
+}
+
 pub(crate) fn close_sticky(stickies: &Stickies, id: &str) {
     if let Some(entry) = stickies.borrow().get(id) {
         entry.save_timer.stop();
@@ -314,7 +353,7 @@ fn attach_photo(memo_id: &str, pick: PhotoPick) {
 /// Opens a memo's sticky, or raises it when already open.
 pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     if let Some(entry) = ctx.stickies.borrow().get(&memo.id) {
-        present(&entry.window);
+        raise_sticky(&entry.window);
         return Ok(());
     }
 
@@ -325,6 +364,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     window.set_memo_text(SharedString::from(sticky_text(memo)));
     window.set_sticky_color(SharedString::from(memo.color.clone()));
     window.set_sticky_opacity(memo.opacity as f32);
+    window.set_pinned(ctx.settings.borrow().memo_pinned(&memo.id));
     window.set_created_at(SharedString::from(format_created_at(memo.created_at)));
     {
         let guard = ctx.vault.borrow();
@@ -456,6 +496,29 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     {
         let ctx = ctx.clone();
         window.on_new_memo(move || new_memo(&ctx));
+    }
+
+    // Pin: stay above other windows, or drop back among them. Stored in settings.json, so
+    // it is remembered the next time this memo is opened and never reaches another device.
+    // The window property alone is enough to apply it — Slint pushes the new level to the
+    // window when `always-on-top` changes.
+    {
+        let ctx = ctx.clone();
+        let id = memo.id.clone();
+        let weak = window.as_weak();
+        window.on_toggle_pin(move || {
+            touch(&ctx);
+            let Some(w) = weak.upgrade() else { return };
+            let pinned = !w.get_pinned();
+            {
+                let mut settings = ctx.settings.borrow_mut();
+                if !settings.set_memo_pinned(&id, pinned) {
+                    return;
+                }
+                settings.save(&ctx.dir);
+            }
+            w.set_pinned(pinned);
+        });
     }
 
     // Color change: only the color is stored, and it syncs across devices.
@@ -638,7 +701,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
-    present(&window);
+    present_sticky(&window);
     // A note opens at its first line, whatever the widget's scroll offset happened to be.
     window.invoke_body_to_top();
     if focus {

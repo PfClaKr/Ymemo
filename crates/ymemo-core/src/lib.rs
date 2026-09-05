@@ -5,7 +5,7 @@
 //! ([`Store`]). The layers above live in sibling modules: [`crypto`] (key derivation and
 //! AEAD), [`changelog`] (encrypted append-only log), [`vault`] (automerge merge and cache
 //! rebuild), [`sync`] (Syncthing control), [`pairing`] and [`lan_pair`] (device linking).
-//! [`diag`] is the log file every one of them reports failures to.
+//! [`mod@diag`] is the log file every one of them reports failures to.
 
 pub mod blob;
 pub mod changelog;
