@@ -1,5 +1,7 @@
 # Ymemo
 
+**English** · [한국어](README.ko.md)
+
 Sticky notes for your desk and your phone. They sync directly between your own devices —
 end-to-end encrypted, with **no server of anyone's in between**, and no account to sign up for.
 
