@@ -131,15 +131,30 @@ Type: filesandordirs; Name: "{app}"
     2. taskkill on Ymemo.exe — for an installed version older than --quit.
     3. taskkill on ymemo-sync.exe — for a daemon orphaned by a version that predates the job
        object that now ties it to the app's lifetime.
-  Every step is best effort: nothing here may stop an install. }
-procedure StopYmemo(AppExe: String);
+  Every step is best effort: nothing here may stop an install.
+
+  AsOriginalUser decides who sends step 1, and it is not a preference. `--quit` finds the
+  running app through `instance.port` in the **per-user** data directory, so it has to run as
+  whoever is logged in — but `ExecAsOriginalUser` exists only while installing. Calling it
+  from the uninstaller raises "Cannot call ExecAsOriginalUser function during Uninstall" and
+  takes the whole uninstall down with it, which is what 1.0.0 shipped.
+
+  So the uninstaller uses plain Exec. Elevating an administrator's own account keeps that
+  account's profile, so step 1 still works in the ordinary case; a standard user who typed
+  someone else's admin password gets a --quit that finds no port and does nothing, and
+  taskkill below removes the app the blunt way. Losing the graceful close is worth far less
+  than an uninstall that cannot run at all. }
+procedure StopYmemo(AppExe: String; AsOriginalUser: Boolean);
 var
   Code: Integer;
 begin
-  { As the original user: Setup is elevated, and the running app — with the data directory
-    holding the port it listens on — belongs to whoever is logged in. }
   if FileExists(AppExe) then
-    ExecAsOriginalUser(AppExe, '--quit', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  begin
+    if AsOriginalUser then
+      ExecAsOriginalUser(AppExe, '--quit', '', SW_HIDE, ewWaitUntilTerminated, Code)
+    else
+      Exec(AppExe, '--quit', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  end;
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/T /F /IM Ymemo.exe', '',
        SW_HIDE, ewWaitUntilTerminated, Code);
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/T /F /IM ymemo-sync.exe', '',
@@ -151,13 +166,13 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   WizardForm.PreparingLabel.Caption := ExpandConstant('{cm:StoppingApp}');
-  StopYmemo(ExpandConstant('{app}\Ymemo.exe'));
+  StopYmemo(ExpandConstant('{app}\Ymemo.exe'), True);
   Result := '';
 end;
 
 function InitializeUninstall(): Boolean;
 begin
-  StopYmemo(ExpandConstant('{app}\Ymemo.exe'));
+  StopYmemo(ExpandConstant('{app}\Ymemo.exe'), False);
   Result := True;
 end;
 
