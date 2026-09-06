@@ -141,17 +141,24 @@ class ListConfigureActivity : Activity() {
         val value = findViewById<TextView>(R.id.configure_opacity_value)
         val start = WidgetStore.listAlpha(this, widgetId)
 
-        // The bar is 0..(100 - MIN_ALPHA) and shifted, because a floor is what keeps a widget
-        // from being dragged all the way to invisible and then hunted for on the wallpaper.
-        bar.max = 100 - WidgetStore.MIN_ALPHA
-        bar.progress = start - WidgetStore.MIN_ALPHA
+        // The bar reads 0..100, so the thumb sits where the number says: at 50% it is half
+        // way along. It used to be 0..(100 - MIN_ALPHA) with the value shifted on top, which
+        // put the thumb at 37% while the label read 50% — the floor was being spent as a
+        // shifted origin instead of as a floor.
+        //
+        // The floor still holds: dragging below it snaps back, so a widget cannot be pulled
+        // all the way to invisible and then hunted for on the wallpaper.
+        bar.max = 100
+        bar.progress = start
         value.text = getString(R.string.widget_list_configure_percent, start)
         bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
-                value.text = getString(
-                    R.string.widget_list_configure_percent,
-                    progress + WidgetStore.MIN_ALPHA,
-                )
+                if (progress < WidgetStore.MIN_ALPHA) {
+                    // Re-enters once with the floor, which then takes the branch below.
+                    bar.progress = WidgetStore.MIN_ALPHA
+                    return
+                }
+                value.text = getString(R.string.widget_list_configure_percent, progress)
                 updatePreview()
             }
 
@@ -171,7 +178,7 @@ class ListConfigureActivity : Activity() {
         val chrome = Chrome.of(this, chosenValue(
             findViewById(R.id.configure_colors), colorKeys, WidgetStore.THEME_COLOR,
         ))
-        val alpha = findViewById<SeekBar>(R.id.configure_opacity).progress + WidgetStore.MIN_ALPHA
+        val alpha = findViewById<SeekBar>(R.id.configure_opacity).progress
 
         val card = findViewById<ImageView>(R.id.preview_card)
         card.setColorFilter(chrome.card)
@@ -234,7 +241,7 @@ class ListConfigureActivity : Activity() {
         val color = chosenValue(
             findViewById(R.id.configure_colors), colorKeys, WidgetStore.THEME_COLOR,
         )
-        val alpha = findViewById<SeekBar>(R.id.configure_opacity).progress + WidgetStore.MIN_ALPHA
+        val alpha = findViewById<SeekBar>(R.id.configure_opacity).progress
         WidgetStore.setList(this, widgetId, folder, color, alpha)
 
         val manager = AppWidgetManager.getInstance(this)
