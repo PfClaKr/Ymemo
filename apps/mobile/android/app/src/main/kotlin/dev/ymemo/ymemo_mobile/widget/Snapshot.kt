@@ -50,7 +50,12 @@ internal data class Snapshot(
      * shortcut surface wants. Naming a folder narrows it to that folder's own subfolders and
      * its own memos, which is what the app's folder screen shows.
      */
-    fun rows(folder: String): List<Pair<Boolean, Entry>> {
+    fun rows(folder: String, picks: Set<String> = emptySet()): List<Pair<Boolean, Entry>> {
+        if (folder == WidgetStore.PICKED) {
+            // Just the chosen memos, in the order the snapshot lists them (most recently
+            // edited first). No folders: someone who named the memos is not browsing.
+            return memos.filter { picks.contains(it.id) }.map { false to it }
+        }
         if (folder == WidgetStore.EVERYTHING) {
             return folders.filter { it.parent.isEmpty() }.map { true to it } +
                 memos.map { false to it }
@@ -66,9 +71,14 @@ internal data class Snapshot(
      * square forever is the worst answer to that; it falls back to the whole vault, which is
      * also what the widget looked like before anyone configured it.
      */
-    fun resolveFolder(id: String): String =
-        if (id == WidgetStore.EVERYTHING || folders.any { it.id == id }) id
-        else WidgetStore.EVERYTHING
+    fun resolveFolder(id: String, picks: Set<String> = emptySet()): String = when {
+        id == WidgetStore.EVERYTHING -> id
+        // A pick list whose memos have all been deleted would leave a square that can never
+        // show anything again; the whole vault is the same answer a lost folder gets.
+        id == WidgetStore.PICKED -> if (memos.any { picks.contains(it.id) }) id else WidgetStore.EVERYTHING
+        folders.any { it.id == id } -> id
+        else -> WidgetStore.EVERYTHING
+    }
 
     /** The chosen folder itself, or null for [WidgetStore.EVERYTHING] and a deleted one. */
     fun folder(id: String): Entry? =
@@ -92,6 +102,7 @@ internal object WidgetStore {
     private const val KEY_SNAPSHOT = "snapshot"
     private const val KEY_NOTE_PREFIX = "note_memo_"
     private const val KEY_LIST_FOLDER_PREFIX = "list_folder_"
+    private const val KEY_LIST_PICKS_PREFIX = "list_picks_"
     private const val KEY_LIST_COLOR_PREFIX = "list_color_"
     private const val KEY_LIST_ALPHA_PREFIX = "list_alpha_"
 
@@ -107,6 +118,15 @@ internal object WidgetStore {
      * it always drew.
      */
     const val EVERYTHING = "*"
+
+    /**
+     * A list widget showing named memos rather than a folder.
+     *
+     * Which ones is [`listPicks`], kept apart from this because a folder and a pick list are
+     * different questions — someone who switches to a folder and back should find their picks
+     * where they left them.
+     */
+    const val PICKED = "+"
 
     /** A list widget drawn in the launcher's own light/dark chrome rather than a paper color. */
     const val THEME_COLOR = ""
@@ -182,8 +202,20 @@ internal object WidgetStore {
     fun listAlpha(context: Context, widgetId: Int): Int =
         prefs(context).getInt(KEY_LIST_ALPHA_PREFIX + widgetId, 100).coerceIn(MIN_ALPHA, 100)
 
-    fun setList(context: Context, widgetId: Int, folder: String, color: String, alpha: Int) {
+    /** The memos a [PICKED] widget shows; empty for every other kind. */
+    fun listPicks(context: Context, widgetId: Int): Set<String> =
+        prefs(context).getStringSet(KEY_LIST_PICKS_PREFIX + widgetId, emptySet()) ?: emptySet()
+
+    fun setList(
+        context: Context,
+        widgetId: Int,
+        folder: String,
+        picks: Set<String>,
+        color: String,
+        alpha: Int,
+    ) {
         prefs(context).edit()
+            .putStringSet(KEY_LIST_PICKS_PREFIX + widgetId, picks)
             .putString(KEY_LIST_FOLDER_PREFIX + widgetId, folder)
             .putString(KEY_LIST_COLOR_PREFIX + widgetId, color)
             .putInt(KEY_LIST_ALPHA_PREFIX + widgetId, alpha.coerceIn(MIN_ALPHA, 100))
@@ -192,6 +224,7 @@ internal object WidgetStore {
 
     fun forgetList(context: Context, widgetId: Int) {
         prefs(context).edit()
+            .remove(KEY_LIST_PICKS_PREFIX + widgetId)
             .remove(KEY_LIST_FOLDER_PREFIX + widgetId)
             .remove(KEY_LIST_COLOR_PREFIX + widgetId)
             .remove(KEY_LIST_ALPHA_PREFIX + widgetId)

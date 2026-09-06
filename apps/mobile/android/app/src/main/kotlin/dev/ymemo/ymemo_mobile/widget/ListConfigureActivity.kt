@@ -6,7 +6,9 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.SeekBar
@@ -35,6 +37,9 @@ class ListConfigureActivity : Activity() {
     /** Folder id per radio button id, in the order they were added. */
     private val folderIds = mutableListOf<String>()
     private val colorKeys = mutableListOf<String>()
+
+    /** One checkbox per memo, by memo id, for the "memos I pick" answer. */
+    private val pickBoxes = linkedMapOf<String, CheckBox>()
 
     /**
      * Whether the folder question could be asked at all.
@@ -94,7 +99,13 @@ class ListConfigureActivity : Activity() {
         }
         foldersOffered = true
 
-        val chosen = snapshot.resolveFolder(WidgetStore.listFolder(this, widgetId))
+        // The picks have to come along: without them "memos I pick" looks like a choice with
+        // nothing behind it, and the screen quietly reopens on "everything" — throwing the
+        // widget's real setting away the moment Done is pressed.
+        val chosen = snapshot.resolveFolder(
+            WidgetStore.listFolder(this, widgetId),
+            WidgetStore.listPicks(this, widgetId),
+        )
         addChoice(group, folderIds, WidgetStore.EVERYTHING,
             getString(R.string.widget_list_configure_everything), chosen)
 
@@ -118,6 +129,51 @@ class ListConfigureActivity : Activity() {
             }
         }
         walk("", 0)
+
+        // Last, so its checklist is directly underneath it. Between the folders it read as
+        // another folder's contents rather than as its own answer.
+        addChoice(group, folderIds, WidgetStore.PICKED,
+            getString(R.string.widget_list_configure_pick), chosen)
+        fillPicks(snapshot)
+        // The checklist belongs to one answer, so it comes and goes with it.
+        group.setOnCheckedChangeListener { _, _ -> showPicksIfChosen() }
+        showPicksIfChosen()
+    }
+
+    /**
+     * A checkbox per memo, for a widget that shows a handful of named notes rather than a
+     * folder — the shopping list and the door code, and nothing else moving around them.
+     *
+     * The memos are the snapshot's, so the same cap applies as everywhere else: the most
+     * recently edited ones. A memo that falls off the end of that, or is deleted, simply
+     * stops being drawn; the rest of the picks are unaffected.
+     */
+    private fun fillPicks(snapshot: Snapshot) {
+        val container = findViewById<LinearLayout>(R.id.configure_picks)
+        val picked = WidgetStore.listPicks(this, widgetId)
+        snapshot.memos.forEach { memo ->
+            val box = CheckBox(this).apply {
+                id = View.generateViewId()
+                text = memo.title.ifEmpty { getString(R.string.widget_untitled) }
+                isChecked = picked.contains(memo.id)
+                setPadding(paddingLeft, PADDING, paddingRight, PADDING)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                )
+            }
+            container.addView(box)
+            pickBoxes[memo.id] = box
+        }
+    }
+
+    /** Shows the checklist only while "memos I pick" is the answer. */
+    private fun showPicksIfChosen() {
+        val chosen = chosenValue(
+            findViewById(R.id.configure_folders), folderIds, WidgetStore.EVERYTHING,
+        )
+        findViewById<LinearLayout>(R.id.configure_picks).visibility =
+            if (chosen == WidgetStore.PICKED) View.VISIBLE else View.GONE
     }
 
     /** The launcher's own light/dark chrome, or one of the sticky papers. */
@@ -242,7 +298,10 @@ class ListConfigureActivity : Activity() {
             findViewById(R.id.configure_colors), colorKeys, WidgetStore.THEME_COLOR,
         )
         val alpha = findViewById<SeekBar>(R.id.configure_opacity).progress
-        WidgetStore.setList(this, widgetId, folder, color, alpha)
+        // Kept even when the answer is a folder, so switching to a folder and back finds the
+        // picks where they were left.
+        val picks = pickBoxes.filterValues { it.isChecked }.keys.toSet()
+        WidgetStore.setList(this, widgetId, folder, picks, color, alpha)
 
         val manager = AppWidgetManager.getInstance(this)
         // The rows come from a RemoteViewsFactory, which only re-reads when it is told to:

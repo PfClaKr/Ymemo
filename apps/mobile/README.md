@@ -277,7 +277,7 @@ The gear on its header — or the launcher's own "reconfigure", on Android 12 an
 
 | | Choices | Default |
 |---|---|---|
-| **Memos** | everything, or one folder | everything |
+| **Memos** | everything, one folder, or memos picked by name | everything |
 | **Background** | follow the system, or one of the five paper colours | follow the system |
 | **Opacity** | 20-100% | 100% |
 
@@ -299,6 +299,13 @@ in `WidgetStore`, the same private SharedPreferences file as the snapshot. They 
 the vault: a home screen belongs to one device, arranged the way that device's owner wants,
 and syncing it would only pick a fight with the other device's arrangement. `onDeleted` drops
 them, because Android keeps no per-widget storage of its own.
+
+Picking memos by name is the third answer, and it is a different question from the folder —
+switching to a folder and back finds the ticks where they were left, because the two are
+stored apart. It is stored as a set of memo ids; one that is deleted, or that falls off the
+end of what the snapshot publishes, simply stops being drawn and the rest are unaffected. A
+pick list with nothing left in it falls back to the whole vault, the same answer a deleted
+folder gets — a square that can never show anything again is the one outcome worth avoiding.
 
 Two things follow from the folder choice:
 
