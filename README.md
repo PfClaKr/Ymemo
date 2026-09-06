@@ -20,6 +20,11 @@ end-to-end encrypted, with **no server of anyone's in between**, and no account 
 default settings a change reaches the other device in about twenty seconds, and
 Settings > Advanced trades battery for speed.*
 
+Memos keep the order you put them in. Drag one **between** two rows in the list to place it;
+drop it **on** a folder to file it there. The arrangement is per folder and it syncs, so two
+devices rearranging at once keep both changes instead of one overwriting the other. A folder
+nobody has arranged is still newest-first, as it always was.
+
 ## Getting it
 
 | | Download | Notes |

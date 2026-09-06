@@ -71,6 +71,7 @@ export component ListWindow inherits Window {
     in-out property <string> coloring-id: "";
     callback delete-row(string, bool);     // id, is-group
     callback move-row(int, int);           // source row, drop row (out of range = top level)
+    callback reorder-row(int, int);        // source row, gap to drop it in (0 = above everything)
     callback add-peer(string);
     // Pairing panel open/close; Rust resizes the window, as in LockWindow.
     callback sync-toggled(bool);
@@ -82,9 +83,29 @@ export component ListWindow inherits Window {
 
     private property <bool> show-sync: false;
     changed show-sync => { root.sync-toggled(self.show-sync); }
-    // Drag state: the grabbed row and the current drop target; -1 means no drag.
+    // Drag state: the grabbed row and where the pointer is, in row units — 3.5 is the middle
+    // of row 3. Rows are uniform, so this is the whole geometry the drop needs. -1 = no drag.
     private property <int> drag-source: -1;
-    private property <int> drag-target: -1;
+    private property <float> drag-at: -1;
+    // Whether the row being dragged is a folder. Folders keep the old behaviour — dropped
+    // *on* a row, never *between* two — because what is being arranged here is the memos
+    // inside a folder, and a folder's own place comes from the tree.
+    private property <bool> drag-is-group: false;
+
+    private property <int> drag-under: Math.floor(root.drag-at);
+    private property <float> drag-frac: root.drag-at - root.drag-under;
+    // Dropping into a folder rather than between two rows: the pointer has to be in the
+    // middle of a folder's row. The outer quarters are the gaps above and below it, so a
+    // folder never swallows a drop meant to land next to it.
+    private property <bool> drag-into-folder: root.drag-source != -1 && !root.drag-is-group
+        && root.drag-under >= 0 && root.drag-under < root.rows.length
+        && root.rows[root.drag-under].is-group
+        && root.drag-frac > 0.25 && root.drag-frac < 0.75;
+    // The row a drop would go *into*, and the gap it would go *between*; one or the other.
+    private property <int> drag-into: root.drag-into-folder ? root.drag-under : -1;
+    private property <int> drag-gap: root.drag-source == -1 || root.drag-is-group
+        || root.drag-into-folder ? -1
+        : (root.drag-frac >= 0.5 ? root.drag-under + 1 : root.drag-under);
     // Whether this press became a drag, so its release is not taken for a click.
     private property <bool> did-drag: false;
 
@@ -253,11 +274,24 @@ export component ListWindow inherits Window {
             for row[idx] in root.rows: Rectangle {
                 height: root.row-h;
                 border-radius: 6px;
-                // The dragged row dims, the drop target highlights.
+                // The dragged row dims, a folder about to swallow it highlights.
                 opacity: root.drag-source == idx ? 0.45 : 1;
-                background: root.drag-source != -1 && root.drag-target == idx ? #7db8ec55
+                background: root.drag-into == idx ? #7db8ec55
                           : ta.has-hover ? #ffffff1a
                           : transparent;
+
+                // The line the memo would land on. Drawn on the row below the gap, and on the
+                // bottom edge of the last row for the gap past the end of the list.
+                if root.drag-gap == idx: Rectangle {
+                    y: -1px;
+                    height: 2px;
+                    background: #7db8ec;
+                }
+                if root.drag-gap == idx + 1 && idx == root.rows.length - 1: Rectangle {
+                    y: parent.height - 1px;
+                    height: 2px;
+                    background: #7db8ec;
+                }
 
                 // Touch area underneath: the Text above does not consume input, so it lands
                 // here — except while renaming, where the LineEdit on top takes it first.
@@ -267,11 +301,26 @@ export component ListWindow inherits Window {
                             root.did-drag = false;
                         }
                         if (ev.kind == PointerEventKind.up) {
-                            if (root.drag-source != -1 && root.drag-target != root.drag-source) {
-                                root.move-row(root.drag-source, root.drag-target);
+                            if (root.drag-source != -1) {
+                                if (root.drag-is-group) {
+                                    // Unchanged: a folder is dropped on a row, and past the
+                                    // end of the list means the top level.
+                                    if (root.drag-under != root.drag-source) {
+                                        root.move-row(root.drag-source, root.drag-under);
+                                    }
+                                } else if (root.drag-into != -1) {
+                                    if (root.drag-into != root.drag-source) {
+                                        root.move-row(root.drag-source, root.drag-into);
+                                    }
+                                // The two gaps touching the memo are where it already is, so
+                                // a drop there is not a move and must not write anything.
+                                } else if (root.drag-gap != root.drag-source
+                                        && root.drag-gap != root.drag-source + 1) {
+                                    root.reorder-row(root.drag-source, root.drag-gap);
+                                }
                             }
                             root.drag-source = -1;
-                            root.drag-target = -1;
+                            root.drag-at = -1;
                         }
                     }
                     moved => {
@@ -279,10 +328,13 @@ export component ListWindow inherits Window {
                         if (self.mouse-y - self.pressed-y > 4px || self.pressed-y - self.mouse-y > 4px) {
                             root.did-drag = true;
                             root.drag-source = idx;
+                            root.drag-is-group = row.is-group;
                         }
                         if (root.drag-source != -1) {
-                            // Rows are uniform, so pixels convert straight to row counts.
-                            root.drag-target = idx + Math.round((self.mouse-y - self.pressed-y) / root.row-h);
+                            // Rows are uniform, and `mouse-y` is measured from this row's top,
+                            // so this is the pointer's position in row units — fraction and
+                            // all, which is what tells a gap from the middle of a folder.
+                            root.drag-at = idx + self.mouse-y / root.row-h;
                         }
                     }
                     clicked => {

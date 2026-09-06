@@ -645,6 +645,15 @@ fn main() -> Result<()> {
         });
     }
 
+    // ---- Dragging a memo into a gap between rows: the folder's own arrangement. ----
+    {
+        let ctx = ctx.clone();
+        list.on_reorder_row(move |src, gap| {
+            touch(&ctx);
+            list::reorder_row(&ctx, src, gap);
+        });
+    }
+
     // ---- Recolouring a row (folder or memo) from the list. ----
     {
         let ctx = ctx.clone();
