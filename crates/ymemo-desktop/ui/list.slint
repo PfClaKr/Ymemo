@@ -106,6 +106,27 @@ export component ListWindow inherits Window {
     private property <int> drag-gap: root.drag-source == -1 || root.drag-is-group
         || root.drag-into-folder ? -1
         : (root.drag-frac >= 0.5 ? root.drag-under + 1 : root.drag-under);
+
+    // How far the rows either side of the gap lean away from it. The row keeps its height and
+    // its touch area — only what is drawn moves — because the drop position is worked out
+    // from the pointer against a **fixed** row height, and rows that changed size while being
+    // aimed at would move the target out from under the pointer.
+    private property <length> part: 5px;
+
+    // Spring-loaded folders: hold a memo over a closed folder and it opens, so the memo can
+    // be put *between* the ones inside rather than only "in there somewhere". A folder with
+    // nothing in it has nothing to open, and one already open is left alone — otherwise this
+    // would sit there shutting and opening it for as long as the pointer rests.
+    private property <string> spring-group: root.drag-into != -1
+        && !root.rows[root.drag-into].expanded
+        && root.rows[root.drag-into].child-count > 0
+        ? root.rows[root.drag-into].id : "";
+    Timer {
+        // Long enough that passing over a folder on the way somewhere else does not open it.
+        interval: 550ms;
+        running: root.spring-group != "";
+        triggered() => { root.toggle-group(root.spring-group); }
+    }
     // Whether this press became a drag, so its release is not taken for a click.
     private property <bool> did-drag: false;
 
@@ -276,20 +297,31 @@ export component ListWindow inherits Window {
                 border-radius: 6px;
                 // The dragged row dims, a folder about to swallow it highlights.
                 opacity: root.drag-source == idx ? 0.45 : 1;
+                animate opacity { duration: 120ms; easing: ease-out; }
                 background: root.drag-into == idx ? #7db8ec55
                           : ta.has-hover ? #ffffff1a
                           : transparent;
+                animate background { duration: 120ms; easing: ease-out; }
 
-                // The line the memo would land on. Drawn on the row below the gap, and on the
-                // bottom edge of the last row for the gap past the end of the list.
+                // The line the memo would land on, in the space the two rows either side have
+                // just made for it. Drawn on the row below the gap, and on the bottom edge of
+                // the last row for the gap past the end of the list.
                 if root.drag-gap == idx: Rectangle {
-                    y: -1px;
+                    x: 6px + row.depth * 14px;
+                    // Straddles the row's top edge, except on the first row, where the half
+                    // above it falls outside the list and is clipped away.
+                    y: idx == 0 ? 0px : -1px;
+                    width: parent.width - self.x - 8px;
                     height: 2px;
+                    border-radius: 1px;
                     background: #7db8ec;
                 }
                 if root.drag-gap == idx + 1 && idx == root.rows.length - 1: Rectangle {
+                    x: 6px + row.depth * 14px;
                     y: parent.height - 1px;
+                    width: parent.width - self.x - 8px;
                     height: 2px;
+                    border-radius: 1px;
                     background: #7db8ec;
                 }
 
@@ -360,6 +392,12 @@ export component ListWindow inherits Window {
                     padding-left: 6px + row.depth * 14px; // tree indent
                     padding-right: 4px;
                     spacing: 6px;
+                    // Lean away from the gap, so the two rows either side of the drop visibly
+                    // make room. The row itself does not move; this is only what it draws.
+                    y: root.drag-gap == idx ? root.part
+                     : root.drag-gap == idx + 1 ? -root.part
+                     : 0px;
+                    animate y { duration: 130ms; easing: ease-out; }
 
                     // Groups show a disclosure marker, memos a color accent.
                     if row.is-group: Rectangle {

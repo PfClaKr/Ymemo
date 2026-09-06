@@ -265,7 +265,14 @@ impl Vault {
     /// memo is already at the top and inventing a key would be the one write that pushed it
     /// down. Arranging a folder is what gives its memos keys ([`Vault::move_memo`]).
     fn key_for_new(&self, memo: &Memo) -> Result<String> {
-        if !memo.order_key.is_empty() {
+        // A memo that has just been put in another folder is new *to that folder*, whatever
+        // key it had: that key is a position among memos it no longer sits with, and carrying
+        // it over drops the memo at an arbitrary point in its new folder. Every way of moving
+        // one that is not a deliberate placement comes through here — the list's drag onto a
+        // folder, and the phone's move — while `move_memo`, which is a placement, writes the
+        // cache directly and never asks.
+        let moved = matches!(self.store.get(&memo.id)?, Some(old) if old.group_id != memo.group_id);
+        if !memo.order_key.is_empty() && !moved {
             return Ok(memo.order_key.clone());
         }
         Ok(match self.store.first_order_key(&memo.group_id)? {
@@ -1273,6 +1280,49 @@ mod tests {
             merged.iter().position(|t| t == "b").unwrap() < merged.iter().position(|t| t == "a").unwrap(),
             "B's move was lost: {merged:?}",
         );
+    }
+
+    /// Moving a memo to another folder puts it at the top of that folder, not at whatever
+    /// position its old key happens to name among memos it has never been beside.
+    #[test]
+    fn a_memo_moved_to_another_folder_lands_on_top_of_it() {
+        let dir = temp_dir();
+        let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let folder = crate::Group::new("folder");
+        v.upsert_group(&folder).unwrap();
+
+        // Two memos in the folder, arranged, so it has real keys to land among.
+        let mut inside = Vec::new();
+        for (i, title) in ["in-one", "in-two"].iter().enumerate() {
+            let mut m = Memo::new(*title, "");
+            m.group_id = folder.id.clone();
+            m.updated_at = 1_000 + i as i64;
+            v.upsert(&m).unwrap();
+            inside.push(m.id);
+        }
+        v.move_memo(&inside[0], &folder.id, Some(&inside[1]), None).unwrap();
+
+        // One at the top level, arranged to the bottom so its key is a large one.
+        let mut outside = Memo::new("outsider", "");
+        outside.updated_at = 5_000;
+        v.upsert(&outside).unwrap();
+        let filler = Memo::new("filler", "");
+        v.upsert(&filler).unwrap();
+        v.move_memo(&outside.id, "", Some(&filler.id), None).unwrap();
+
+        // Now move it into the folder the ordinary way — as the list and the phone both do.
+        let mut moved = v.store().get(&outside.id).unwrap().unwrap();
+        moved.group_id = folder.id.clone();
+        v.upsert(&moved).unwrap();
+
+        let in_folder: Vec<String> = v
+            .store()
+            .in_group(&folder.id)
+            .unwrap()
+            .into_iter()
+            .map(|m| m.title)
+            .collect();
+        assert_eq!(in_folder[0], "outsider", "landed at {in_folder:?}");
     }
 
     /// Blob to a file, record to the log — and the logs alone must restore both.
