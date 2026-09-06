@@ -337,9 +337,11 @@ export component StickyWindow inherits Window {
     in property <string> sticky-color: "yellow";
     // Window opacity in percent; in-out because the slider previews it live.
     in-out property <float> sticky-opacity: 100;
-    // Stay above other windows. Device-local (settings.json), never synced: which windows
-    // cover which is a property of this desktop, not of the memo.
-    in property <bool> pinned: true;
+    // Stay above other windows. Off unless the pin says otherwise: a note that covers
+    // whatever is being read is a note in the way, and a deskful of them is a wall over the
+    // work. Device-local (settings.json), never synced: which windows cover which is a
+    // property of this desktop, not of the memo.
+    in property <bool> pinned: false;
     in property <bool> collapsed: false;
     in property <[PhotoRow]> photos: [];
     // True while a photo is being dragged or resized. Rust reads it before pushing a merged

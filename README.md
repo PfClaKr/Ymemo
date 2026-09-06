@@ -64,10 +64,12 @@ Double-click the title bar to fold a note down to that bar; drag it and it snaps
 edges and to the other notes, so a wall of them stays a wall rather than a pile.
 
 Notes stay out of the taskbar, because a desk with eight notes on it is not eight
-applications. The **pin** on the title bar decides whether a note floats above your other
-windows or sits among them, and the tray is how you get one back after it has slipped behind
-something. (Keeping notes out of the taskbar needs Windows or X11; a native Wayland session
-has no way to ask for it, so there they keep their buttons.)
+applications — and they sit among your other windows rather than over them, because a note
+you have to move to read what is underneath is a note in the way. The **pin** on the title
+bar is what puts one above everything, for the one you are keeping in view on purpose; the
+tray brings the rest forward when they have slipped behind something. (Keeping notes out of
+the taskbar needs Windows or X11; a native Wayland session has no way to ask for it, so there
+they keep their buttons.)
 
 Each note carries its own **colour** and **opacity**, and both travel with it: a note you
 turned blue on the desktop is blue on the phone. The fade lifts while you are writing in a

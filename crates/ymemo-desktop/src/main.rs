@@ -263,6 +263,8 @@ fn main() -> Result<()> {
         dir: Rc::new(dir.clone()),
         settings: Rc::new(RefCell::new(loaded)),
         last_activity: Rc::new(Cell::new(Instant::now())),
+        // Answered below, once the tray has had its go.
+        has_tray: Rc::new(Cell::new(false)),
     };
     list.set_rows(ModelRc::from(ctx.model.clone()));
     let unlocked = Rc::new(Cell::new(false));
@@ -548,7 +550,7 @@ fn main() -> Result<()> {
                 // longer exist. Only a local delete can do this; one that arrives over sync
                 // leaves its entry behind, which costs a string and nothing else.
                 let mut settings = ctx.settings.borrow_mut();
-                if settings.set_memo_pinned(id.as_str(), true) {
+                if settings.set_memo_pinned(id.as_str(), false) {
                     settings.save(&ctx.dir);
                 }
             }
@@ -728,7 +730,7 @@ fn main() -> Result<()> {
                 last_update_check: ctx.settings.borrow().last_update_check,
                 // Likewise: the pins belong to the sticky windows, not to this dialog, and
                 // rebuilding the struct from it would unpin every note that is open.
-                unpinned_memos: ctx.settings.borrow().unpinned_memos.clone(),
+                pinned_memos: ctx.settings.borrow().pinned_memos.clone(),
             };
             next.sanitize();
             let prev_unlock_days = ctx.settings.borrow().unlock_days;
@@ -851,7 +853,15 @@ fn main() -> Result<()> {
         })
     });
     // The tray lives as long as this handle, which lives to the end of main.
-    *tray_handle.borrow_mut() = Some(tray::start());
+    {
+        let tray = tray::start();
+        // The stickies leave the taskbar only if there is somewhere else to reach them from.
+        ctx.has_tray.set(tray.is_available());
+        if !tray.is_available() {
+            diag!("no tray on this desktop; the notes keep their taskbar buttons");
+        }
+        *tray_handle.borrow_mut() = Some(tray);
+    }
 
     // Window icons only apply once the event loop has created the winit windows: a one-shot
     // timer covers the lock and list windows, and later windows get theirs where they are

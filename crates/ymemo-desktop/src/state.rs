@@ -49,6 +49,14 @@ pub(crate) struct Ctx {
     pub(crate) settings: Rc<RefCell<Settings>>,
     /// When the user last interacted; the idle auto-lock watches this.
     pub(crate) last_activity: Rc<Cell<Instant>>,
+    /// Whether a tray icon actually registered.
+    ///
+    /// Not a detail: taking the stickies out of the taskbar is only defensible *because* the
+    /// tray can bring a buried note back. Plenty of Linux desktops have no StatusNotifier
+    /// host at all — vanilla GNOME is one, and this project ships a Fedora package — and
+    /// there the two together would leave a note with no way back to it. So the notes keep
+    /// their taskbar buttons when this is false. Set once, after `tray::start`.
+    pub(crate) has_tray: Rc<Cell<bool>>,
 }
 
 /// Marks user activity, resetting the idle auto-lock.

@@ -18,15 +18,17 @@ use crate::lock::lock_now;
 use crate::state::{touch, APP};
 use crate::window::present;
 
-/// Tray click: bring the open memos forward.
+/// Tray click: bring Ymemo forward — the open notes, and the list when it is not on screen.
 ///
-/// The stickies are not in the taskbar any more (see [`crate::window::skip_taskbar`]), and an
-/// unpinned one sits with the ordinary windows, so this is how a note that ended up behind a
-/// browser comes back. It only ever raises: "show me my notes" has no opposite to toggle
-/// into, and hiding the desk on a stray click would be the worse half of a toggle.
+/// The stickies are not in the taskbar (see [`crate::window::skip_taskbar`]), and an unpinned
+/// one sits with the ordinary windows, so this is how a note that ended up behind a browser
+/// comes back. It only ever raises: "show me my notes" has no opposite to toggle into, and
+/// hiding the desk on a stray click would be the worse half of a toggle.
 ///
-/// With nothing open there is nothing to raise, so it falls back to what a tray click has
-/// always done and opens the list — a click that does nothing at all reads as a broken tray.
+/// **The list counts as Ymemo too.** Raising only the notes left the list unreachable from a
+/// click once any note was open — it is not in front, and the only way back to it was the
+/// menu — so a hidden list is shown, and a visible one is raised when there is nothing else
+/// to raise. A click that appears to do nothing reads as a broken tray.
 pub(crate) fn request_raise_notes() {
     let _ = slint::invoke_from_event_loop(|| {
         APP.with(|a| {
@@ -37,8 +39,12 @@ pub(crate) fn request_raise_notes() {
                 present(&app.lock);
                 return;
             }
-            if crate::sticky::raise_open(&app.ctx) == 0 {
+            let raised = crate::sticky::raise_open(&app.ctx);
+            if !app.list.window().is_visible() {
+                // Shown last, so the thing that just appeared is the thing in front.
                 present(&app.list);
+            } else if raised == 0 {
+                crate::window::raise(&app.list);
             }
         });
     });
@@ -198,6 +204,11 @@ mod imp {
                 h.update(|_| {});
             }
         }
+
+        /// Whether an icon actually registered; see `Ctx::has_tray`.
+        pub fn is_available(&self) -> bool {
+            self.0.is_some()
+        }
     }
 
     pub fn start() -> TrayHandle {
@@ -243,6 +254,11 @@ mod imp {
             for (item, label) in self.items.iter().zip(labels) {
                 item.set_text(label);
             }
+        }
+
+        /// Whether an icon actually registered; see `Ctx::has_tray`.
+        pub fn is_available(&self) -> bool {
+            self._tray.is_some()
         }
     }
 
@@ -336,6 +352,11 @@ mod imp {
 
     impl TrayHandle {
         pub fn refresh(&self) {}
+
+        /// No backend here, so never.
+        pub fn is_available(&self) -> bool {
+            false
+        }
     }
 
     pub fn start() -> TrayHandle {

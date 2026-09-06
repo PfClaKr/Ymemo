@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Something for the preview card to be translucent *against*. A flat activity background
+     would show nothing at all as the opacity slider moves, which is the one thing the
+     preview exists to show. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient
+        android:angle="315"
+        android:startColor="#FF3F5B7A"
+        android:centerColor="#FF7A6A9E"
+        android:endColor="#FFB08A6A"
+        android:type="linear" />
+    <corners android:radius="12dp" />
+</shape>

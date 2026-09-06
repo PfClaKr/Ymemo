@@ -18,6 +18,7 @@
 use std::time::Duration;
 
 use slint::{ComponentHandle, LogicalSize};
+use ymemo_core::diag;
 
 use crate::icon::set_window_icon;
 
@@ -54,6 +55,37 @@ pub(crate) fn present<T: ComponentHandle + 'static>(component: &T) {
     });
 }
 
+/// Runs `f` with a window's **winit** window, as soon as there is one.
+///
+/// `show()` does not create it. The winit backend registers a newly shown window as
+/// "inactive" and builds it on a later turn of the event loop (`create_inactive_windows`,
+/// called from `resumed` and `about_to_wait`), so `with_winit_window` straight after
+/// [`present`] finds nothing and drops what was asked silently. That is exactly how the
+/// stickies kept their taskbar buttons after they were told not to.
+///
+/// The future resolves immediately when the window already exists — the usual case when an
+/// open note is raised — and with an error if the window is destroyed first, so a note that
+/// is closed before it is ever shown leaves nothing waiting.
+fn with_window<T: ComponentHandle + 'static>(
+    component: &T,
+    f: impl FnOnce(&i_slint_backend_winit::winit::window::Window) + 'static,
+) {
+    use i_slint_backend_winit::WinitWindowAccessor;
+
+    let weak = component.as_weak();
+    let spawned = slint::spawn_local(async move {
+        let Some(component) = weak.upgrade() else { return };
+        // An error means the window went away while we waited. Nothing to configure, and
+        // nothing wrong.
+        if let Ok(window) = component.window().winit_window().await {
+            f(&window);
+        }
+    });
+    if let Err(e) = spawned {
+        diag!("could not reach the event loop to configure a window: {e}");
+    }
+}
+
 /// Keeps a window out of the taskbar, and out of the pager where there is one.
 ///
 /// A sticky is not an application. Eight notes on the desktop produced eight taskbar
@@ -63,9 +95,13 @@ pub(crate) fn present<T: ComponentHandle + 'static>(component: &T) {
 ///
 /// Per platform, because there is no portable way to say this:
 ///
-/// - **Windows**: `ITaskbarList::DeleteTab`, through winit. The shell gives a window a new
-///   button every time it is shown, so this has to be re-applied after **every** `present`,
-///   not once at creation — which is why the two travel together in `present_sticky`.
+/// - **Windows**: two things, and it needs both. `WS_EX_TOOLWINDOW` is the *style* that
+///   keeps the shell from ever giving this window a button — and takes it out of Alt+Tab
+///   too, which is the same statement — but the shell decides that when it first notices the
+///   window, so a style set afterwards does not take a button away again.
+///   `ITaskbarList::DeleteTab` (winit's `set_skip_taskbar`) does that. Applying only the
+///   second one is a race against the shell noticing the window, which is what shipped and
+///   is why the buttons came back.
 /// - **X11**: `_NET_WM_STATE_SKIP_TASKBAR` and `_NET_WM_STATE_SKIP_PAGER`, sent to the root
 ///   window as a client message the way EWMH asks. winit has no API for either state, so
 ///   this talks X11 itself.
@@ -73,32 +109,53 @@ pub(crate) fn present<T: ComponentHandle + 'static>(component: &T) {
 ///   belong in a task list, so there the stickies keep their entries. This is the same
 ///   split as the magnetic snapping in `sticky.rs`: X11 and Windows do it, Wayland silently
 ///   does not.
-pub(crate) fn skip_taskbar(window: &slint::Window) {
-    #[cfg(windows)]
-    {
-        use i_slint_backend_winit::winit::platform::windows::WindowExtWindows;
-        use i_slint_backend_winit::WinitWindowAccessor;
-        window.with_winit_window(|w| w.set_skip_taskbar(true));
-    }
-    #[cfg(target_os = "linux")]
-    {
-        use i_slint_backend_winit::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-        use i_slint_backend_winit::WinitWindowAccessor;
-        // None under native Wayland, where the handle is a Wayland surface and there is
-        // nothing to ask for.
-        let xid = window
-            .with_winit_window(|w| match w.window_handle().ok()?.as_raw() {
+pub(crate) fn skip_taskbar<T: ComponentHandle + 'static>(component: &T) {
+    with_window(component, |window| {
+        #[cfg(windows)]
+        {
+            use i_slint_backend_winit::winit::platform::windows::WindowExtWindows;
+            windows_impl::tool_window(window);
+            window.set_skip_taskbar(true);
+        }
+        #[cfg(target_os = "linux")]
+        {
+            use i_slint_backend_winit::winit::raw_window_handle::{
+                HasWindowHandle, RawWindowHandle,
+            };
+            // None under native Wayland, where the handle is a Wayland surface and there is
+            // nothing to ask for.
+            let xid = window.window_handle().ok().and_then(|h| match h.as_raw() {
                 RawWindowHandle::Xlib(h) => Some(h.window as u32),
                 RawWindowHandle::Xcb(h) => Some(h.window.get()),
                 _ => None,
-            })
-            .flatten();
-        if let Some(xid) = xid {
-            x11::skip_taskbar(xid);
+            });
+            if let Some(xid) = xid {
+                x11::skip_taskbar(xid);
+            }
         }
-    }
-    #[cfg(not(any(windows, target_os = "linux")))]
-    let _ = window;
+        #[cfg(not(any(windows, target_os = "linux")))]
+        let _ = window;
+    });
+}
+
+/// Re-applies [`skip_taskbar`] after the window level has been changed.
+///
+/// winit keeps its own `WindowFlags` and rebuilds the **whole** ex-style from them whenever
+/// one of them changes (`WindowFlags::to_window_styles`) — `WS_EX_APPWINDOW` back on, and
+/// anything added by hand gone. Pinning a note is exactly such a change, so pinning put the
+/// note straight back in the taskbar: measured on Windows, `0x00000190` before the pin and
+/// `0x00040118` after it.
+///
+/// Slint applies the changed property on the next turn of the event loop, so the hint is
+/// re-asserted on the turn after that. It cannot be done in the same breath as the toggle,
+/// because at that moment winit has not clobbered it yet.
+pub(crate) fn reassert_taskbar<T: ComponentHandle + 'static>(component: &T) {
+    let weak = component.as_weak();
+    slint::Timer::single_shot(Duration::ZERO, move || {
+        if let Some(component) = weak.upgrade() {
+            skip_taskbar(&component);
+        }
+    });
 }
 
 /// Raises a window above the others and gives it the keyboard focus.
@@ -109,8 +166,44 @@ pub(crate) fn skip_taskbar(window: &slint::Window) {
 /// both of which the window manager may refuse — hence no return value to check: this asks,
 /// it does not promise.
 pub(crate) fn raise<T: ComponentHandle + 'static>(component: &T) {
-    use i_slint_backend_winit::WinitWindowAccessor;
-    component.window().with_winit_window(|w| w.focus_window());
+    with_window(component, |window| window.focus_window());
+}
+
+/// The Windows half of [`skip_taskbar`] that winit has no API for.
+#[cfg(windows)]
+mod windows_impl {
+    use i_slint_backend_winit::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use i_slint_backend_winit::winit::window::Window;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    };
+
+    /// Marks a window as a tool window, which is the shell's own idea of "not an application":
+    /// no taskbar button, and no place in Alt+Tab either — the same statement.
+    ///
+    /// **Both halves are needed.** The shell's rule is that a window gets a button if it has
+    /// `WS_EX_APPWINDOW`, *or* it is top-level and unowned without `WS_EX_TOOLWINDOW` — so
+    /// `WS_EX_APPWINDOW` wins over the tool-window style, and winit puts it on every window it
+    /// creates. Adding one flag without clearing the other leaves the button exactly where it
+    /// was, which is measurable: the sticky came back reading `exstyle=0x00040190`, tool window
+    /// and app window at once.
+    ///
+    /// Safe to call on a window already in this state — the read-modify-write leaves it as it
+    /// was, and every `present` comes back through here.
+    pub(super) fn tool_window(window: &Window) {
+        let Ok(handle) = window.window_handle() else { return };
+        let RawWindowHandle::Win32(win32) = handle.as_raw() else { return };
+        let hwnd = win32.hwnd.get() as *mut core::ffi::c_void;
+        // SAFETY: the handle comes from the winit window we are holding, so it is live for
+        // the length of this call, and GWL_EXSTYLE is an isize on every supported target.
+        unsafe {
+            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            let wanted = (style | WS_EX_TOOLWINDOW as isize) & !(WS_EX_APPWINDOW as isize);
+            if wanted != style {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, wanted);
+            }
+        }
+    }
 }
 
 /// The X11 half of [`skip_taskbar`].
