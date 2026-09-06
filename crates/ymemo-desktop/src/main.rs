@@ -263,6 +263,8 @@ fn main() -> Result<()> {
         dir: Rc::new(dir.clone()),
         settings: Rc::new(RefCell::new(loaded)),
         last_activity: Rc::new(Cell::new(Instant::now())),
+        // Answered below, once the tray has had its go.
+        has_tray: Rc::new(Cell::new(false)),
     };
     list.set_rows(ModelRc::from(ctx.model.clone()));
     let unlocked = Rc::new(Cell::new(false));
@@ -851,7 +853,15 @@ fn main() -> Result<()> {
         })
     });
     // The tray lives as long as this handle, which lives to the end of main.
-    *tray_handle.borrow_mut() = Some(tray::start());
+    {
+        let tray = tray::start();
+        // The stickies leave the taskbar only if there is somewhere else to reach them from.
+        ctx.has_tray.set(tray.is_available());
+        if !tray.is_available() {
+            diag!("no tray on this desktop; the notes keep their taskbar buttons");
+        }
+        *tray_handle.borrow_mut() = Some(tray);
+    }
 
     // Window icons only apply once the event loop has created the winit windows: a one-shot
     // timer covers the lock and list windows, and later windows get theirs where they are

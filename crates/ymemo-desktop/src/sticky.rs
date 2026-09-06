@@ -147,26 +147,34 @@ pub(crate) fn new_memo(ctx: &Ctx) {
 
 /// Hides a sticky and schedules its removal from the registry; dropping the window inside
 /// its own callback is unsafe, so it waits for the next event-loop turn.
-/// `present`, plus the taskbar hint a sticky wants.
+/// `present`, plus the taskbar hint a sticky wants — when there is a tray to reach it from.
 ///
 /// The two go together every time, not once when the window is built: on Windows the shell
 /// hands a window a fresh taskbar button whenever it is shown, so hiding it is undone by the
 /// very next `show`. See [`crate::window::skip_taskbar`].
-pub(crate) fn present_sticky(window: &StickyWindow) {
+///
+/// Without a tray the button stays. It is the only other way back to a note that has slipped
+/// behind something, and a desktop with no StatusNotifier host is not unusual — see
+/// [`Ctx::has_tray`].
+pub(crate) fn present_sticky(ctx: &Ctx, window: &StickyWindow) {
     present(window);
-    skip_taskbar(window);
+    if ctx.has_tray.get() {
+        skip_taskbar(window);
+    }
 }
 
 /// Brings one sticky to the front, showing it first if it is not on screen.
-pub(crate) fn raise_sticky(window: &StickyWindow) {
+pub(crate) fn raise_sticky(ctx: &Ctx, window: &StickyWindow) {
     if window.window().is_visible() {
         // Deliberately not `present`: that resizes the window a pixel and back to force a
         // repaint, and a note already on screen has nothing to repaint — the jolt would be
         // the only thing the user saw, times every note on the desk. The taskbar hint is
         // still re-applied, since it is one call and the shell is generous with buttons.
-        skip_taskbar(window);
+        if ctx.has_tray.get() {
+            skip_taskbar(window);
+        }
     } else {
-        present_sticky(window);
+        present_sticky(ctx, window);
     }
     raise(window);
 }
@@ -193,7 +201,7 @@ pub(crate) fn raise_open(ctx: &Ctx) -> usize {
         .map(|e| e.window.clone_strong())
         .collect();
     for window in &windows {
-        raise_sticky(window);
+        raise_sticky(ctx, window);
     }
     windows.len()
 }
@@ -365,7 +373,7 @@ fn attach_photo(memo_id: &str, pick: PhotoPick) {
 /// Opens a memo's sticky, or raises it when already open.
 pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     if let Some(entry) = ctx.stickies.borrow().get(&memo.id) {
-        raise_sticky(&entry.window);
+        raise_sticky(ctx, &entry.window);
         return Ok(());
     }
 
@@ -531,8 +539,11 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
             }
             w.set_pinned(pinned);
             // Changing the level makes winit rebuild the ex-style from its own flags, which
-            // undoes the taskbar hint; see `window::reassert_taskbar`.
-            crate::window::reassert_taskbar(&w);
+            // undoes the taskbar hint; see `window::reassert_taskbar`. Nothing to undo when
+            // the notes were never taken out of the taskbar in the first place.
+            if ctx.has_tray.get() {
+                crate::window::reassert_taskbar(&w);
+            }
         });
     }
 
@@ -716,7 +727,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
-    present_sticky(&window);
+    present_sticky(ctx, &window);
     // A note opens at its first line, whatever the widget's scroll offset happened to be.
     window.invoke_body_to_top();
     if focus {

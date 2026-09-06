@@ -41,12 +41,15 @@
     <string name="widget_list_settings">Widget settings</string>
     <string name="widget_list_configure_title">What should this widget show?</string>
     <string name="widget_list_configure_source">Memos</string>
+    <string name="widget_list_configure_locked">Open Ymemo and unlock it to choose a folder. The background and the opacity can be set now.</string>
     <string name="widget_list_configure_everything">Everything</string>
     <string name="widget_list_configure_background">Background</string>
     <string name="widget_list_configure_theme">Follow the system</string>
     <string name="widget_list_configure_opacity">Opacity</string>
     <string name="widget_list_configure_percent">%1$d%%</string>
     <string name="widget_list_configure_done">Done</string>
+    <string name="widget_list_configure_preview_row">A memo</string>
+    <string name="widget_list_configure_preview_row2">and the line under it</string>
 
     <string name="widget_color_yellow">Yellow</string>
     <string name="widget_color_pink">Pink</string>

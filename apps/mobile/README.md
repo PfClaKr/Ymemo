@@ -281,6 +281,12 @@ The gear on its header — or the launcher's own "reconfigure", on Android 12 an
 | **Background** | follow the system, or one of the five paper colours | follow the system |
 | **Opacity** | 20-100% | 100% |
 
+A card above the questions shows what the answers add up to, repainted as they change — on a
+patterned backdrop, because opacity against a flat activity background shows nothing at all,
+and opacity is the one setting nobody gets right first try. With the vault closed the folder
+question is left out rather than answered from an empty list (that would quietly reset the
+widget to "everything"); the colour and the opacity need no vault and still work.
+
 Every default is the answer that draws exactly what this widget drew before it could be
 configured, which is what lets `widget_list_info.xml` carry `configuration_optional`: on
 Android 12 and up the widget is placed straight away and the screen is only opened by someone

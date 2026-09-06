@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.SeekBar
@@ -66,6 +67,7 @@ class ListConfigureActivity : Activity() {
         fillFolders(snapshot)
         fillColors()
         fillOpacity()
+        updatePreview()
 
         findViewById<Button>(R.id.configure_done).setOnClickListener { save() }
     }
@@ -101,9 +103,17 @@ class ListConfigureActivity : Activity() {
         // the top rather than dropping out of the list here.
         fun walk(parent: String, depth: Int) {
             snapshot.folders.filter { it.parent == parent }.forEach { folder ->
-                val indent = "    ".repeat(depth)
-                addChoice(group, folderIds, folder.id,
-                    indent + folder.title.ifEmpty { getString(R.string.widget_untitled) }, chosen)
+                // Indented with padding, not with spaces in the label: spaces are the width of
+                // whatever font the device happens to use, a screen reader reads them out, and
+                // an ellipsized long name puts the "…" in a different place on every row.
+                val button = addChoice(group, folderIds, folder.id,
+                    folder.title.ifEmpty { getString(R.string.widget_untitled) }, chosen)
+                button.setPadding(
+                    button.paddingLeft + depth * INDENT,
+                    button.paddingTop,
+                    button.paddingRight,
+                    button.paddingBottom,
+                )
                 if (depth < MAX_DEPTH) walk(folder.id, depth + 1)
             }
         }
@@ -123,6 +133,7 @@ class ListConfigureActivity : Activity() {
             button.setBackgroundColor(Palette.bg(key))
             button.setTextColor(Palette.ink(key))
         }
+        group.setOnCheckedChangeListener { _, _ -> updatePreview() }
     }
 
     private fun fillOpacity() {
@@ -141,11 +152,44 @@ class ListConfigureActivity : Activity() {
                     R.string.widget_list_configure_percent,
                     progress + WidgetStore.MIN_ALPHA,
                 )
+                updatePreview()
             }
 
             override fun onStartTrackingTouch(bar: SeekBar) = Unit
             override fun onStopTrackingTouch(bar: SeekBar) = Unit
         })
+    }
+
+    /**
+     * Repaints the card above the questions in the colours currently chosen.
+     *
+     * Without it the only way to see what 45% looks like is to save, look at the home screen,
+     * come back in and drag again — and opacity is exactly the setting nobody gets right
+     * first try. The desktop's own opacity slider previews live for the same reason.
+     */
+    private fun updatePreview() {
+        val chrome = Chrome.of(this, chosenValue(
+            findViewById(R.id.configure_colors), colorKeys, WidgetStore.THEME_COLOR,
+        ))
+        val alpha = findViewById<SeekBar>(R.id.configure_opacity).progress + WidgetStore.MIN_ALPHA
+
+        val card = findViewById<ImageView>(R.id.preview_card)
+        card.setColorFilter(chrome.card)
+        card.imageAlpha = alpha * 255 / 100
+
+        findViewById<TextView>(R.id.preview_title).apply {
+            setTextColor(chrome.ink)
+            text = getString(R.string.widget_list_label)
+        }
+        findViewById<View>(R.id.preview_divider).setBackgroundColor(chrome.divider)
+        findViewById<TextView>(R.id.preview_row1).apply {
+            setTextColor(chrome.ink)
+            text = getString(R.string.widget_list_configure_preview_row)
+        }
+        findViewById<TextView>(R.id.preview_row2).apply {
+            setTextColor(chrome.muted)
+            text = getString(R.string.widget_list_configure_preview_row2)
+        }
     }
 
     /** One radio button, remembering which value it stands for by its position. */
@@ -161,6 +205,12 @@ class ListConfigureActivity : Activity() {
             text = label
             setPadding(paddingLeft, PADDING, paddingRight, PADDING)
             isChecked = value == chosen
+            // Full width, or the paper colour behind a swatch stops where its name does and
+            // the column reads as a ragged edge rather than a list of colours.
+            layoutParams = RadioGroup.LayoutParams(
+                RadioGroup.LayoutParams.MATCH_PARENT,
+                RadioGroup.LayoutParams.WRAP_CONTENT,
+            )
         }
         group.addView(button)
         values.add(value)
@@ -203,6 +253,9 @@ class ListConfigureActivity : Activity() {
 
         /** Deep enough for any folder anyone files memos in, and an end to a looping tree. */
         const val MAX_DEPTH = 8
+
+        /** How far one level of nesting shifts a folder, in px at mdpi. */
+        const val INDENT = 40
 
         /** The palette, in the order the app's own color picker uses. */
         val PAPERS = listOf(
