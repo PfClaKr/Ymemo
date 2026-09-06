@@ -235,6 +235,7 @@ impl Vault {
 
     /// Inserts or updates a memo, writing only changed fields so merges stay field-level.
     pub fn upsert(&mut self, memo: &Memo) -> Result<()> {
+        let order_key = self.key_for_new(memo)?;
         let memos = self.memos_obj()?;
         let obj = match self.doc.get(&memos, &memo.id)? {
             Some((Value::Object(ObjType::Map), id)) => id,
@@ -245,11 +246,97 @@ impl Vault {
         put_str_if_changed(&mut self.doc, &obj, "color", &memo.color)?;
         put_i64_if_changed(&mut self.doc, &obj, "opacity", crate::clamp_opacity(memo.opacity))?;
         put_str_if_changed(&mut self.doc, &obj, "group_id", &memo.group_id)?;
+        put_str_if_changed(&mut self.doc, &obj, "order_key", &order_key)?;
         put_i64_if_changed(&mut self.doc, &obj, "created_at", memo.created_at)?;
         put_i64_if_changed(&mut self.doc, &obj, "updated_at", memo.updated_at)?;
 
         self.append_local_change()?;
-        self.store.upsert(memo)
+        if order_key == memo.order_key {
+            self.store.upsert(memo)
+        } else {
+            self.store.upsert(&Memo { order_key, ..memo.clone() })
+        }
+    }
+
+    /// Where a memo with no place of its own goes.
+    ///
+    /// Above everything, in a folder that has been arranged. In one that has not, **no key at
+    /// all**: every memo there is still ordered by `updated_at`, the newest first, so a new
+    /// memo is already at the top and inventing a key would be the one write that pushed it
+    /// down. Arranging a folder is what gives its memos keys ([`Vault::move_memo`]).
+    fn key_for_new(&self, memo: &Memo) -> Result<String> {
+        if !memo.order_key.is_empty() {
+            return Ok(memo.order_key.clone());
+        }
+        Ok(match self.store.first_order_key(&memo.group_id)? {
+            Some(top) => crate::order::between(None, Some(&top)),
+            None => String::new(),
+        })
+    }
+
+    /// Moves a memo to sit between two others, arranging its folder if nothing ever has.
+    ///
+    /// `after` is the memo it goes below and `before` the one it goes above, both by id and
+    /// both from the destination folder; `None` on either side means the end of the folder.
+    /// Passing a folder different from the memo's current one moves it there and places it in
+    /// one write, which is what a drag from one folder to another is.
+    ///
+    /// **The first arrangement gives every memo in the folder a key.** Until then they are
+    /// ordered by `updated_at` and have none, so there is nothing to sit between; the folder
+    /// is stamped with the order it is already being shown in, and only then is the moved
+    /// memo placed. That write is one change carrying the whole folder — the alternative is
+    /// arranging on open, which would write to the vault on a device that only came to read.
+    ///
+    /// Timestamps are left alone. Rearranging is not editing, and bumping `updated_at` would
+    /// scramble the unarranged folder this is in the middle of stamping.
+    pub fn move_memo(
+        &mut self,
+        id: &str,
+        group_id: &str,
+        after: Option<&str>,
+        before: Option<&str>,
+    ) -> Result<()> {
+        let Some(mut memo) = self.store.get(id)? else {
+            anyhow::bail!("no memo {id} to move");
+        };
+
+        // Stamp the destination folder if it has never been arranged. The memo being moved is
+        // left out: it is about to be given a key of its own, and if it is arriving from
+        // another folder it is not there to stamp.
+        let mut siblings = self.store.in_group(group_id)?;
+        siblings.retain(|m| m.id != id);
+        if siblings.iter().any(|m| m.order_key.is_empty()) {
+            let keys = crate::order::spread(siblings.len());
+            for (m, key) in siblings.iter_mut().zip(keys) {
+                self.put_order_key(&m.id, &key)?;
+                m.order_key = key;
+            }
+        }
+
+        let key_of = |neighbour: Option<&str>| -> Option<String> {
+            let id = neighbour?;
+            siblings.iter().find(|m| m.id == id).map(|m| m.order_key.clone())
+        };
+        memo.order_key = crate::order::between(key_of(after).as_deref(), key_of(before).as_deref());
+        memo.group_id = group_id.to_string();
+
+        // The move itself, again without touching `updated_at`.
+        let memos = self.memos_obj()?;
+        if let Some((Value::Object(ObjType::Map), obj)) = self.doc.get(&memos, id)? {
+            put_str_if_changed(&mut self.doc, &obj, "group_id", &memo.group_id)?;
+            put_str_if_changed(&mut self.doc, &obj, "order_key", &memo.order_key)?;
+        }
+        self.append_local_change()?;
+        self.store.upsert(&memo)
+    }
+
+    /// One memo's arrangement key in the document and the cache, and nothing else.
+    fn put_order_key(&mut self, id: &str, key: &str) -> Result<()> {
+        let memos = self.memos_obj()?;
+        if let Some((Value::Object(ObjType::Map), obj)) = self.doc.get(&memos, id)? {
+            put_str_if_changed(&mut self.doc, &obj, "order_key", key)?;
+        }
+        self.store.set_order_key(id, key)
     }
 
     /// Attaches a photo: bytes go to the blob store, only the record is synced.
@@ -609,6 +696,10 @@ impl Vault {
                         crate::DEFAULT_OPACITY,
                     )),
                     group_id: get_str_or(&self.doc, &obj, "group_id", ""),
+                    // Absent on a memo written before folders could be arranged, and on one
+                    // from a device that has not been updated. Empty sorts to the top, where
+                    // `updated_at` then orders it — exactly the old behaviour.
+                    order_key: get_str_or(&self.doc, &obj, "order_key", ""),
                     created_at: get_i64(&self.doc, &obj, "created_at")?,
                     updated_at: get_i64(&self.doc, &obj, "updated_at")?,
                 };
@@ -1036,6 +1127,152 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ymemo-vault-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// Ids in the order the list draws them.
+    fn order(v: &Vault) -> Vec<String> {
+        v.store().list().unwrap().into_iter().map(|m| m.title).collect()
+    }
+
+    /// A folder nobody has arranged is still the newest-first list it always was, and a new
+    /// memo lands at the top of it without anything being written to say so.
+    #[test]
+    fn an_unarranged_folder_is_still_newest_first() {
+        let dir = temp_dir();
+        let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        for title in ["one", "two", "three"] {
+            let mut m = Memo::new(title, "");
+            m.updated_at = crate::now_millis() + order(&v).len() as i64;
+            v.upsert(&m).unwrap();
+        }
+        assert_eq!(order(&v), ["three", "two", "one"]);
+        assert!(v.store().list().unwrap().iter().all(|m| m.order_key.is_empty()));
+    }
+
+    /// The first drag stamps the folder with the order it was already being shown in, so
+    /// nothing jumps except the memo being moved.
+    #[test]
+    fn arranging_keeps_what_was_on_screen_and_moves_only_the_one() {
+        let dir = temp_dir();
+        let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let mut ids = Vec::new();
+        for (i, title) in ["a", "b", "c", "d"].iter().enumerate() {
+            let mut m = Memo::new(*title, "");
+            m.updated_at = 1_000 + i as i64;
+            v.upsert(&m).unwrap();
+            ids.push(m.id);
+        }
+        // Newest first: d c b a
+        assert_eq!(order(&v), ["d", "c", "b", "a"]);
+
+        // Drag "a" to the very top.
+        let a = ids[0].clone();
+        v.move_memo(&a, "", None, Some(&ids[3])).unwrap();
+        assert_eq!(order(&v), ["a", "d", "c", "b"]);
+        // Everything now has a key, so the arrangement survives a later edit.
+        assert!(v.store().list().unwrap().iter().all(|m| !m.order_key.is_empty()));
+    }
+
+    /// Rearranging is not editing: it must not restamp `updated_at`, or the folder it is
+    /// arranging reorders underneath it.
+    #[test]
+    fn arranging_leaves_the_timestamps_alone() {
+        let dir = temp_dir();
+        let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let mut m = Memo::new("only", "");
+        m.updated_at = 4_242;
+        v.upsert(&m).unwrap();
+        let other = Memo::new("other", "");
+        v.upsert(&other).unwrap();
+
+        v.move_memo(&m.id, "", Some(&other.id), None).unwrap();
+        assert_eq!(v.store().get(&m.id).unwrap().unwrap().updated_at, 4_242);
+    }
+
+    /// An arrangement is a memo field like any other, so the logs alone must restore it.
+    #[test]
+    fn the_arrangement_survives_a_rebuild_from_logs() {
+        let dir = temp_dir();
+        let ids: Vec<String>;
+        {
+            let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+            let mut made = Vec::new();
+            for (i, title) in ["a", "b", "c"].iter().enumerate() {
+                let mut m = Memo::new(*title, "");
+                m.updated_at = 1_000 + i as i64;
+                v.upsert(&m).unwrap();
+                made.push(m.id);
+            }
+            // "a" to the top. Both neighbours given: `None` on both sides is not "the
+            // bottom", it is the middle of an empty folder.
+            v.move_memo(&made[0], "", None, Some(&made[2])).unwrap();
+            assert_eq!(order(&v), ["a", "c", "b"]);
+            ids = made;
+        }
+        let v = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        assert_eq!(order(&v), ["a", "c", "b"]);
+        assert!(!v.store().get(&ids[0]).unwrap().unwrap().order_key.is_empty());
+    }
+
+    /// Placing into an arranged folder puts a new memo on top, where a new memo belongs.
+    #[test]
+    fn a_new_memo_lands_on_top_of_an_arranged_folder() {
+        let dir = temp_dir();
+        let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let first = Memo::new("first", "");
+        v.upsert(&first).unwrap();
+        let second = Memo::new("second", "");
+        v.upsert(&second).unwrap();
+        v.move_memo(&first.id, "", Some(&second.id), None).unwrap();
+        assert_eq!(order(&v), ["second", "first"]);
+
+        v.upsert(&Memo::new("newest", "")).unwrap();
+        assert_eq!(order(&v), ["newest", "second", "first"]);
+    }
+
+    /// The case a position number cannot survive, and the reason the order is a fractional
+    /// index: two devices rearrange the same folder without seeing each other.
+    ///
+    /// Neither arrangement may be thrown away, and both devices must end up drawing the
+    /// folder the same way round — which is what a renumbering scheme cannot promise, because
+    /// each device would write a new number for memos it never touched.
+    #[test]
+    fn two_devices_rearranging_at_once_agree_on_the_result() {
+        let dir = temp_dir();
+
+        let mut a = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let mut ids = Vec::new();
+        for (i, title) in ["a", "b", "c", "d"].iter().enumerate() {
+            let mut m = Memo::new(*title, "");
+            m.updated_at = 1_000 + i as i64;
+            a.upsert(&m).unwrap();
+            ids.push(m.id);
+        }
+        // Arrange it once so both devices start from the same keys, not from timestamps.
+        a.move_memo(&ids[0], "", None, Some(&ids[3])).unwrap();
+        assert_eq!(order(&a), ["a", "d", "c", "b"]);
+
+        let mut b = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        assert_eq!(order(&b), ["a", "d", "c", "b"]);
+
+        // Neither can see the other: A drops "c" at the top, B drops "b" at the top.
+        a.move_memo(&ids[2], "", None, Some(&ids[0])).unwrap();
+        b.move_memo(&ids[1], "", None, Some(&ids[0])).unwrap();
+
+        a.rebuild().unwrap();
+        b.rebuild().unwrap();
+
+        // Both moves survived — neither device's drag was silently undone by the other's.
+        let merged = order(&a);
+        assert_eq!(merged, order(&b), "the two devices disagree about the folder");
+        assert!(
+            merged.iter().position(|t| t == "c").unwrap() < merged.iter().position(|t| t == "a").unwrap(),
+            "A's move was lost: {merged:?}",
+        );
+        assert!(
+            merged.iter().position(|t| t == "b").unwrap() < merged.iter().position(|t| t == "a").unwrap(),
+            "B's move was lost: {merged:?}",
+        );
     }
 
     /// Blob to a file, record to the log — and the logs alone must restore both.
