@@ -257,6 +257,22 @@ Two of the plugins reach into the platform side, so a change there can break the
   syncing for someone who was happy with it. Because a paused folder is indistinguishable
   from broken sync, the reason is shown on the **Sync devices** screen.
 
+## Arranging memos
+
+The list is a `ReorderableListView`, and the handle on each memo row is the only thing that
+starts a drag (`buildDefaultDragHandles: false`). A memo row already answers to a tap, a long
+press and a swipe; a drag that could start anywhere on it would be a fourth reading of the
+same gesture and would fight the swipe that deletes.
+
+Folders are not arranged this way — they carry no key, and their place comes from the tree —
+so a memo dragged up among them lands at the top of the memos instead of nowhere.
+
+`onReorderItem`, not the deprecated `onReorder`: it hands over an index already counted with
+the dragged row taken out, which is the off-by-one the older callback leaves to every caller.
+What crosses to Rust is not a position but **the two memos it ended up between**
+(`memoMove`), so the same call still means the right thing if another device rearranged the
+folder in the meantime. See `ymemo_core::order`.
+
 ## Home-screen widgets
 
 Three, in `android/app/src/main/kotlin/dev/ymemo/ymemo_mobile/widget/`:
@@ -277,7 +293,7 @@ The gear on its header — or the launcher's own "reconfigure", on Android 12 an
 
 | | Choices | Default |
 |---|---|---|
-| **Memos** | everything, or one folder | everything |
+| **Memos** | everything, one folder, or memos picked by name | everything |
 | **Background** | follow the system, or one of the five paper colours | follow the system |
 | **Opacity** | 20-100% | 100% |
 
@@ -299,6 +315,13 @@ in `WidgetStore`, the same private SharedPreferences file as the snapshot. They 
 the vault: a home screen belongs to one device, arranged the way that device's owner wants,
 and syncing it would only pick a fight with the other device's arrangement. `onDeleted` drops
 them, because Android keeps no per-widget storage of its own.
+
+Picking memos by name is the third answer, and it is a different question from the folder —
+switching to a folder and back finds the ticks where they were left, because the two are
+stored apart. It is stored as a set of memo ids; one that is deleted, or that falls off the
+end of what the snapshot publishes, simply stops being drawn and the rest are unaffected. A
+pick list with nothing left in it falls back to the whole vault, the same answer a deleted
+folder gets — a square that can never show anything again is the one outcome worth avoiding.
 
 Two things follow from the folder choice:
 

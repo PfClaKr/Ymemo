@@ -39,7 +39,10 @@ class MemoListWidget : AppWidgetProvider() {
     companion object {
         fun update(context: Context, manager: AppWidgetManager, widgetId: Int) {
             val snapshot = WidgetStore.read(context)
-            val folder = snapshot.folder(snapshot.resolveFolder(WidgetStore.listFolder(context, widgetId)))
+            val picks = WidgetStore.listPicks(context, widgetId)
+            val folder = snapshot.folder(
+                snapshot.resolveFolder(WidgetStore.listFolder(context, widgetId), picks)
+            )
             val chrome = Chrome.of(context, WidgetStore.listColor(context, widgetId))
             val views = RemoteViews(context.packageName, R.layout.widget_list)
 

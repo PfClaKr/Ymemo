@@ -116,6 +116,17 @@
                 android:layout_height="wrap_content"
                 android:orientation="vertical" />
 
+            <!-- The memos a "pick them myself" widget shows. Hidden until that is the
+                 answer, so the ordinary case is three short questions and not a wall of
+                 checkboxes. -->
+            <LinearLayout
+                android:id="@+id/configure_picks"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="24dp"
+                android:visibility="gone" />
+
             <!-- Background -->
             <TextView
                 style="@style/WidgetConfigureSection"

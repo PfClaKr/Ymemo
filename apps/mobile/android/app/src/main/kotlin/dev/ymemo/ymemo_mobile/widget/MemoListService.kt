@@ -39,8 +39,9 @@ private class MemoListFactory(
 
     override fun onDataSetChanged() {
         val snapshot = WidgetStore.read(context)
-        val folder = snapshot.resolveFolder(WidgetStore.listFolder(context, widgetId))
-        rows = if (snapshot.hidden) emptyList() else snapshot.rows(folder)
+        val picks = WidgetStore.listPicks(context, widgetId)
+        val folder = snapshot.resolveFolder(WidgetStore.listFolder(context, widgetId), picks)
+        rows = if (snapshot.hidden) emptyList() else snapshot.rows(folder, picks)
         // Re-read with the rows: a color chosen from the gear arrives as a data-set change,
         // and rows drawn in the old ink would sit on the new paper until something else moved.
         chrome = Chrome.of(context, WidgetStore.listColor(context, widgetId))

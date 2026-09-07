@@ -865,6 +865,39 @@ class _MemoListScreenState extends State<MemoListScreen> {
     unawaited(widgets.publishWidgets());
   }
 
+  /// Places a dragged memo where it was let go, and syncs the arrangement.
+  ///
+  /// The list draws the folders first and then the memos, so the indices arrive counting both
+  /// and are shifted back onto the memos here. A memo dragged up among the folders lands at
+  /// the top of the memos rather than nowhere — the folders are not a place a memo can go.
+  ///
+  /// The core is told the two memos it ended up between rather than a position, so the same
+  /// call works whatever another device did to the folder in the meantime.
+  Future<void> _reorderMemo(int oldIndex, int newIndex) async {
+    // `onReorderItem` rather than `onReorder`: it hands over an index already counted in the
+    // list with the dragged row taken out, which is the off-by-one every use of the older
+    // callback has to remember to undo.
+    final from = oldIndex - _folders.length;
+    if (from < 0 || from >= _memos.length) return; // a folder: not arranged this way
+
+    final rest = [..._memos]..removeAt(from);
+    final to = (newIndex - _folders.length).clamp(0, rest.length);
+    if (to == from) return; // let go where it started
+
+    final moved = _memos[from];
+    // Move it in the list first so the row does not spring back while the write happens.
+    setState(() {
+      _memos = [...rest]..insert(to, moved);
+    });
+    await memoMove(
+      id: moved.id,
+      groupId: widget.groupId,
+      after: to > 0 ? rest[to - 1].id : null,
+      before: to < rest.length ? rest[to].id : null,
+    );
+    await _reload();
+  }
+
   /// Renames the vault, on every device that shares it.
   Future<void> _renameVault() async {
     final s = widget.strings;
@@ -1156,55 +1189,81 @@ class _MemoListScreenState extends State<MemoListScreen> {
           )
         else
         Expanded(
-          child: ListView.separated(
+          child: ReorderableListView.builder(
         // Room for the gesture bar and for the button floating above it, or the last memo
         // in the list is unreachable behind one or the other.
         padding: EdgeInsets.only(bottom: _bottomInset(context) + 88),
         // Folders first, then memos — the same order the desktop's tree draws them in.
         itemCount: _folders.length + _memos.length,
-        // Two pastel rows of neighbouring colors have no edge between them, and two of the
-        // same color have none at all; the rule is what keeps a long list countable.
-        separatorBuilder: (_, __) => const Divider(height: 1, thickness: 1),
+        // No drag handle on every row: folders are not arranged this way, and a memo row
+        // already answers to a tap, a long press and a swipe. The handle is added by hand to
+        // the memo rows below, so the three gestures it already has keep working.
+        buildDefaultDragHandles: false,
+        onReorderItem: _reorderMemo,
         itemBuilder: (context, i) {
           if (i < _folders.length) {
             final folder = _folders[i];
-            return _tinted(
-              context,
-              folder.color,
-              ListTile(
-                leading: Icon(Icons.folder, color: paletteInk(folder.color)),
-                title: Text(folder.name),
-                onTap: () => _openFolder(folder),
-                onLongPress: () => _folderMenu(folder),
-              ),
+            return Column(
+              key: ValueKey('folder:${folder.id}'),
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _tinted(
+                  context,
+                  folder.color,
+                  ListTile(
+                    leading: Icon(Icons.folder, color: paletteInk(folder.color)),
+                    title: Text(folder.name),
+                    onTap: () => _openFolder(folder),
+                    onLongPress: () => _folderMenu(folder),
+                  ),
+                ),
+                const Divider(height: 1, thickness: 1),
+              ],
             );
           }
           final memo = _memos[i - _folders.length];
-          return Dismissible(
+          return Column(
             key: ValueKey(memo.id),
-            direction: DismissDirection.endToStart,
-            onDismissed: (_) async {
-              await memoDelete(id: memo.id);
-              await _reload();
-            },
-            background: Container(
-              color: Colors.red,
-              alignment: Alignment.centerRight,
-              padding: const EdgeInsets.only(right: 16),
-              child: const Icon(Icons.delete, color: Colors.white),
-            ),
-            child: _tinted(
-              context,
-              memo.color,
-              ListTile(
-                title: Text(memo.title.isEmpty ? widget.strings.newMemo : memo.title),
-                subtitle: memo.body.isEmpty
-                    ? null
-                    : Text(memo.body, maxLines: 1, overflow: TextOverflow.ellipsis),
-                onTap: () => _open(memo),
-                onLongPress: () => _memoMenu(memo),
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Dismissible(
+                key: ValueKey('dismiss:${memo.id}'),
+                direction: DismissDirection.endToStart,
+                onDismissed: (_) async {
+                  await memoDelete(id: memo.id);
+                  await _reload();
+                },
+                background: Container(
+                  color: Colors.red,
+                  alignment: Alignment.centerRight,
+                  padding: const EdgeInsets.only(right: 16),
+                  child: const Icon(Icons.delete, color: Colors.white),
+                ),
+                child: _tinted(
+                  context,
+                  memo.color,
+                  ListTile(
+                    title: Text(memo.title.isEmpty ? widget.strings.newMemo : memo.title),
+                    subtitle: memo.body.isEmpty
+                        ? null
+                        : Text(memo.body, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    onTap: () => _open(memo),
+                    onLongPress: () => _memoMenu(memo),
+                    // A handle of its own, rather than a long press: a long press already
+                    // opens this memo's menu, and a drag that starts anywhere on the row
+                    // would fight the swipe that deletes it.
+                    trailing: ReorderableDragStartListener(
+                      index: i,
+                      child: Icon(
+                        Icons.drag_handle,
+                        color: paletteInk(memo.color).withValues(alpha: 0.55),
+                      ),
+                    ),
+                  ),
+                ),
               ),
-            ),
+              const Divider(height: 1, thickness: 1),
+            ],
           );
         },
           ),

@@ -98,6 +98,76 @@ pub(crate) fn move_row(ctx: &Ctx, src: i32, dst: i32) {
     refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
 }
 
+/// Drops a memo into a gap between two rows, which is how a folder gets arranged by hand.
+///
+/// The gap says both things at once — which folder the memo lands in, and where in it:
+///
+/// - The folder is the one that owns the row **above** the gap: that memo's folder, or the
+///   folder whose own row it is (dropping right under an open folder puts the memo inside it,
+///   at the top). Above the first row means the top level.
+/// - The neighbours are the memos of that folder either side of the gap, skipping the one
+///   being dragged — it is still in the list while it is being moved.
+///
+/// Folders never get here; `move_row` still handles those. What is being arranged is the
+/// memos inside a folder, and a folder's own place comes from the tree it is in.
+pub(crate) fn reorder_row(ctx: &Ctx, src: i32, gap: i32) {
+    use slint::Model;
+    let rows = &ctx.model;
+    let Some(source) = usize::try_from(src).ok().and_then(|i| rows.row_data(i)) else {
+        return;
+    };
+    if source.is_group {
+        return;
+    }
+
+    let mut guard = ctx.vault.borrow_mut();
+    let Some(v) = guard.as_mut() else { return };
+    let count = rows.row_count() as i32;
+    let gap = gap.clamp(0, count);
+
+    // The folder of a row, or None for a row that is not a memo.
+    let memo_group = |v: &Vault, id: &str| -> Option<String> {
+        v.store().get(id).ok().flatten().map(|m| m.group_id)
+    };
+
+    // Walk up from the gap for the first row that is not the one being dragged.
+    let mut dest = String::new();
+    for i in (0..gap).rev() {
+        let Some(row) = rows.row_data(i as usize) else { continue };
+        if row.id == source.id {
+            continue;
+        }
+        dest = if row.is_group {
+            if row.expanded {
+                row.id.to_string() // just under an open folder: inside it
+            } else {
+                // A closed folder shows nothing of its contents, so a drop under it belongs
+                // beside it rather than inside, where it would vanish.
+                v.store().get_group(row.id.as_str()).ok().flatten().map(|g| g.parent_id).unwrap_or_default()
+            }
+        } else {
+            memo_group(v, row.id.as_str()).unwrap_or_default()
+        };
+        break;
+    }
+
+    let neighbour = |v: &Vault, i: i32| -> Option<String> {
+        let row = rows.row_data(i as usize)?;
+        if row.is_group || row.id == source.id {
+            return None;
+        }
+        (memo_group(v, row.id.as_str())? == dest).then(|| row.id.to_string())
+    };
+    let after = (0..gap).rev().find_map(|i| neighbour(v, i));
+    let before = (gap..count).find_map(|i| neighbour(v, i));
+
+    if let Err(e) = v.move_memo(source.id.as_str(), &dest, after.as_deref(), before.as_deref()) {
+        diag!("could not rearrange the memo: {e}");
+        return;
+    }
+    refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+}
+
 /// Recursively emits the groups under `parent`: subgroups first, then that group's memos.
 pub(crate) fn push_group_rows(
     parent: &str,
@@ -206,6 +276,107 @@ pub(crate) fn memo_row(memo: &Memo, depth: i32) -> ListRow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::cell::{Cell, RefCell};
+    use std::collections::{HashMap, HashSet};
+    use std::rc::Rc;
+    use std::time::Instant;
+    use ymemo_core::{vault::Vault, Memo, Store};
+
+    /// A `Ctx` around a real vault, with the row model the list window would be showing.
+    ///
+    /// No window is involved: everything the drop logic reads is the row model and the vault,
+    /// so the part that cannot be driven by hand — which folder a gap belongs to, and which
+    /// memos are its neighbours — is exactly the part this can check.
+    fn ctx_with(titles: &[&str]) -> (Ctx, Vec<String>) {
+        // A directory nothing else is using; the process id and a counter is enough here.
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("ymemo-list-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut vault = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let mut ids = Vec::new();
+        for (i, title) in titles.iter().enumerate() {
+            let mut m = Memo::new(*title, "");
+            m.updated_at = 1_000 + i as i64;
+            vault.upsert(&m).unwrap();
+            ids.push(m.id);
+        }
+        let model = Rc::new(slint::VecModel::from(Vec::<ListRow>::new()));
+        refresh_list(&vault, &model, &HashSet::new());
+        let ctx = Ctx {
+            vault: Rc::new(RefCell::new(Some(vault))),
+            model,
+            stickies: Rc::new(RefCell::new(HashMap::new())),
+            collapsed: Rc::new(RefCell::new(HashSet::new())),
+            dir: Rc::new(dir),
+            settings: Rc::new(RefCell::new(crate::settings::Settings::default())),
+            last_activity: Rc::new(Cell::new(Instant::now())),
+            has_tray: Rc::new(Cell::new(false)),
+        };
+        (ctx, ids)
+    }
+
+    fn titles(ctx: &Ctx) -> Vec<String> {
+        use slint::Model;
+        ctx.model.iter().map(|r| r.title.to_string()).collect()
+    }
+
+    /// Dropping a memo in the gap above everything puts it first, and leaves the rest alone.
+    #[test]
+    fn a_memo_dropped_at_the_top_goes_first() {
+        let (ctx, _) = ctx_with(&["a", "b", "c", "d"]);
+        assert_eq!(titles(&ctx), ["d", "c", "b", "a"]); // newest first, unarranged
+        reorder_row(&ctx, 3, 0); // drag "a" to the gap above "d"
+        assert_eq!(titles(&ctx), ["a", "d", "c", "b"]);
+    }
+
+    /// And in the gap past the last row, last.
+    #[test]
+    fn a_memo_dropped_at_the_bottom_goes_last() {
+        let (ctx, _) = ctx_with(&["a", "b", "c", "d"]);
+        reorder_row(&ctx, 0, 4); // drag "d" past the end
+        assert_eq!(titles(&ctx), ["c", "b", "a", "d"]);
+    }
+
+    /// The two gaps touching a memo are where it already is. The UI does not send those, but
+    /// nothing may move if one arrives — a drop that changes nothing must write nothing.
+    #[test]
+    fn dropping_a_memo_back_where_it_was_changes_nothing() {
+        let (ctx, _) = ctx_with(&["a", "b", "c"]);
+        let before = titles(&ctx);
+        reorder_row(&ctx, 1, 1);
+        assert_eq!(titles(&ctx), before);
+        reorder_row(&ctx, 1, 2);
+        assert_eq!(titles(&ctx), before);
+    }
+
+    /// An arrangement is not an edit, so it must not restamp the memo and float it to the top
+    /// of every "most recently changed" list in the app.
+    #[test]
+    fn arranging_from_the_list_leaves_the_timestamp_alone() {
+        let (ctx, ids) = ctx_with(&["a", "b", "c"]);
+        reorder_row(&ctx, 2, 0); // "a" to the top
+        let guard = ctx.vault.borrow();
+        let v = guard.as_ref().unwrap();
+        assert_eq!(v.store().get(&ids[0]).unwrap().unwrap().updated_at, 1_000);
+    }
+
+    /// Folders are dropped *on* rows, never between them; `move_row` owns that.
+    #[test]
+    fn a_folder_is_not_reordered_by_a_gap() {
+        let (ctx, _) = ctx_with(&["a", "b"]);
+        {
+            let mut guard = ctx.vault.borrow_mut();
+            let v = guard.as_mut().unwrap();
+            v.upsert_group(&group("g", "folder", "")).unwrap();
+            refresh_list(v, &ctx.model, &HashSet::new());
+        }
+        let before = titles(&ctx);
+        let folder_row = titles(&ctx).iter().position(|t| t == "folder").unwrap() as i32;
+        reorder_row(&ctx, folder_row, 0);
+        assert_eq!(titles(&ctx), before);
+    }
 
     fn group(id: &str, name: &str, parent: &str) -> ymemo_core::Group {
         ymemo_core::Group {

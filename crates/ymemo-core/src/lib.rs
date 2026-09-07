@@ -13,6 +13,7 @@ pub mod crypto;
 pub mod diag;
 pub mod history;
 pub mod lan_pair;
+pub mod order;
 pub mod pairing;
 pub mod recovery;
 pub mod sync;
@@ -70,6 +71,14 @@ pub struct Memo {
     pub opacity: i64,
     /// Owning group (folder) id; empty means top level.
     pub group_id: String,
+    /// Where this memo sits **within its folder** — a fractional index, see [`crate::order`].
+    ///
+    /// Sorted ascending, and **always with the id as the tie-break**: two devices can land on
+    /// the same key, and without the tie-break those two memos would swap places depending on
+    /// which device is drawing them. Empty on a memo from before folders could be arranged,
+    /// and on one that arrived from a device that has not been updated; those sort to the top
+    /// (an empty string is the smallest key there is) until something gives them one.
+    pub order_key: String,
     /// Unix epoch millis.
     pub created_at: i64,
     /// Unix epoch millis.
@@ -87,6 +96,9 @@ impl Memo {
             color: DEFAULT_COLOR.to_string(),
             opacity: DEFAULT_OPACITY,
             group_id: String::new(),
+            // Empty until the folder it lands in decides where it goes; `Vault::upsert` is
+            // what gives a memo with no key one, at the top of wherever it is being put.
+            order_key: String::new(),
             created_at: now,
             updated_at: now,
         }
@@ -262,6 +274,7 @@ impl Store {
                 color      TEXT NOT NULL DEFAULT 'yellow',
                 opacity    INTEGER NOT NULL DEFAULT 100,
                 group_id   TEXT NOT NULL DEFAULT '',
+                order_key  TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
@@ -301,6 +314,7 @@ impl Store {
             ("memos", "color", "ALTER TABLE memos ADD COLUMN color TEXT NOT NULL DEFAULT 'yellow'"),
             ("memos", "opacity", "ALTER TABLE memos ADD COLUMN opacity INTEGER NOT NULL DEFAULT 100"),
             ("memos", "group_id", "ALTER TABLE memos ADD COLUMN group_id TEXT NOT NULL DEFAULT ''"),
+            ("memos", "order_key", "ALTER TABLE memos ADD COLUMN order_key TEXT NOT NULL DEFAULT ''"),
             ("groups", "color", "ALTER TABLE groups ADD COLUMN color TEXT NOT NULL DEFAULT 'yellow'"),
             (
                 "attachments",
@@ -419,10 +433,11 @@ impl Store {
     /// Inserts or updates a memo by id.
     pub fn upsert(&self, memo: &Memo) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO memos (id, title, body, color, opacity, group_id, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            "INSERT INTO memos (id, title, body, color, opacity, group_id, order_key, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(id) DO UPDATE SET
-                 title = ?2, body = ?3, color = ?4, opacity = ?5, group_id = ?6, updated_at = ?8",
+                 title = ?2, body = ?3, color = ?4, opacity = ?5, group_id = ?6,
+                 order_key = ?7, updated_at = ?9",
             params![
                 memo.id,
                 memo.title,
@@ -430,6 +445,7 @@ impl Store {
                 memo.color,
                 clamp_opacity(memo.opacity),
                 memo.group_id,
+                memo.order_key,
                 memo.created_at,
                 memo.updated_at
             ],
@@ -440,8 +456,12 @@ impl Store {
     /// All memos, most recently updated first.
     pub fn list(&self) -> Result<Vec<Memo>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, body, color, opacity, group_id, created_at, updated_at
-             FROM memos ORDER BY updated_at DESC",
+            "SELECT id, title, body, color, opacity, group_id, order_key, created_at, updated_at
+             -- The arrangement, with the id breaking a tie so two devices that landed on
+             -- the same key still draw the folder the same way round. `updated_at` is what
+             -- orders memos nobody has arranged yet: every key is empty then, and the list
+             -- looks exactly as it did before folders could be arranged at all.
+             FROM memos ORDER BY order_key ASC, updated_at DESC, id ASC",
         )?;
         let rows = stmt.query_map([], row_to_memo)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -450,7 +470,7 @@ impl Store {
     /// Looks up one memo by id.
     pub fn get(&self, id: &str) -> Result<Option<Memo>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, body, color, opacity, group_id, created_at, updated_at
+            "SELECT id, title, body, color, opacity, group_id, order_key, created_at, updated_at
              FROM memos WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map([id], row_to_memo)?;
@@ -501,6 +521,41 @@ impl Store {
         Ok(())
     }
 
+    /// The smallest arrangement key in one folder, or `None` if nothing there has one.
+    ///
+    /// `None` means the folder has never been arranged: every memo in it still sorts by
+    /// `updated_at`. Empty keys are skipped rather than returned as the smallest, because an
+    /// empty key is the absence of an answer, not an answer of "first".
+    pub fn first_order_key(&self, group_id: &str) -> Result<Option<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT MIN(order_key) FROM memos WHERE group_id = ?1 AND order_key <> ''",
+        )?;
+        let key: Option<String> = stmt.query_row([group_id], |row| row.get(0))?;
+        Ok(key)
+    }
+
+    /// Every memo in one folder, in the order it is drawn in.
+    pub fn in_group(&self, group_id: &str) -> Result<Vec<Memo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, body, color, opacity, group_id, order_key, created_at, updated_at
+             FROM memos WHERE group_id = ?1
+             ORDER BY order_key ASC, updated_at DESC, id ASC",
+        )?;
+        let rows = stmt.query_map([group_id], row_to_memo)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Writes one memo's arrangement key, leaving `updated_at` alone.
+    ///
+    /// Rearranging is not editing: bumping the timestamp would reorder the very list being
+    /// arranged (an unarranged folder sorts by it) and would show up as an edit everywhere
+    /// else that reads it.
+    pub fn set_order_key(&self, id: &str, key: &str) -> Result<()> {
+        self.conn
+            .execute("UPDATE memos SET order_key = ?2 WHERE id = ?1", params![id, key])?;
+        Ok(())
+    }
+
     /// Deletes a memo by id.
     pub fn delete(&self, id: &str) -> Result<()> {
         self.conn.execute("DELETE FROM memos WHERE id = ?1", [id])?;
@@ -517,8 +572,9 @@ fn row_to_memo(row: &rusqlite::Row) -> rusqlite::Result<Memo> {
         color: row.get(3)?,
         opacity: row.get(4)?,
         group_id: row.get(5)?,
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
+        order_key: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
     })
 }
 
