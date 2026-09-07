@@ -1,11 +1,17 @@
 //! App and tray icons, drawn pixel by pixel: no decoder dependency and no file that has to
 //! sit next to the executable.
 //!
-//! The picture is the same one every other platform shows — a dog-eared note on the app's
-//! gold — and the geometry below is the same 108-unit viewport
+//! The picture is the same one every other platform shows — a sticky note on the app's gold,
+//! one corner lifted — and the geometry below is the same 108-unit viewport
 //! `packaging/gen_icons.py` draws, so the tray, the taskbar, the `.desktop` entry, the
 //! Windows `.ico` and the Android launcher are one icon. **Change one, change all three:**
-//! this file, that script, and `apps/mobile/.../res/drawable/ic_launcher_foreground.xml`.
+//! this file, that script, and `apps/mobile/.../res/drawable/ic_launcher_foreground.xml`
+//! (plus its monochrome twin).
+//!
+//! Flat, and with no outline at all. This is the size the icon is judged at — 22px in a tray
+//! — and a stroke there is under a pixel: the old outlined note washed out into a smudge on
+//! gold. What carries it now is the silhouette and the contrast of white paper on a
+//! saturated badge.
 //!
 //! The one difference is framing. Android hands its icon to a launcher that will mask it, so
 //! the note there sits small and centred; nothing masks a tray or taskbar icon, so here the
@@ -18,15 +24,23 @@ pub(crate) fn tray_icon_rgba() -> (Vec<u8>, u32, u32) {
     note_icon_rgba(22)
 }
 
-const GOLD: [u8; 3] = [0xE6, 0xD2, 0x4A]; // background: the app's accent
-const PAPER: [u8; 3] = [0xFF, 0xFC, 0xE3]; // note body: the yellow palette's paper
-const EDGE: [u8; 3] = [0x8C, 0x7B, 0x1E]; // outline
-const FOLD: [u8; 3] = [0xD8, 0xC6, 0x5C]; // the dog-eared corner
-const RULE: [u8; 3] = [0xB8, 0xA6, 0x3A]; // the ruled lines
+const GOLD: [u8; 3] = [0xE2, 0xC2, 0x2A]; // the badge
+const PAPER: [u8; 3] = [0xFF, 0xFD, 0xF5]; // the note
+const INK: [u8; 3] = [0x5C, 0x50, 0x10]; // the writing
+const UNDER: [u8; 3] = [0xBA, 0x9E, 0x1E]; // the underside of the lifted corner
 
 /// How much bigger the note is drawn than in the Android viewport, where a launcher mask
 /// keeps it small.
-const NOTE_SCALE: f32 = 1.44;
+const NOTE_SCALE: f32 = 1.30;
+
+/// The paper, in viewport units: a square, and the radius of its three intact corners.
+const PAGE: (f32, f32, f32, f32) = (32.0, 32.0, 76.0, 76.0);
+const PAGE_R: f32 = 8.0;
+/// The legs of the corner the fold takes off the top right.
+const FOLD: f32 = 13.0;
+/// The lines of writing: left edge, top, right edge — and how thick they are.
+const RULES: [(f32, f32, f32); 3] = [(38.0, 50.0, 64.0), (38.0, 58.5, 70.0), (38.0, 67.0, 55.0)];
+const RULE_H: f32 = 5.5;
 
 /// Subpixel samples per axis. The fold's diagonal and the rounded corners are unreadable
 /// without them at 22px, which is the size that matters most.
@@ -75,36 +89,26 @@ fn sample(x: f32, y: f32) -> Option<[u8; 3]> {
         return None;
     }
     // Back into the note's own coordinates, so every constant below is the one the vector
-    // and the Python use; scaling the sample point beats scaling nine shapes.
+    // and the Python use; scaling the sample point beats scaling every shape.
     let nx = 54.0 + (x - 54.0) / NOTE_SCALE;
     let ny = 54.0 + (y - 54.0) / NOTE_SCALE;
 
-    // The page: a rounded rectangle with its top-right corner cut away by the fold, which
-    // is the line nx - ny = 36 through (63,27) and (77,41).
-    let page = rounded_rect(nx, ny, 31.0, 27.0, 77.0, 81.0, 6.0) && nx - ny <= 36.0;
-    if !page {
+    let (x0, y0, x1, y1) = PAGE;
+    // The paper, with its top-right corner taken off by the fold. The fold's diagonal runs
+    // through (x1 - FOLD, y0) and (x1, y0 + FOLD) at 45 degrees, so it is the line
+    // nx - ny = x1 - FOLD - y0, and the corner is everything past it.
+    let cut = x1 - FOLD - y0;
+    if !rounded_rect(nx, ny, x0, y0, x1, y1, PAGE_R) || nx - ny > cut {
         return Some(GOLD);
     }
-    // Inset by the stroke width to leave the outline behind; the diagonal insets along its
-    // own normal, hence the 2.
-    let inside = rounded_rect(nx, ny, 33.5, 29.5, 74.5, 78.5, 3.5)
-        && nx - ny <= 36.0 - 2.5 * std::f32::consts::SQRT_2;
-    if !inside {
-        return Some(EDGE);
+    // The lifted corner is the square the diagonal cuts across, below the diagonal itself.
+    if nx >= x1 - FOLD && ny <= y0 + FOLD {
+        return Some(UNDER);
     }
-    // The two straight sides of the dog ear, then its fill.
-    let fold_edge = ((nx - 63.0).abs() <= 1.25 && (27.0..=41.0).contains(&ny))
-        || ((ny - 41.0).abs() <= 1.25 && (63.0..=77.0).contains(&nx));
-    if fold_edge {
-        return Some(EDGE);
-    }
-    if nx >= 63.0 && ny <= 41.0 {
-        return Some(FOLD);
-    }
-    // Three ruled lines, the last one short.
-    for (top, right) in [(50.0, 69.0), (58.0, 69.0), (66.0, 57.0)] {
-        if capsule(nx, ny, 40.5, top + 1.5, right - 1.5, top + 1.5, 1.5) {
-            return Some(RULE);
+    for (left, top, right) in RULES {
+        let r = RULE_H / 2.0;
+        if capsule(nx, ny, left + r, top + r, right - r, top + r, r) {
+            return Some(INK);
         }
     }
     Some(PAPER)
@@ -183,4 +187,5 @@ mod tests {
         }
     }
 }
+
 
