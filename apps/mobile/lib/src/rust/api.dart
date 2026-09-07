@@ -195,6 +195,23 @@ Future<List<FfiGroup>> groupChildren({required String parentId}) =>
 Future<List<FfiMemo>> memosInGroup({required String groupId}) =>
     RustLib.instance.api.crateApiMemosInGroup(groupId: groupId);
 
+/// Places a memo between two others in a folder, arranging the folder if nothing ever has.
+///
+/// `after` is the memo it goes below and `before` the one it goes above, both by id and both
+/// from the destination folder; `None` on either side means the end of the folder. Passing a
+/// folder other than the memo's current one moves it there and places it in one write.
+///
+/// The arrangement syncs, and two devices rearranging the same folder at once keep both
+/// changes — see `ymemo_core::order` for why it is a key between neighbours and not a
+/// position number.
+Future<void> memoMove(
+        {required String id,
+        required String groupId,
+        String? after,
+        String? before}) =>
+    RustLib.instance.api.crateApiMemoMove(
+        id: id, groupId: groupId, after: after, before: before);
+
 /// Creates a group and returns its id.
 Future<String> groupCreate({required String name, required String parentId}) =>
     RustLib.instance.api.crateApiGroupCreate(name: name, parentId: parentId);

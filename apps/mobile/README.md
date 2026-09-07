@@ -257,6 +257,22 @@ Two of the plugins reach into the platform side, so a change there can break the
   syncing for someone who was happy with it. Because a paused folder is indistinguishable
   from broken sync, the reason is shown on the **Sync devices** screen.
 
+## Arranging memos
+
+The list is a `ReorderableListView`, and the handle on each memo row is the only thing that
+starts a drag (`buildDefaultDragHandles: false`). A memo row already answers to a tap, a long
+press and a swipe; a drag that could start anywhere on it would be a fourth reading of the
+same gesture and would fight the swipe that deletes.
+
+Folders are not arranged this way — they carry no key, and their place comes from the tree —
+so a memo dragged up among them lands at the top of the memos instead of nowhere.
+
+`onReorderItem`, not the deprecated `onReorder`: it hands over an index already counted with
+the dragged row taken out, which is the off-by-one the older callback leaves to every caller.
+What crosses to Rust is not a position but **the two memos it ended up between**
+(`memoMove`), so the same call still means the right thing if another device rearranged the
+folder in the meantime. See `ymemo_core::order`.
+
 ## Home-screen widgets
 
 Three, in `android/app/src/main/kotlin/dev/ymemo/ymemo_mobile/widget/`:

@@ -713,6 +713,24 @@ pub fn memos_in_group(group_id: String) -> Result<Vec<FfiMemo>> {
     })
 }
 
+/// Places a memo between two others in a folder, arranging the folder if nothing ever has.
+///
+/// `after` is the memo it goes below and `before` the one it goes above, both by id and both
+/// from the destination folder; `None` on either side means the end of the folder. Passing a
+/// folder other than the memo's current one moves it there and places it in one write.
+///
+/// The arrangement syncs, and two devices rearranging the same folder at once keep both
+/// changes — see `ymemo_core::order` for why it is a key between neighbours and not a
+/// position number.
+pub fn memo_move(
+    id: String,
+    group_id: String,
+    after: Option<String>,
+    before: Option<String>,
+) -> Result<()> {
+    with_vault(|v| v.move_memo(&id, &group_id, after.as_deref(), before.as_deref()))
+}
+
 /// Creates a group and returns its id.
 pub fn group_create(name: String, parent_id: String) -> Result<String> {
     with_vault(|v| {
