@@ -58,7 +58,7 @@ use lock::{
 };
 use pairing::qr_image;
 use state::{touch, AppUi, Ctx, APP};
-use sticky::{close_sticky, new_memo, open_sticky, snap_tick, SNAP_INTERVAL};
+use sticky::{close_sticky, new_memo, open_sticky, snap_tick, GEOMETRY_INTERVAL, SNAP_INTERVAL};
 use sync::{start_merge_timer, start_syncthing, SYNC_FOLDER_ID};
 
 /// Smallest window (logical px) for the lock-screen panels that outgrow the password prompt:
@@ -68,6 +68,14 @@ use window::present;
 
 /// How often idleness is checked; fine-grained enough against a setting in minutes.
 const IDLE_CHECK_INTERVAL: Duration = Duration::from_secs(20);
+
+/// How long a delete can be taken back for.
+///
+/// Long enough to notice the wrong row went, short enough that the bar is not still offering
+/// to undo something the user has since forgotten doing. The memo is really gone from the
+/// document the whole time — this is an offer to write it back, not a pending deletion — so
+/// nothing about the timing risks the vault or the other devices.
+const UNDO_WINDOW: Duration = Duration::from_secs(30);
 
 
 /// Picks the Slint renderer; call once before creating any window.
@@ -260,6 +268,7 @@ fn main() -> Result<()> {
         model: Rc::new(VecModel::from(Vec::<ListRow>::new())),
         stickies: Rc::new(RefCell::new(HashMap::new())),
         collapsed: Rc::new(RefCell::new(HashSet::new())),
+        query: Rc::new(RefCell::new(String::new())),
         dir: Rc::new(dir.clone()),
         settings: Rc::new(RefCell::new(loaded)),
         last_activity: Rc::new(Cell::new(Instant::now())),
@@ -330,6 +339,14 @@ fn main() -> Result<()> {
             }
         });
 
+    // Whether the vault on disk was made on this device. The watcher in `pairing` uses it to
+    // tell a header that arrived over sync from one this device just wrote itself.
+    let created_here: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+
+    // The last delete, for as long as the bar in the list is offering to put it back.
+    let undo: Rc<RefCell<Option<ymemo_core::vault::Deleted>>> = Rc::new(RefCell::new(None));
+    let undo_timer = Rc::new(slint::Timer::default());
+
     // ---- Lock window: open an existing vault, or create one. ----
     {
         let ctx = ctx.clone();
@@ -370,6 +387,7 @@ fn main() -> Result<()> {
         let dir = dir.clone();
         let syncthing = syncthing.clone();
         let pending_vault = pending_vault.clone();
+        let created_here = created_here.clone();
         // Create: only on a device starting fresh. The salt is generated exactly here.
         lock.on_create_vault(move |password| {
             let lock = lock_weak.unwrap();
@@ -386,6 +404,7 @@ fn main() -> Result<()> {
             };
             match Vault::open_or_create(dir.join("vault"), password.as_bytes(), store) {
                 Ok(v) => {
+                    created_here.set(true);
                     // Register the folder here as well as at startup: a reset removes it
                     // deliberately, and this is the first vault that follows one.
                     if let Some(st) = syncthing.borrow().as_ref() {
@@ -529,31 +548,101 @@ fn main() -> Result<()> {
         let ctx = ctx.clone();
         list.on_new_memo(move || new_memo(&ctx));
     }
+    // ---- Delete, and the offer to take it back. ----
+    //
+    // Deleting is the only thing in this app that loses writing, and a deleted memo cannot be
+    // reached through its own history either — the row it would be opened from is the row
+    // that just went away. What stands in for a confirmation is the bar this puts at the top
+    // of the list: the delete happens immediately, which is right for the many that were
+    // meant, and the one that was not is one click away for the next thirty seconds.
     {
         let ctx = ctx.clone();
+        let list_weak = list.as_weak();
+        let undo = undo.clone();
+        let undo_timer = undo_timer.clone();
         list.on_delete_row(move |id, is_group| {
             touch(&ctx);
-            {
+            let removed = {
                 let mut guard = ctx.vault.borrow_mut();
                 let Some(v) = guard.as_mut() else { return };
                 // Deleting a group lifts its contents instead of removing them.
                 let res = if is_group { v.delete_group(&id) } else { v.delete(&id) };
-                if let Err(e) = res {
-                    diag!("delete failed: {e}");
-                    return;
-                }
-                refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
-            }
+                let removed = match res {
+                    Ok(removed) => removed,
+                    Err(e) => {
+                        diag!("delete failed: {e}");
+                        return;
+                    }
+                };
+                refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
+                removed
+            };
             if !is_group {
                 close_sticky(&ctx.stickies, id.as_str()); // clean up an open sticky
-                // Drop its pin too, or settings.json accumulates the ids of memos that no
-                // longer exist. Only a local delete can do this; one that arrives over sync
-                // leaves its entry behind, which costs a string and nothing else.
+                // Drop its pin and its window too, or settings.json accumulates the ids of
+                // memos that no longer exist. Only a local delete can do this; one that
+                // arrives over sync leaves its entry behind, which costs a string and nothing
+                // else. Deliberately *not* undone by the undo below: a note put back belongs
+                // where the desk has room, not necessarily under whatever is there now.
                 let mut settings = ctx.settings.borrow_mut();
-                if settings.set_memo_pinned(id.as_str(), false) {
+                let mut changed = settings.set_memo_pinned(id.as_str(), false);
+                changed |= settings.forget_memo_window(id.as_str());
+                if changed {
                     settings.save(&ctx.dir);
                 }
             }
+            let Some(removed) = removed else { return };
+            *undo.borrow_mut() = Some(removed);
+            if let Some(list) = list_weak.upgrade() {
+                list.set_undo_message(SharedString::from(if is_group {
+                    t!("ui.list_deleted_group")
+                } else {
+                    t!("ui.list_deleted_memo")
+                }));
+            }
+            // The offer expires: a bar that never goes away is furniture, and one still
+            // sitting there tomorrow says nothing about what it would put back.
+            let list_weak = list_weak.clone();
+            let undo = undo.clone();
+            undo_timer.start(TimerMode::SingleShot, UNDO_WINDOW, move || {
+                *undo.borrow_mut() = None;
+                if let Some(list) = list_weak.upgrade() {
+                    list.set_undo_message(SharedString::new());
+                }
+            });
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        let list_weak = list.as_weak();
+        let undo = undo.clone();
+        let undo_timer = undo_timer.clone();
+        list.on_undo_delete(move || {
+            touch(&ctx);
+            let Some(deleted) = undo.borrow_mut().take() else { return };
+            undo_timer.stop();
+            if let Some(list) = list_weak.upgrade() {
+                list.set_undo_message(SharedString::new());
+            }
+            let mut guard = ctx.vault.borrow_mut();
+            let Some(v) = guard.as_mut() else { return };
+            if let Err(e) = v.undelete(&deleted) {
+                diag!("undo failed: {e}");
+                return;
+            }
+            refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
+        });
+    }
+
+    // ---- Find. The model is rebuilt from the query, so every later refresh honours it. ----
+    {
+        let ctx = ctx.clone();
+        list.on_search(move |query| {
+            touch(&ctx);
+            *ctx.query.borrow_mut() = query.to_string();
+            let mut guard = ctx.vault.borrow_mut();
+            let Some(v) = guard.as_mut() else { return };
+            refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
         });
     }
 
@@ -571,7 +660,7 @@ fn main() -> Result<()> {
                     diag!("could not create the group: {e}");
                     return;
                 }
-                refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+                refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
             }
             // Go straight into rename mode so the user can type.
             if let Some(w) = list_weak.upgrade() {
@@ -592,7 +681,7 @@ fn main() -> Result<()> {
             }
             let guard = ctx.vault.borrow();
             let Some(v) = guard.as_ref() else { return };
-            refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+            refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
         });
     }
     {
@@ -611,7 +700,7 @@ fn main() -> Result<()> {
                 diag!("could not rename the group: {e}");
                 return;
             }
-            refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+            refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
         });
     }
     // ---- Rename the vault. The name is in the synced document, so this reaches every
@@ -671,7 +760,7 @@ fn main() -> Result<()> {
         &syncthing,
         lan.clone(),
         my_device_id.clone(),
-        &vault_dir,
+        pairing::VaultOrigin { dir: &vault_dir, created_here: created_here.clone() },
     );
 
     // ---- Periodic merge, pulling other devices' logs into the list and stickies. ----
@@ -740,6 +829,10 @@ fn main() -> Result<()> {
                 // Likewise: the pins belong to the sticky windows, not to this dialog, and
                 // rebuilding the struct from it would unpin every note that is open.
                 pinned_memos: ctx.settings.borrow().pinned_memos.clone(),
+                // And likewise for where the windows are: this dialog knows nothing about
+                // them, so saving it must not scatter the notes on the desk.
+                memo_windows: ctx.settings.borrow().memo_windows.clone(),
+                list_window: ctx.settings.borrow().list_window,
             };
             next.sanitize();
             let prev_unlock_days = ctx.settings.borrow().unlock_days;
@@ -847,6 +940,35 @@ fn main() -> Result<()> {
     {
         let stickies = ctx.stickies.clone();
         snap_timer.start(TimerMode::Repeated, SNAP_INTERVAL, move || snap_tick(&stickies));
+    }
+
+    // ---- Closing the list on a desktop with no tray. See `quit_if_last_window`. ----
+    {
+        let ctx = ctx.clone();
+        let list_weak = list.as_weak();
+        list.window().on_close_requested(move || {
+            if let Some(list) = list_weak.upgrade() {
+                // Recorded here as well as on the timer: this is the last chance to see where
+                // the window was before it goes.
+                sticky::remember_geometry(&ctx, &list);
+                sticky::quit_if_last_window(&ctx, &list);
+            }
+            slint::CloseRequestResponse::HideWindow
+        });
+    }
+
+    // ---- Remembering where the windows are, so a desk stays arranged across a restart.
+    // Polled, because Slint has no "the window moved" callback — the same reason the snapping
+    // above is a poll. Far slower than that one: this one writes a file. ----
+    let geometry_timer = slint::Timer::default();
+    {
+        let ctx = ctx.clone();
+        let list_weak = list.as_weak();
+        geometry_timer.start(TimerMode::Repeated, GEOMETRY_INTERVAL, move || {
+            if let Some(list) = list_weak.upgrade() {
+                sticky::remember_geometry(&ctx, &list);
+            }
+        });
     }
 
     // ---- Tray icon ----

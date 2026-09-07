@@ -147,6 +147,14 @@ pub(crate) fn qr_image(text: &str) -> Option<slint::Image> {
 /// Wires up everything about device linking: entering a pairing code, the 6-digit LAN code,
 /// watching for vault.json, refreshing and revoking shared devices, and resizing the panel.
 ///
+/// What `wire` needs to know about the vault on disk: where it is, and whether this device
+/// made it rather than receiving it over sync. The two travel together because the watcher
+/// below is the only thing that reads either.
+pub(crate) struct VaultOrigin<'a> {
+    pub(crate) dir: &'a std::path::Path,
+    pub(crate) created_here: Rc<Cell<bool>>,
+}
+
 /// The periodic work runs only while the returned [`PairingTimers`] is alive; `main` holds
 /// it to the end.
 pub(crate) fn wire(
@@ -156,10 +164,12 @@ pub(crate) fn wire(
     syncthing: &Rc<RefCell<Option<Syncthing>>>,
     lan: Option<Rc<lan_pair::PairListener>>,
     my_device_id: Option<String>,
-    vault_dir: &std::path::Path,
+    vault: VaultOrigin<'_>,
 ) -> PairingTimers {
+    let VaultOrigin { dir: vault_dir, created_here } = vault;
     let pair_timer = slint::Timer::default();
-    let vault_watch_timer = slint::Timer::default();
+    // Held by an Rc so the watch below can stop itself; see the comment where it is started.
+    let vault_watch_timer = Rc::new(slint::Timer::default());
     let devices_timer = slint::Timer::default();
     let pending_timer = slint::Timer::default();
 
@@ -268,8 +278,23 @@ pub(crate) fn wire(
     if !vault_dir.join("vault.json").exists() {
         let lock_weak = lock.as_weak();
         let vault_json = vault_dir.join("vault.json");
+        // Weak, so the timer holding the closure that holds the timer is not a cycle.
+        let self_ref = Rc::downgrade(&vault_watch_timer);
         vault_watch_timer.start(TimerMode::Repeated, Duration::from_millis(800), move || {
             if !vault_json.exists() {
+                return;
+            }
+            // **It stops the moment it fires.** This ran on for the life of the process
+            // before, and once the user created a vault here it kept re-announcing a pairing
+            // that never happened — and, because it wrote `lock_message` every 800ms, it
+            // also wiped "wrong password" about a tenth of a second after it appeared, so a
+            // mistyped password looked like a dead button.
+            if let Some(timer) = self_ref.upgrade() {
+                timer.stop();
+            }
+            // A vault this device made itself is not news arriving from anywhere; the create
+            // path has already put the right screen up.
+            if created_here.get() {
                 return;
             }
             if let Some(lock) = lock_weak.upgrade() {
@@ -511,7 +536,7 @@ pub(crate) fn wire(
 /// Keeps the pairing timers alive; dropping it stops them.
 pub(crate) struct PairingTimers {
     _pair: slint::Timer,
-    _vault_watch: slint::Timer,
+    _vault_watch: Rc<slint::Timer>,
     _devices: slint::Timer,
     _pending: slint::Timer,
 }

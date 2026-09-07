@@ -9,6 +9,7 @@
 //! ```
 
 use ymemo_core::diag;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -39,6 +40,34 @@ pub const KEEP_VERSIONS_DAYS_MAX: i32 = 365;
 /// Gap between automatic update checks. Daily is often enough for a release cadence measured
 /// in weeks, and it keeps the request rare enough to be unremarkable.
 const UPDATE_CHECK_INTERVAL_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// Smallest remembered sticky, matching `min-width`/`min-height` in `sticky.slint`.
+const STICKY_MIN: (i32, i32) = (140, 24);
+/// Smallest remembered list window, matching `min-width`/`min-height` in `list.slint`.
+const LIST_MIN: (i32, i32) = (320, 260);
+/// How far off the desktop a remembered window may sit before it is forgotten. Negative
+/// coordinates are ordinary on a multi-monitor desktop — a screen to the left of the primary
+/// one starts below zero — so this is loose on purpose and only catches the absurd.
+const GEOMETRY_LIMIT: i32 = 100_000;
+
+/// Stand-in x and y for a window whose position could not be read.
+///
+/// Native Wayland gives a client no way to ask where its own window is, the same gap that
+/// leaves snapping and the taskbar hint inert there. The **size** is still worth keeping —
+/// it is the half of "where I left it" that a compositor will not undo — so a note reopens
+/// as big as it was and wherever the compositor puts it.
+pub const POS_UNKNOWN: i32 = i32::MIN;
+
+/// Whether a remembered `[x, y, width, height]` could still put a usable window on screen.
+///
+/// Everything here is **physical** pixels: a position can only be read and set in those, and
+/// splitting the units across one array of four numbers reads worse than the DPI change it
+/// would guard against, which costs a note its size once.
+fn sane_geometry(g: &[i32; 4], min_w: i32, min_h: i32) -> bool {
+    let position_ok = (g[0] == POS_UNKNOWN && g[1] == POS_UNKNOWN)
+        || (g[0].abs() <= GEOMETRY_LIMIT && g[1].abs() <= GEOMETRY_LIMIT);
+    position_ok && g[2] >= min_w && g[3] >= min_h && g[2] <= GEOMETRY_LIMIT && g[3] <= GEOMETRY_LIMIT
+}
 
 /// Device-local preferences; every field defaults, so older files still load.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -83,6 +112,19 @@ pub struct Settings {
     /// purpose — which window covers which is a property of a desktop, not of a memo, and
     /// syncing it would also put one log entry per pin toggle in front of every other device.
     pub pinned_memos: Vec<String>,
+    /// Where each memo's sticky sat and how big it was, by memo id: `[x, y, width, height]`
+    /// in logical pixels.
+    ///
+    /// Device-local for the same reason the pins are: a note's place on a desk is a fact
+    /// about that desk, and two screens of different sizes cannot share one. Without this a
+    /// sticky reopened at the default 200x120 wherever the window manager felt like putting
+    /// it, which threw away every arrangement the moment a note was closed — on an app whose
+    /// whole point is notes lying where you left them, and which goes to the trouble of
+    /// snapping them to each other while you drag.
+    pub memo_windows: HashMap<String, [i32; 4]>,
+    /// The memo list's own geometry, same shape. Absent until the window has been moved or
+    /// resized once.
+    pub list_window: Option<[i32; 4]>,
 }
 
 impl Default for Settings {
@@ -102,6 +144,8 @@ impl Default for Settings {
             update_check: true,
             last_update_check: 0,
             pinned_memos: Vec::new(),
+            memo_windows: HashMap::new(),
+            list_window: None,
         }
     }
 }
@@ -162,6 +206,49 @@ impl Settings {
         // A hand-edited file, or a memo pinned on two runs before the first save landed.
         self.pinned_memos.sort();
         self.pinned_memos.dedup();
+        // A window remembered off the edge of a screen that is no longer attached would be a
+        // note that cannot be reached; a size below the sticky's own minimum would be one
+        // that cannot be read. Both are dropped rather than clamped, because the right place
+        // for a note whose monitor is gone is wherever the window manager puts it now.
+        self.memo_windows
+            .retain(|_, g| sane_geometry(g, STICKY_MIN.0, STICKY_MIN.1));
+        if let Some(g) = self.list_window {
+            if !sane_geometry(&g, LIST_MIN.0, LIST_MIN.1) {
+                self.list_window = None;
+            }
+        }
+    }
+
+    /// Where this memo's sticky was last seen, if anywhere.
+    pub fn memo_window(&self, id: &str) -> Option<[i32; 4]> {
+        self.memo_windows.get(id).copied()
+    }
+
+    /// Records a sticky's geometry. Returns whether anything changed, so a caller polling
+    /// window positions does not rewrite the file every tick.
+    pub fn set_memo_window(&mut self, id: &str, geometry: [i32; 4]) -> bool {
+        if !sane_geometry(&geometry, STICKY_MIN.0, STICKY_MIN.1) {
+            return false;
+        }
+        if self.memo_windows.get(id) == Some(&geometry) {
+            return false;
+        }
+        self.memo_windows.insert(id.to_string(), geometry);
+        true
+    }
+
+    /// Forgets one memo's window, for a memo that no longer exists.
+    pub fn forget_memo_window(&mut self, id: &str) -> bool {
+        self.memo_windows.remove(id).is_some()
+    }
+
+    /// Records the list window's geometry. Returns whether anything changed.
+    pub fn set_list_window(&mut self, geometry: [i32; 4]) -> bool {
+        if !sane_geometry(&geometry, LIST_MIN.0, LIST_MIN.1) || self.list_window == Some(geometry) {
+            return false;
+        }
+        self.list_window = Some(geometry);
+        true
     }
 
     /// Whether this memo's sticky stays above other windows.
@@ -346,9 +433,23 @@ mod tests {
             last_update_check: i64::MAX,
             // The same memo twice, as two runs racing to save the same pin would leave.
             pinned_memos: vec!["b".into(), "a".into(), "b".into()],
+            // One window too small to read and one absurdly far off any desktop; both are
+            // dropped rather than clamped, since there is no honest place to put them.
+            memo_windows: HashMap::from([
+                ("kept".to_string(), [10, 20, 300, 200]),
+                ("tiny".to_string(), [10, 20, 4, 4]),
+                ("lost".to_string(), [9_000_000, 0, 300, 200]),
+                // No position, as native Wayland leaves it: the size is still worth keeping.
+                ("sizeonly".to_string(), [POS_UNKNOWN, POS_UNKNOWN, 300, 200]),
+            ]),
+            list_window: Some([0, 0, 10, 10]),
         };
         s.sanitize();
         assert_eq!(s.pinned_memos, vec!["a".to_string(), "b".to_string()]);
+        let mut kept: Vec<&String> = s.memo_windows.keys().collect();
+        kept.sort();
+        assert_eq!(kept, vec!["kept", "sizeonly"]);
+        assert_eq!(s.list_window, None);
         assert_eq!(s.lang, "auto");
         assert_eq!(s.unlock_days, UNLOCK_DAYS_MAX);
         assert_eq!(s.idle_lock_minutes, 0);

@@ -21,8 +21,9 @@ use ymemo_core::{now_millis, Memo};
 use ymemo_i18n::t;
 
 use crate::list::refresh_list;
+use crate::settings::POS_UNKNOWN;
 use crate::state::{touch, Ctx, StickyEntry, Stickies, APP};
-use crate::window::{present, raise, skip_taskbar};
+use crate::window::{present, raise, restore_geometry, skip_taskbar};
 use crate::{apply_strings, PhotoRow, StickyWindow, Strings};
 
 /// Body font size (logical px) that photo sizes in em are measured against.
@@ -37,6 +38,12 @@ pub(crate) const BAR_HEIGHT: f32 = 24.0;
 pub(crate) const SNAP_DIST: f32 = 12.0;
 /// How often sticky positions are polled for snapping.
 pub(crate) const SNAP_INTERVAL: Duration = Duration::from_millis(90);
+/// How often where the windows are is written to `settings.json`.
+///
+/// Deliberately far slower than the snap poll: this is a file write, and a drag would
+/// otherwise produce one per frame. Two seconds is under the time it takes to move a note and
+/// reach for something else, and a close records its own window immediately anyway.
+pub(crate) const GEOMETRY_INTERVAL: Duration = Duration::from_secs(2);
 /// The size a sticky opens at (logical px); **must match the preferred size in
 /// `ui/sticky.slint`**, which is what the window is actually given.
 pub(crate) const DEFAULT_SIZE: (f32, f32) = (200.0, 120.0);
@@ -65,6 +72,25 @@ pub(crate) fn derive_title(text: &str) -> String {
         .collect()
 }
 
+/// The title a memo should carry once its body becomes `text`.
+///
+/// A sticky has no title field — the title *is* the first line of what is written on it — but
+/// the phone has one, and a memo written there carries a title its body never mentions.
+/// Re-deriving unconditionally meant that opening such a memo here and touching a single
+/// character silently renamed it to its first line: the kind of loss that is only noticed
+/// much later, on the other device.
+///
+/// So the test is the memo as it stands. A title that still matches what its own body would
+/// produce is this app's own doing and follows the text; anything else was typed by hand
+/// somewhere and is left alone.
+pub(crate) fn title_for(memo: &Memo, text: &str) -> String {
+    if memo.title.is_empty() || memo.title == derive_title(&sticky_text(memo)) {
+        derive_title(text)
+    } else {
+        memo.title.clone()
+    }
+}
+
 /// Saves an edited body to the vault, deriving the title from its first line.
 pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) {
     let mut guard = ctx.vault.borrow_mut();
@@ -73,7 +99,7 @@ pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) {
         Ok(Some(m)) => m,
         _ => return, // drop leftover edits of a deleted memo
     };
-    let title = derive_title(text);
+    let title = title_for(&memo, text);
     if memo.body == text && memo.title == title {
         return;
     }
@@ -84,7 +110,7 @@ pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) {
         diag!("could not save the memo: {e}");
         return;
     }
-    refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+    refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
     // Reflect the new title in the title bar.
     if let Some(entry) = ctx.stickies.borrow().get(id) {
         entry.window.set_memo_title(SharedString::from(memo.title));
@@ -138,7 +164,7 @@ pub(crate) fn new_memo(ctx: &Ctx) {
             diag!("could not create the memo: {e}");
             return;
         }
-        refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+        refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
     }
     if let Err(e) = open_sticky(ctx, &memo, true) {
         diag!("could not open the sticky window: {e}");
@@ -502,13 +528,26 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         let weak = window.as_weak();
         window.on_close_requested(move || {
             touch(&ctx);
-            if dirty.get() {
-                if let Some(w) = weak.upgrade() {
+            if let Some(w) = weak.upgrade() {
+                // Where it was when it was closed, not where the last poll saw it.
+                remember_one(&ctx, &id, w.window());
+                if dirty.get() {
                     save_memo(&ctx, &id, w.get_memo_text().as_str());
+                    dirty.set(false);
                 }
-                dirty.set(false);
             }
+            // A note that was opened and left blank is not a note. Closing one used to leave
+            // an "(empty memo)" row in the list for good, which the user then had to find and
+            // delete — and the button that does that is one row away from the memos that are
+            // not blank.
+            discard_if_blank(&ctx, &id);
             close_sticky(&ctx.stickies, &id);
+            APP.with(|a| {
+                let borrow = a.borrow();
+                if let Some(app) = borrow.as_ref() {
+                    quit_if_last_window(&app.ctx, &app.list);
+                }
+            });
         });
     }
 
@@ -567,7 +606,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
                     diag!("could not change the color: {e}");
                     return;
                 }
-                refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+                refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
             }
             if let Some(w) = weak.upgrade() {
                 w.set_sticky_color(key);
@@ -727,7 +766,14 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
+    // Back where it was left, if this note has been on the desk before. Applied after the
+    // window is on screen: a size set on a window that has not been shown is what the
+    // backends disagree about, and the position needs a real window underneath it.
+    let saved_geometry = ctx.settings.borrow().memo_window(&memo.id);
     present_sticky(ctx, &window);
+    if let Some(geometry) = saved_geometry {
+        restore_geometry(&window, geometry);
+    }
     // A note opens at its first line, whatever the widget's scroll offset happened to be.
     window.invoke_body_to_top();
     if focus {
@@ -750,6 +796,130 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
 // ---------------------------------------------------------------------------
 // Magnetic snapping
 // ---------------------------------------------------------------------------
+
+/// Quits when the window that just closed was the last one, on a desktop with no tray.
+///
+/// The app is tray-resident, and closing every window is meant to leave it waiting in the
+/// tray. Where no tray registered there is nothing to wait in: the app went on running with
+/// no window and no icon, and clicking the launcher again was the only way back — which is
+/// indistinguishable from a crash, and left a vault open in a process the user believed they
+/// had closed, since the idle auto-lock is off by default.
+///
+/// With a tray this does nothing at all; the notes are one click away there.
+pub(crate) fn quit_if_last_window(ctx: &Ctx, _list: &crate::ListWindow) {
+    if ctx.has_tray.get() {
+        return;
+    }
+    // The window that triggered this is still on screen while its close is being handled — a
+    // `close_requested` handler runs *before* the hide it asks for — so "the last one" can
+    // only be counted on the next turn of the event loop, once it is really gone.
+    let _ = slint::invoke_from_event_loop(|| {
+        APP.with(|a| {
+            let borrow = a.borrow();
+            let Some(app) = borrow.as_ref() else { return };
+            if app.list.window().is_visible() {
+                return;
+            }
+            if app.ctx.stickies.borrow().values().any(|e| e.window.window().is_visible()) {
+                return;
+            }
+            crate::tray::request_quit();
+        });
+    });
+}
+
+/// Deletes a memo that was never written in, so closing an empty note leaves nothing behind.
+///
+/// Only a memo with **nothing at all** on it: no title, no body, and no photo. A blank note
+/// with a picture on it is a note. Nothing is offered to undo here on purpose — there is
+/// nothing in it to lose, and an undo bar after every stray `+` would be its own kind of
+/// clutter.
+pub(crate) fn discard_if_blank(ctx: &Ctx, id: &str) {
+    {
+        let mut guard = ctx.vault.borrow_mut();
+        let Some(v) = guard.as_mut() else { return };
+        match v.store().get(id) {
+            Ok(Some(memo)) if memo.title.is_empty() && memo.body.is_empty() => {
+                // A photo makes it a note, and a cache that cannot be read is not grounds for
+                // deleting anything.
+                match v.store().attachments_of(id) {
+                    Ok(photos) if photos.is_empty() => {}
+                    _ => return,
+                }
+            }
+            _ => return,
+        }
+        if let Err(e) = v.delete(id) {
+            diag!("could not discard the blank memo: {e}");
+            return;
+        }
+        refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
+    }
+    let mut settings = ctx.settings.borrow_mut();
+    let mut changed = settings.forget_memo_window(id);
+    changed |= settings.set_memo_pinned(id, false);
+    if changed {
+        settings.save(&ctx.dir);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Where the notes are
+//
+// A sticky is a scrap of paper on a desk, and a desk that tidies itself every time you close
+// a note is not one. So each window's place and size is written to `settings.json` — device
+// local, never synced: which corner of which screen a note lives in is a fact about that
+// screen, and two devices cannot share one.
+// ---------------------------------------------------------------------------
+
+/// Reads one window's geometry in physical px, `POS_UNKNOWN` for a position we cannot have.
+fn window_geometry(window: &slint::Window) -> [i32; 4] {
+    let size = window.size();
+    let position = window
+        .with_winit_window(|ww| ww.outer_position().ok().map(|p| (p.x, p.y)))
+        .flatten();
+    match position {
+        Some((x, y)) => [x, y, size.width as i32, size.height as i32],
+        None => [POS_UNKNOWN, POS_UNKNOWN, size.width as i32, size.height as i32],
+    }
+}
+
+/// Records this memo's window, and saves if that changed anything.
+pub(crate) fn remember_one(ctx: &Ctx, id: &str, window: &slint::Window) {
+    if !window.is_visible() {
+        return;
+    }
+    let geometry = window_geometry(window);
+    let changed = ctx.settings.borrow_mut().set_memo_window(id, geometry);
+    if changed {
+        ctx.settings.borrow().save(&ctx.dir);
+    }
+}
+
+/// Records every open sticky's window, plus the list's, and saves once if anything moved.
+///
+/// Polled rather than hooked to a move: Slint has no "window moved" callback, which is why
+/// the snapping is a poll too.
+pub(crate) fn remember_geometry(ctx: &Ctx, list: &crate::ListWindow) {
+    let mut changed = false;
+    {
+        let map = ctx.stickies.borrow();
+        let mut settings = ctx.settings.borrow_mut();
+        for (id, entry) in map.iter() {
+            let window = entry.window.window();
+            if !window.is_visible() {
+                continue;
+            }
+            changed |= settings.set_memo_window(id, window_geometry(window));
+        }
+        if list.window().is_visible() {
+            changed |= settings.set_list_window(window_geometry(list.window()));
+        }
+    }
+    if changed {
+        ctx.settings.borrow().save(&ctx.dir);
+    }
+}
 
 /// A rectangle in physical px: (x, y, w, h).
 pub(crate) type Rect = (i32, i32, i32, i32);
@@ -884,6 +1054,35 @@ mod tests {
     use super::*;
 
     const T: i32 = 12; // threshold
+
+    /// A memo written here has a title that follows its first line, as it always did.
+    #[test]
+    fn a_derived_title_follows_the_text() {
+        let mut memo = Memo::new("old first line", "old first line\nrest");
+        assert_eq!(title_for(&memo, "new first line\nrest"), "new first line");
+        // And a memo that never had one gets one.
+        memo.title = String::new();
+        assert_eq!(title_for(&memo, "first\nsecond"), "first");
+    }
+
+    /// A title typed on the phone survives an edit made here.
+    #[test]
+    fn a_hand_written_title_is_left_alone() {
+        let memo = Memo::new("Groceries", "milk");
+        assert_eq!(
+            title_for(&memo, "milk\neggs"),
+            "Groceries",
+            "editing the body on the desktop must not rename a memo titled elsewhere"
+        );
+    }
+
+    /// An old memo that only ever had a title still gets one derived: `sticky_text` promotes
+    /// that title into the body, so the two do match and the memo is this app's own.
+    #[test]
+    fn an_old_title_only_memo_still_derives() {
+        let memo = Memo::new("just a title", "");
+        assert_eq!(title_for(&memo, "just a title\nand now a body"), "just a title");
+    }
 
     #[test]
     fn snaps_to_screen_left_edge_when_near() {

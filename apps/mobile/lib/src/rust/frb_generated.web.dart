@@ -51,6 +51,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FfiRelease dco_decode_ffi_release(dynamic raw);
 
   @protected
+  FfiRevision dco_decode_ffi_revision(dynamic raw);
+
+  @protected
   FfiSettings dco_decode_ffi_settings(dynamic raw);
 
   @protected
@@ -79,6 +82,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FfiPendingDevice> dco_decode_list_ffi_pending_device(dynamic raw);
+
+  @protected
+  List<FfiRevision> dco_decode_list_ffi_revision(dynamic raw);
 
   @protected
   List<FfiSharedDevice> dco_decode_list_ffi_shared_device(dynamic raw);
@@ -138,6 +144,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FfiRelease sse_decode_ffi_release(SseDeserializer deserializer);
 
   @protected
+  FfiRevision sse_decode_ffi_revision(SseDeserializer deserializer);
+
+  @protected
   FfiSettings sse_decode_ffi_settings(SseDeserializer deserializer);
 
   @protected
@@ -168,6 +177,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<FfiPendingDevice> sse_decode_list_ffi_pending_device(
       SseDeserializer deserializer);
+
+  @protected
+  List<FfiRevision> sse_decode_list_ffi_revision(SseDeserializer deserializer);
 
   @protected
   List<FfiSharedDevice> sse_decode_list_ffi_shared_device(
@@ -233,6 +245,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_ffi_release(FfiRelease self, SseSerializer serializer);
 
   @protected
+  void sse_encode_ffi_revision(FfiRevision self, SseSerializer serializer);
+
+  @protected
   void sse_encode_ffi_settings(FfiSettings self, SseSerializer serializer);
 
   @protected
@@ -264,6 +279,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_ffi_pending_device(
       List<FfiPendingDevice> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_ffi_revision(
+      List<FfiRevision> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_ffi_shared_device(

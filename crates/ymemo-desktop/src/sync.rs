@@ -45,7 +45,7 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
         let Some(v) = guard.as_mut() else { return };
         match v.rebuild() {
             Ok(()) => {
-                refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+                refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
                 // Force a repaint: the Windows software renderer does not repaint on a model
                 // change alone, which makes a successful merge look like a failed sync.
                 if let Some(w) = list_weak.upgrade() {

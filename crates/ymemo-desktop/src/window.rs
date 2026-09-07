@@ -86,6 +86,30 @@ fn with_window<T: ComponentHandle + 'static>(
     }
 }
 
+/// Puts a window back where it was left, as far as the platform allows.
+///
+/// The size goes on straight away; the **position has to wait for a winit window to exist**.
+/// `show()` does not create one — see [`with_window`] — so setting the position on the turn
+/// the note is shown is dropped without a word, which is why a remembered note came back the
+/// right size in the wrong place. It is the same trap that left the stickies their taskbar
+/// buttons, and it wants the same answer.
+///
+/// A `POS_UNKNOWN` position means the platform would not say where the window was (native
+/// Wayland); the size is still worth restoring, and the compositor places the window.
+pub(crate) fn restore_geometry<T: ComponentHandle + 'static>(component: &T, geometry: [i32; 4]) {
+    use i_slint_backend_winit::winit::dpi::PhysicalPosition;
+
+    component
+        .window()
+        .set_size(slint::PhysicalSize::new(geometry[2].max(1) as u32, geometry[3].max(1) as u32));
+    if geometry[0] == crate::settings::POS_UNKNOWN {
+        return;
+    }
+    with_window(component, move |window| {
+        window.set_outer_position(PhysicalPosition::new(geometry[0], geometry[1]));
+    });
+}
+
 /// Keeps a window out of the taskbar, and out of the pager where there is one.
 ///
 /// A sticky is not an application. Eight notes on the desktop produced eight taskbar

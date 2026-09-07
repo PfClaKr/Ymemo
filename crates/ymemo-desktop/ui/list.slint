@@ -43,6 +43,12 @@ export component ListWindow inherits Window {
     private property <bool> naming: false;
 
     in property <[ListRow]> rows;
+    // What is typed in the find box. Rust filters the model on it; empty shows the tree.
+    in-out property <string> query: "";
+    callback search(string);
+    // Set while a delete can still be taken back, and the line the bar shows.
+    in property <string> undo-message: "";
+    callback undo-delete();
     in property <bool> sync-available: false;
     in property <string> my-pairing-code;
     in property <image> qr-image;
@@ -161,12 +167,35 @@ export component ListWindow inherits Window {
             // label. Cheaper than a tooltip and always in the same spot.
             if root.naming: LineEdit {
                 horizontal-stretch: 1;
+                // A LineEdit asks for more room than the heading it replaces, and in a window
+                // at its minimum width that pushed the last toolbar button off the edge — so
+                // the field is allowed to be narrow instead.
+                min-width: 60px;
                 text: root.vault-name;
                 placeholder-text: Strings.ui_list_heading;
                 // The field is created by this very `if`, so nothing has focus until it asks
                 // for it — the same way a group's name field does two hundred lines below.
-                init => { self.focus(); }
+                // Selected, not just focused: the box opens holding the current name, and a
+                // caret parked in front of it turns typing a new name into appending to the
+                // old one.
+                init => { self.focus(); self.select-all(); }
                 accepted => { root.finish-naming(self.text); }
+                // Escape backs out. Clicking elsewhere in the window does not move the focus
+                // — nothing else in the list takes it — so without a key that says "never
+                // mind" the heading stayed a text field, and with it the toolbar stayed one
+                // button narrower.
+                //
+                // The old name is put back before the field goes, because losing focus is
+                // itself a commit here (see below) and tearing the field down may deliver one
+                // — `set_name` ignores a name that did not change, so this cannot fight it.
+                key-pressed(ev) => {
+                    if (ev.text == Key.Escape) {
+                        self.text = root.vault-name;
+                        root.naming = false;
+                        return accept;
+                    }
+                    return reject;
+                }
                 // Clicking away is as much an answer as pressing return, and a heading stuck
                 // in edit mode because the pointer moved is a trap. `set_name` ignores a name
                 // that did not change, so the two paths cannot fight.
@@ -283,8 +312,129 @@ export component ListWindow inherits Window {
             Rectangle { vertical-stretch: 1; }
         }
 
+        // Find. Always on screen rather than behind a sixth toolbar button: a memo app whose
+        // search has to be discovered is a memo app without one, and the row costs 24px.
+        // While it has something in it the list is a flat list of matches, so the tree
+        // controls below (indent, drag, folders) are the ones that stand down, not this.
+        if !root.show-sync: Rectangle {
+            height: 24px;
+            border-radius: 6px;
+            background: #ffffff10;
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 4px;
+                spacing: 4px;
+                Rectangle {
+                    width: 14px;
+                    Glyph {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        width: 13px;
+                        height: 13px;
+                        name: "search";
+                        stroke: #b0a99a;
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    // The placeholder sits *under* the field rather than beside it: a
+                    // TextInput has none of its own, and a sibling in the layout would take
+                    // room from the text it is standing in for.
+                    if root.query == "": Text {
+                        x: 0px;
+                        width: 100%;
+                        text: Strings.ui_list_search;
+                        font-size: 12px;
+                        color: #7d7768;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    find := TextInput {
+                        width: 100%;
+                        height: 100%;
+                        text <=> root.query;
+                        font-size: 12px;
+                        color: #ece7db;
+                        vertical-alignment: center;
+                        single-line: true;
+                        accessible-label: Strings.ui_list_search;
+                        edited => { root.search(self.text); }
+                        // Escape clears rather than closes: the field has no close of its own,
+                        // and a search left standing is what would make the list look half
+                        // empty ten minutes later.
+                        key-pressed(ev) => {
+                            if (ev.text == Key.Escape) {
+                                self.text = "";
+                                root.search("");
+                                return accept;
+                            }
+                            return reject;
+                        }
+                    }
+                }
+                if root.query != "": IconButton {
+                    width: 20px;
+                    height: 20px;
+                    icon: "close";
+                    label: Strings.ui_list_search;
+                    clicked => { find.text = ""; root.search(""); }
+                }
+            }
+        }
+
+        // What a delete left behind, for as long as it can still be taken back. A bar and not
+        // a dialog: the delete already happened, and a question in front of every one of them
+        // is a tax on the many that were meant.
+        if root.undo-message != "": Rectangle {
+            height: 26px;
+            border-radius: 6px;
+            background: #43352f;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 4px;
+                spacing: 6px;
+                Text {
+                    text: root.undo-message;
+                    font-size: 11px;
+                    color: #e8d0c4;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                undo-btn := TouchArea {
+                    width: 78px;
+                    mouse-cursor: pointer;
+                    accessible-role: button;
+                    accessible-label: Strings.ui_list_undo;
+                    HorizontalLayout {
+                        spacing: 4px;
+                        alignment: center;
+                        Rectangle {
+                            width: 13px;
+                            Glyph {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: 13px;
+                                height: 13px;
+                                name: "undo";
+                                stroke: undo-btn.has-hover ? #ffffff : #9ec5e8;
+                            }
+                        }
+                        Text {
+                            text: Strings.ui_list_undo;
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: undo-btn.has-hover ? #ffffff : #9ec5e8;
+                            vertical-alignment: center;
+                        }
+                    }
+                    clicked => { root.undo-delete(); }
+                }
+            }
+        }
+
         if !root.show-sync && root.rows.length == 0: Text {
-            text: Strings.ui_list_empty;
+            text: root.query == "" ? Strings.ui_list_empty : Strings.ui_list_search_none;
             font-size: 12px;
             color: #b0a99a;
             wrap: word-wrap;
@@ -356,6 +506,10 @@ export component ListWindow inherits Window {
                         }
                     }
                     moved => {
+                        // Nothing is dragged while a search is on: these rows are the matches,
+                        // flattened out of the tree, so a drop between two of them would mean
+                        // a place in a list that is not the one being arranged.
+                        if (root.query != "") { return; }
                         // Small movements stay clicks; past the threshold it is a drag.
                         if (self.mouse-y - self.pressed-y > 4px || self.pressed-y - self.mouse-y > 4px) {
                             root.did-drag = true;
@@ -399,38 +553,48 @@ export component ListWindow inherits Window {
                      : 0px;
                     animate y { duration: 130ms; easing: ease-out; }
 
-                    // Groups show a disclosure marker, memos a color accent.
-                    if row.is-group: Rectangle {
+                    // The disclosure column. Empty on a memo, and on a folder with nothing in
+                    // it, but **always there**: without it a folder's own row started 32px
+                    // further in than a memo's at the same depth, so a top-level folder
+                    // looked like it was inside something.
+                    Rectangle {
                         width: 14px;
-                        Glyph {
+                        if row.is-group && row.child-count > 0: Glyph {
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
                             width: 11px;
                             height: 11px;
-                            name: row.child-count == 0 ? ""
-                                : row.expanded ? "chevron-down" : "chevron-right";
+                            name: row.expanded ? "chevron-down" : "chevron-right";
                             stroke: #b0a99a;
                             stroke-width: 1.5px;
                         }
                     }
-                    if row.is-group: Glyph {
-                        width: 15px;
-                        height: 15px;
-                        name: "folder";
-                        stroke: Palette.swatch(row.color);
-                    }
-                    // Colour accent, and the way in to changing it. Folders carry a colour
-                    // too now, so the same strip serves both.
+
+                    // What the row *is*, in its own colour, and the way in to changing that
+                    // colour. One mark, not two: a folder used to carry a thin outline folder
+                    // **and** the same colour strip a memo has, which said "folder" twice and
+                    // "memo" once in the same breath. The filled shape reads at this size,
+                    // where the outline's tab was a pixel and a half wide and vanished.
                     Rectangle {
-                        width: 5px;
-                        height: 22px;
-                        y: (parent.height - self.height) / 2;
-                        border-radius: 2.5px;
-                        background: Palette.swatch(row.color);
+                        width: 18px;
+                        if row.is-group: Glyph {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: 17px;
+                            height: 17px;
+                            name: "folder-solid";
+                            fill: Palette.swatch(row.color);
+                        }
+                        if !row.is-group: Rectangle {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: 5px;
+                            height: 22px;
+                            border-radius: 2.5px;
+                            background: Palette.swatch(row.color);
+                        }
                         swatch-ta := TouchArea {
                             mouse-cursor: pointer;
-                            width: 12px;
-                            x: -3px;
                             clicked => {
                                 root.commit-edit();
                                 root.coloring-id = root.coloring-id == row.id ? "" : row.id;
@@ -453,9 +617,13 @@ export component ListWindow inherits Window {
                             border-color: row.color == key ? #ffffff : #00000040;
                             TouchArea {
                                 mouse-cursor: pointer;
+                                // Closed *before* the write, not after: `set-row-color`
+                                // rebuilds the row model, which destroys this very element,
+                                // and anything after that call never runs — which is why the
+                                // palette used to stay open over the colour it had just set.
                                 clicked => {
-                                    root.set-row-color(row.id, row.is-group, key);
                                     root.coloring-id = "";
+                                    root.set-row-color(row.id, row.is-group, key);
                                 }
                             }
                         }
@@ -465,7 +633,10 @@ export component ListWindow inherits Window {
                     if root.coloring-id != row.id && root.editing-id == row.id: LineEdit {
                         horizontal-stretch: 1;
                         text: row.title;
-                        init => { self.focus(); }
+                        // Selected as well as focused: a new folder arrives here already
+                        // called "New folder", and with only the caret placed, typing a name
+                        // produced "WorkNew folder".
+                        init => { self.focus(); self.select-all(); }
                         edited(t) => { root.editing-text = t; }
                         accepted => { root.commit-edit(); }
                     }
@@ -481,47 +652,64 @@ export component ListWindow inherits Window {
                         horizontal-stretch: 1;
                     }
 
-                    // Past versions, for folders and memos alike. Only on hover, so it
-                    // never competes with the name for room.
-                    if root.coloring-id != row.id: Rectangle {
-                        width: 20px;
-                        opacity: ta.has-hover || hist-ta.has-hover ? 1 : 0;
-                        Glyph {
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
-                            width: 14px;
-                            height: 14px;
-                            name: "history";
-                            stroke: #b0a99a;
-                        }
-                        hist-ta := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => {
-                                root.commit-edit();
-                                root.show-history(row.id, row.is-group);
-                            }
-                        }
-                    }
-
-
                     if row.is-group: Text {
                         text: row.child-count > 0 ? row.child-count : "";
                         font-size: 11px;
                         color: #8d8778;
                         vertical-alignment: center;
                     }
-                    del-ta := TouchArea {
-                        width: 28px;
-                        Glyph {
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
-                            width: 15px;
-                            height: 15px;
-                            name: "trash";
-                            stroke: del-ta.has-hover ? #e8a0a0 : #b0a99a;
-                            opacity: del-ta.has-hover ? 1 : 0.4;
+
+                    // Past versions and delete, for folders and memos alike. Both appear on
+                    // hover only, so neither competes with the name for room — and, more to
+                    // the point, so they behave alike: delete used to be the one icon always
+                    // drawn on every row, which left the only button that loses writing
+                    // permanently on screen while the harmless one beside it hid. What
+                    // softens it now is the undo bar above, not a dialog in front of it.
+                    //
+                    // The two live in one `if` so each can see the other's hover: the row's
+                    // own TouchArea loses `has-hover` to whichever of these the pointer is
+                    // over, and without the other two terms an icon would blink out exactly
+                    // as it was being aimed at.
+                    if root.coloring-id != row.id: HorizontalLayout {
+                        spacing: 0px;
+                        Rectangle {
+                            width: 20px;
+                            opacity: ta.has-hover || hist-ta.has-hover || del-ta.has-hover ? 1 : 0;
+                            Glyph {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: 14px;
+                                height: 14px;
+                                name: "history";
+                                stroke: #b0a99a;
+                            }
+                            hist-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                accessible-role: button;
+                                accessible-label: Strings.ui_sticky_history;
+                                clicked => {
+                                    root.commit-edit();
+                                    root.show-history(row.id, row.is-group);
+                                }
+                            }
                         }
-                        clicked => { root.commit-edit(); root.delete-row(row.id, row.is-group); }
+                        del-ta := TouchArea {
+                            width: 28px;
+                            mouse-cursor: pointer;
+                            accessible-role: button;
+                            accessible-label: Strings.ui_list_tip_delete;
+                            Glyph {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: 15px;
+                                height: 15px;
+                                name: "trash";
+                                stroke: del-ta.has-hover ? #e8a0a0 : #b0a99a;
+                                opacity: !(ta.has-hover || hist-ta.has-hover || del-ta.has-hover) ? 0
+                                    : del-ta.has-hover ? 1 : 0.4;
+                            }
+                            clicked => { root.commit-edit(); root.delete-row(row.id, row.is-group); }
+                        }
                     }
                 }
             }

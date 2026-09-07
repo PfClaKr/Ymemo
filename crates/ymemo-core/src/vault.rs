@@ -56,6 +56,25 @@ const KEY_CHECK: &[u8] = b"ymemo-key-check-v1";
 /// Header version written today: a wrapped data key. 1 was the unwrapped format.
 const HEADER_VERSION: u32 = 2;
 
+/// What a delete removed, and enough of its surroundings to put it back.
+///
+/// Deleting is the one thing in this app that loses writing, and a deleted memo cannot be
+/// reached through [`Vault::history`] either — the row it was opened from is gone. So a
+/// delete hands this back and the UI keeps it for as long as the offer to undo stands.
+///
+/// It carries values, not log positions, so it stays valid across a `rebuild()` and across
+/// changes arriving from other devices in the meantime.
+#[derive(Debug, Clone)]
+pub enum Deleted {
+    Memo(Memo),
+    /// A folder, plus the ids of what got lifted out of it, so an undo can gather them again.
+    Group {
+        group: Group,
+        lifted_groups: Vec<String>,
+        lifted_memos: Vec<String>,
+    },
+}
+
 /// Contents of `vault.json`. Neither salt is secret, and every key in it is wrapped.
 ///
 /// The optional fields are absent in the original format; `#[serde(default)]` reads those
@@ -468,12 +487,13 @@ impl Vault {
 
     /// Deletes a group and **lifts** its groups and memos to the parent instead of deleting
     /// them — removing a folder must not remove its memos.
-    pub fn delete_group(&mut self, id: &str) -> Result<()> {
-        let parent = self
-            .store
-            .get_group(id)?
-            .map(|g| g.parent_id)
-            .unwrap_or_default();
+    ///
+    /// Returns what it removed, so the caller can offer to put it back; see [`Deleted`].
+    pub fn delete_group(&mut self, id: &str) -> Result<Option<Deleted>> {
+        let Some(group) = self.store.get_group(id)? else {
+            return Ok(None);
+        };
+        let parent = group.parent_id.clone();
 
         // Lift child groups.
         let children: Vec<Group> = self
@@ -482,7 +502,9 @@ impl Vault {
             .into_iter()
             .filter(|g| g.parent_id == id)
             .collect();
+        let mut lifted_groups = Vec::new();
         for mut child in children {
+            lifted_groups.push(child.id.clone());
             child.parent_id = parent.clone();
             child.updated_at = crate::now_millis();
             self.upsert_group(&child)?;
@@ -494,7 +516,9 @@ impl Vault {
             .into_iter()
             .filter(|m| m.group_id == id)
             .collect();
+        let mut lifted_memos = Vec::new();
         for mut memo in memos {
+            lifted_memos.push(memo.id.clone());
             memo.group_id = parent.clone();
             memo.updated_at = crate::now_millis();
             self.upsert(&memo)?;
@@ -505,17 +529,72 @@ impl Vault {
             self.doc.delete(&groups, id)?;
         }
         self.append_local_change()?;
-        self.store.delete_group(id)
+        self.store.delete_group(id)?;
+        Ok(Some(Deleted::Group { group, lifted_groups, lifted_memos }))
     }
 
     /// Deletes a memo.
-    pub fn delete(&mut self, id: &str) -> Result<()> {
+    ///
+    /// Returns the memo it removed, so the caller can offer to put it back; see [`Deleted`].
+    /// Attachments are left alone — they point at the memo rather than the other way round,
+    /// so an undelete brings the photos back with it.
+    pub fn delete(&mut self, id: &str) -> Result<Option<Deleted>> {
+        let Some(memo) = self.store.get(id)? else {
+            return Ok(None);
+        };
         let memos = self.memos_obj()?;
         if self.doc.get(&memos, id)?.is_some() {
             self.doc.delete(&memos, id)?;
         }
         self.append_local_change()?;
-        self.store.delete(id)
+        self.store.delete(id)?;
+        Ok(Some(Deleted::Memo(memo)))
+    }
+
+    /// Puts back what [`Vault::delete`] or [`Vault::delete_group`] removed.
+    ///
+    /// Like [`Vault::restore`], this is an ordinary edit and not a rewrite: the deletion
+    /// stays in the log and in the history, and the undo becomes the newest revision. So two
+    /// devices that both act on the same deletion merge instead of fighting, and an undo is
+    /// itself undoable by deleting again.
+    ///
+    /// A folder's contents are put back only where they still sit where the deletion left
+    /// them; anything moved in the meantime is left where the user put it.
+    pub fn undelete(&mut self, deleted: &Deleted) -> Result<()> {
+        let now = crate::now_millis();
+        match deleted {
+            Deleted::Memo(memo) => {
+                let mut memo = memo.clone();
+                memo.updated_at = now;
+                self.upsert(&memo)
+            }
+            Deleted::Group { group, lifted_groups, lifted_memos } => {
+                let mut group = group.clone();
+                group.updated_at = now;
+                self.upsert_group(&group)?;
+                for id in lifted_groups {
+                    match self.store.get_group(id)? {
+                        Some(mut child) if child.parent_id == group.parent_id => {
+                            child.parent_id = group.id.clone();
+                            child.updated_at = now;
+                            self.upsert_group(&child)?;
+                        }
+                        _ => {}
+                    }
+                }
+                for id in lifted_memos {
+                    match self.store.get(id)? {
+                        Some(mut memo) if memo.group_id == group.parent_id => {
+                            memo.group_id = group.id.clone();
+                            memo.updated_at = now;
+                            self.upsert(&memo)?;
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(())
+            }
+        }
     }
 
     /// Merges every log in `logs/` into a fresh document and rebuilds the SQLite cache from
@@ -1922,6 +2001,79 @@ mod tests {
         let back = v.store().get(&memo.id).unwrap().unwrap();
         assert_eq!(back.title, "gone");
         assert_eq!(back.created_at, memo.created_at, "the original creation time comes back");
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db).ok();
+    }
+
+    /// What a delete hands back is enough to put the memo, and its photos, straight back.
+    #[test]
+    fn undelete_restores_the_memo_it_removed() {
+        let dir = temp_dir();
+        let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
+
+        let mut memo = Memo::new("shopping", "milk");
+        memo.color = "pink".into();
+        let mut v = Vault::create(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+        v.upsert(&memo).unwrap();
+        let photo = v.attach(&memo.id, b"pretend-jpeg", "photo.jpg", "image/jpeg", 4, 3).unwrap();
+
+        let removed = v.delete(&memo.id).unwrap().expect("the memo was there");
+        assert!(v.store().get(&memo.id).unwrap().is_none());
+
+        v.undelete(&removed).unwrap();
+        let back = v.store().get(&memo.id).unwrap().unwrap();
+        assert_eq!(back.title, "shopping");
+        assert_eq!(back.body, "milk");
+        assert_eq!(back.color, "pink", "everything about it comes back, not just the text");
+        assert_eq!(back.created_at, memo.created_at);
+        // Attachments point at the memo, not the other way round, so they were never touched.
+        let photos = v.store().attachments_of(&memo.id).unwrap();
+        assert_eq!(photos.len(), 1);
+        assert_eq!(photos[0].id, photo.id);
+
+        // Deleting something that is not there is not an error, and offers nothing to undo.
+        assert!(v.delete("no-such-memo").unwrap().is_none());
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db).ok();
+    }
+
+    /// Undoing a folder's deletion gathers its contents back up.
+    #[test]
+    fn undelete_puts_a_folders_contents_back_into_it() {
+        let dir = temp_dir();
+        let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
+
+        let mut v = Vault::create(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+        let folder = Group::new("work");
+        v.upsert_group(&folder).unwrap();
+        let mut inside = Memo::new("report", "");
+        inside.group_id = folder.id.clone();
+        v.upsert(&inside).unwrap();
+        let mut moved_away = Memo::new("elsewhere", "");
+        moved_away.group_id = folder.id.clone();
+        v.upsert(&moved_away).unwrap();
+
+        let removed = v.delete_group(&folder.id).unwrap().expect("the folder was there");
+        assert_eq!(v.store().get(&inside.id).unwrap().unwrap().group_id, "", "lifted out");
+
+        // One of them is deliberately put somewhere else before the undo, standing in for a
+        // user who reorganised in the meantime — an undo must not drag it back.
+        let other = Group::new("home");
+        v.upsert_group(&other).unwrap();
+        let mut moved_away = v.store().get(&moved_away.id).unwrap().unwrap();
+        moved_away.group_id = other.id.clone();
+        v.upsert(&moved_away).unwrap();
+
+        v.undelete(&removed).unwrap();
+        assert_eq!(v.store().get_group(&folder.id).unwrap().unwrap().name, "work");
+        assert_eq!(v.store().get(&inside.id).unwrap().unwrap().group_id, folder.id);
+        assert_eq!(
+            v.store().get(&moved_away.id).unwrap().unwrap().group_id,
+            other.id,
+            "a memo moved since the deletion stays where the user put it"
+        );
 
         fs::remove_dir_all(&dir).ok();
         fs::remove_file(&db).ok();
