@@ -372,7 +372,9 @@ being dropped.
 
 ### The launcher icon
 
-The same dog-eared note every other platform shows. Two files here:
+The same sticky note every other platform shows — a square sheet on the app's gold
+with one corner lifted, flat and without an outline so it survives a 16px tray. Two files
+here:
 
 - `res/drawable/ic_launcher_foreground.xml` — the adaptive icon (API 26+), on the flat gold of
   `ic_launcher_background`, plus `ic_launcher_monochrome.xml` for Android 13's themed icons.

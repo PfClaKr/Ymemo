@@ -14,6 +14,7 @@ use std::sync::Mutex;
 use anyhow::{anyhow, Result};
 use ymemo_core::{
     lan_pair, now_millis,
+    history::RevisionKind,
     pairing::{self, PairingCode},
     sync::{Syncthing, VAULT_FOLDER_ID},
     vault::Vault,
@@ -23,6 +24,21 @@ use ymemo_i18n::t;
 
 /// The open vault; one per app process.
 static VAULT: Mutex<Option<Vault>> = Mutex::new(None);
+
+/// The last thing a delete removed, for as long as the UI is offering to put it back.
+///
+/// One slot, like the desktop's: what this stands in for is a confirmation dialog, and the
+/// question a confirmation answers is only ever about the delete that just happened. It is
+/// cleared by [`vault_close`], so a locked vault leaves nothing here — the value holds a
+/// memo's text, and that must not outlive the session that could read it.
+static LAST_DELETE: Mutex<Option<ymemo_core::vault::Deleted>> = Mutex::new(None);
+
+/// Records what a delete removed, so [`memo_undelete`] can offer it back.
+fn remember_delete(removed: Option<ymemo_core::vault::Deleted>) {
+    if let Ok(mut slot) = LAST_DELETE.lock() {
+        *slot = removed;
+    }
+}
 
 fn with_vault<T>(f: impl FnOnce(&mut Vault) -> Result<T>) -> Result<T> {
     let mut guard = VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))?;
@@ -208,14 +224,24 @@ pub struct FfiStrings {
     pub cancel: String,
     pub delete: String,
     pub delete_group_hint: String,
+    pub deleted: String,
+    pub undo: String,
     pub empty_folder: String,
     pub folder_name: String,
     pub move_to: String,
+    pub history: String,
+    pub history_empty: String,
+    pub history_pick: String,
+    pub history_restore: String,
+    pub history_restored: String,
     pub new_group: String,
     pub ok: String,
     pub rename: String,
     pub root_folder: String,
     pub list_title: String,
+    pub search: String,
+    pub search_none: String,
+    pub empty_hint: String,
     pub master_password: String,
     pub my_code: String,
     pub new_memo: String,
@@ -230,6 +256,7 @@ pub struct FfiStrings {
     pub scan_hint: String,
     pub scan_qr: String,
     pub sync_devices: String,
+    pub connected_devices: String,
     pub sync_now: String,
     pub sync_starting: String,
     pub sync_unavailable: String,
@@ -242,6 +269,8 @@ pub struct FfiStrings {
     pub color: String,
     pub change_password: String,
     pub confirm_password: String,
+    pub repeat_password: String,
+    pub repeat_mismatch: String,
     pub create_vault: String,
     pub current_password: String,
     pub forgot_password: String,
@@ -352,14 +381,24 @@ pub fn mobile_strings() -> FfiStrings {
         cancel: t!("mobile.cancel"),
         delete: t!("mobile.delete"),
         delete_group_hint: t!("mobile.delete_group_hint"),
+        deleted: t!("mobile.deleted"),
+        undo: t!("mobile.undo"),
         empty_folder: t!("mobile.empty_folder"),
         folder_name: t!("mobile.folder_name"),
         move_to: t!("mobile.move_to"),
+        history: t!("mobile.history"),
+        history_empty: t!("mobile.history_empty"),
+        history_pick: t!("mobile.history_pick"),
+        history_restore: t!("mobile.history_restore"),
+        history_restored: t!("mobile.history_restored"),
         new_group: t!("mobile.new_group"),
         ok: t!("mobile.ok"),
         rename: t!("mobile.rename"),
         root_folder: t!("mobile.root_folder"),
         list_title: t!("mobile.list_title"),
+        search: t!("mobile.search"),
+        search_none: t!("mobile.search_none"),
+        empty_hint: t!("mobile.empty_hint"),
         master_password: t!("mobile.master_password"),
         my_code: t!("mobile.my_code"),
         new_memo: t!("mobile.new_memo"),
@@ -374,6 +413,7 @@ pub fn mobile_strings() -> FfiStrings {
         scan_hint: t!("mobile.scan_hint"),
         scan_qr: t!("mobile.scan_qr"),
         sync_devices: t!("mobile.sync_devices"),
+        connected_devices: t!("mobile.connected_devices"),
         sync_now: t!("mobile.sync_now"),
         sync_starting: t!("mobile.sync_starting"),
         sync_unavailable: t!("mobile.sync_unavailable"),
@@ -384,6 +424,8 @@ pub fn mobile_strings() -> FfiStrings {
         color: t!("mobile.color"),
         change_password: t!("mobile.change_password"),
         confirm_password: t!("mobile.confirm_password"),
+        repeat_password: t!("mobile.repeat_password"),
+        repeat_mismatch: t!("mobile.repeat_mismatch"),
         create_vault: t!("mobile.create_vault"),
         current_password: t!("mobile.current_password"),
         forgot_password: t!("mobile.forgot_password"),
@@ -453,6 +495,10 @@ pub fn vault_set_name(name: String) -> Result<String> {
 /// Closes the vault (log out).
 pub fn vault_close() -> Result<()> {
     *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = None;
+    // A pending undo holds a memo's title and body in memory. A closed vault must leave no
+    // memo text behind it, and an undo offered across a lock would put a memo back into a
+    // vault the user has just shut.
+    remember_delete(None);
     Ok(())
 }
 
@@ -559,9 +605,125 @@ pub fn memo_upsert(id: Option<String>, title: String, body: String) -> Result<St
     })
 }
 
-/// Deletes a memo.
+/// Deletes a memo, keeping it for one [`memo_undelete`].
 pub fn memo_delete(id: String) -> Result<()> {
-    with_vault(|v| v.delete(&id))
+    let removed = with_vault(|v| v.delete(&id))?;
+    remember_delete(removed);
+    Ok(())
+}
+
+/// Puts back whatever the last delete removed. Does nothing when there is nothing to undo.
+///
+/// Not a rollback: the deletion stays in the log and in the memo's history, and this is an
+/// ordinary edit on top of it — so two devices acting on the same deletion merge instead of
+/// fighting over it. See `Vault::undelete`.
+pub fn memo_undelete() -> Result<bool> {
+    let Some(deleted) = LAST_DELETE.lock().ok().and_then(|mut slot| slot.take()) else {
+        return Ok(false);
+    };
+    with_vault(|v| v.undelete(&deleted))?;
+    Ok(true)
+}
+
+/// Whether a delete is still waiting to be taken back.
+pub fn memo_can_undelete() -> bool {
+    LAST_DELETE.lock().map(|slot| slot.is_some()).unwrap_or(false)
+}
+
+/// One past version of a memo, as the phone's history screen shows it.
+///
+/// The labels are built here rather than in Dart so that both platforms say the same words
+/// about the same thing — they are the desktop's own `ui.history_*` strings, which is the
+/// point: the two UIs drifting apart on wording is what makes them read as two products.
+pub struct FfiRevision {
+    /// Position in the core's own ordering, oldest first. What [`memo_restore`] takes.
+    pub index: i32,
+    /// Unix epoch millis; the phone formats it.
+    pub at: i64,
+    /// "This device" or "another device", already in the user's language.
+    pub device: String,
+    /// Created / edited / deleted.
+    pub kind: String,
+    /// The fields this revision changed, comma-separated and translated.
+    pub changed: String,
+    pub title: String,
+    pub body: String,
+    pub color: String,
+    /// False for the revision that recorded a deletion; there is nothing in it to go back to.
+    pub restorable: bool,
+}
+
+/// Every past version of one memo, **newest first** — the one you want back is nearly always
+/// a recent one.
+///
+/// Read from the logs rather than the cache, so it is unaffected by the merge timer; see
+/// `ymemo_core::history`.
+pub fn memo_history(id: String) -> Result<Vec<FfiRevision>> {
+    with_vault(|v| {
+        let this_device = v.device_id().to_string();
+        let revisions = v.history(ymemo_core::history::Entity::Memo, &id)?;
+        Ok(revisions
+            .iter()
+            .enumerate()
+            .rev()
+            .map(|(index, r)| FfiRevision {
+                index: index as i32,
+                at: r.at,
+                device: if r.device == this_device {
+                    t!("ui.history_this_device")
+                } else {
+                    t!("ui.history_other_device")
+                },
+                kind: match r.kind {
+                    RevisionKind::Created => t!("ui.history_created"),
+                    RevisionKind::Edited => t!("ui.history_edited"),
+                    RevisionKind::Deleted => t!("ui.history_deleted"),
+                },
+                // `created_at` is left out: it only moves when a deleted memo comes back, and
+                // listing it beside the fields the user actually changed is noise.
+                changed: r
+                    .changed
+                    .iter()
+                    .filter(|f| *f != "created_at")
+                    .map(|f| field_label(f))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                title: r.field("title").to_string(),
+                body: r.field("body").to_string(),
+                color: r.field("color").to_string(),
+                restorable: r.kind != RevisionKind::Deleted,
+            })
+            .collect())
+    })
+}
+
+/// Writes one past version back as a new edit; `index` comes from [`FfiRevision::index`].
+///
+/// The history is re-read rather than trusted from the caller: the list the phone is holding
+/// may be a merge old, and the index is into the core's ordering.
+pub fn memo_restore(id: String, index: i32) -> Result<()> {
+    with_vault(|v| {
+        let revisions = v.history(ymemo_core::history::Entity::Memo, &id)?;
+        let revision = usize::try_from(index)
+            .ok()
+            .and_then(|i| revisions.get(i))
+            .ok_or_else(|| anyhow!(t!("msg.history_gone")))?
+            .clone();
+        v.restore(ymemo_core::history::Entity::Memo, &id, &revision)
+    })
+}
+
+/// A document field name in the user's language; the desktop's own labels.
+fn field_label(field: &str) -> String {
+    match field {
+        "title" => t!("ui.history_field_title"),
+        "body" => t!("ui.history_field_body"),
+        "name" => t!("ui.history_field_name"),
+        "color" => t!("ui.history_field_color"),
+        "opacity" => t!("ui.history_field_opacity"),
+        "group_id" | "parent_id" => t!("ui.history_field_folder"),
+        other => other.to_string(),
+    }
 }
 
 /// Sets the palette key.
@@ -787,7 +949,9 @@ pub fn group_move(id: String, parent_id: String) -> Result<()> {
 
 /// Deletes a group; its memos and subgroups move up instead of being deleted.
 pub fn group_delete(id: String) -> Result<()> {
-    with_vault(|v| v.delete_group(&id))
+    let removed = with_vault(|v| v.delete_group(&id))?;
+    remember_delete(removed);
+    Ok(())
 }
 
 /// Merges the other devices' logs into the local state; call it after the transport has

@@ -43,6 +43,13 @@ pub(crate) struct Ctx {
     /// Collapsed group ids. Device-local view state, never synced; absent means expanded,
     /// so a new device shows its contents right away.
     pub(crate) collapsed: Rc<RefCell<HashSet<String>>>,
+    /// What is typed in the list's find box; empty shows the whole tree.
+    ///
+    /// It lives here rather than being read off the window because every refresh of the model
+    /// has to honour it — a memo saved, or a merge arriving from another device, would
+    /// otherwise quietly put the unfiltered list back while the user was still reading the
+    /// matches.
+    pub(crate) query: Rc<RefCell<String>>,
     /// App data directory, holding settings.json and session.json.
     pub(crate) dir: Rc<PathBuf>,
     /// Device-local preferences (language, lock policy, new-memo defaults, ...).

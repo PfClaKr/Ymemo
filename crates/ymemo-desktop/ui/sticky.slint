@@ -217,8 +217,25 @@ component BarButton inherits TouchArea {
     in property <string> color-key;
     in property <length> icon-size: 14px;
     in property <float> rest-opacity: 0.6;
+    // What this button does. Shown in the title bar while the pointer is on it — see the
+    // note on the title Text — and read out by a screen reader.
+    in property <string> label;
+    // The window's "what is under the pointer" slot, bound in by every button. Written from
+    // here rather than read from the buttons, because half of them live inside an `if` and
+    // Slint will not let the title read an id that a condition might not have created.
+    in-out property <string> tip;
+    changed has-hover => {
+        if (self.has-hover) { self.tip = self.label; }
+        // Only clear a tip that is still ours: moving from one button straight onto the next
+        // can deliver this leave after the neighbour's enter.
+        else if (self.tip == self.label) { self.tip = ""; }
+    }
 
     width: 20px;
+    mouse-cursor: pointer;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
     Glyph {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
@@ -377,6 +394,10 @@ export component StickyWindow inherits Window {
     in property <string> created-at;
     private property <bool> show-palette: false;
     changed show-palette => { root.palette-toggled(self.show-palette); }
+    // The bar button under the pointer, by name; empty when there is none. The title bar
+    // shows it in place of the memo's title.
+    private property <string> tip: "";
+    private property <bool> tip-showing: root.tip != "";
     // Whether this press became a drag, and whether we are tracking it ourselves.
     private property <bool> drag-started: false;
     private property <bool> drag-manual: false;
@@ -443,11 +464,19 @@ export component StickyWindow inherits Window {
                     padding-left: 8px;
                     padding-right: 4px;
                     spacing: 0px;
+                    // The title doubles as the label for whichever bar button the pointer is
+                    // on — the same trick the memo list plays with its heading, and for the
+                    // same reason: six wordless pictograms on a bar this small are a puzzle,
+                    // and a tooltip drawn inside the title row would be painted over by every
+                    // later sibling in the window's layout.
                     Text {
-                        text: root.memo-title == "" ? Strings.ui_sticky_default_title : root.memo-title;
+                        text: root.tip != "" ? root.tip
+                            : root.memo-title == "" ? Strings.ui_sticky_default_title
+                            : root.memo-title;
                         font-size: 11px;
-                        font-weight: 700;
+                        font-weight: root.tip-showing ? 400 : 700;
                         color: Palette.ink(root.sticky-color);
+                        opacity: root.tip-showing ? 0.75 : 1;
                         vertical-alignment: center;
                         overflow: elide;
                         horizontal-stretch: 1;
@@ -458,6 +487,13 @@ export component StickyWindow inherits Window {
                     // unfold (double-click), the pin and the close stay.
                     if !root.collapsed: photo-ta := TouchArea {
                         width: 20px;
+                        mouse-cursor: pointer;
+                        accessible-role: button;
+                        accessible-label: Strings.ui_sticky_pick_photo;
+                        changed has-hover => {
+                            if (self.has-hover) { root.tip = Strings.ui_sticky_pick_photo; }
+                            else if (root.tip == Strings.ui_sticky_pick_photo) { root.tip = ""; }
+                        }
                         // Drawn, not 📎: an emoji needs an emoji font, and where there is
                         // none the glyph falls back to the default text colour and is all
                         // but invisible on these pastel bars — the same reason the colour
@@ -490,13 +526,22 @@ export component StickyWindow inherits Window {
                         }
                         clicked => { root.add-photo(); }
                     }
-                    if !root.collapsed: BarButton {
+                    if !root.collapsed: b-history := BarButton {
+                        tip <=> root.tip;
                         icon: "history";
                         color-key: root.sticky-color;
+                        label: Strings.ui_sticky_history;
                         clicked => { root.show-history(); }
                     }
                     if !root.collapsed: palette-ta := TouchArea {
                         width: 20px;
+                        mouse-cursor: pointer;
+                        accessible-role: button;
+                        accessible-label: Strings.ui_sticky_color;
+                        changed has-hover => {
+                            if (self.has-hover) { root.tip = Strings.ui_sticky_color; }
+                            else if (root.tip == Strings.ui_sticky_color) { root.tip = ""; }
+                        }
                         // A chip of the memo's own colour, not an emoji: an emoji that falls
                         // back to a monochrome glyph is drawn in the default text colour,
                         // which on these pastel bars is all but invisible. A filled circle
@@ -513,9 +558,11 @@ export component StickyWindow inherits Window {
                         }
                         clicked => { root.show-palette = !root.show-palette; }
                     }
-                    if !root.collapsed: BarButton {
+                    if !root.collapsed: b-new := BarButton {
+                        tip <=> root.tip;
                         icon: "plus";
                         color-key: root.sticky-color;
+                        label: Strings.ui_sticky_new_memo;
                         rest-opacity: 0.55;
                         clicked => { root.new-memo(); }
                     }
@@ -524,9 +571,11 @@ export component StickyWindow inherits Window {
                     // that is being left in view, and this opens nothing that a note which
                     // is not on screen could be missing. The struck-through pin is the
                     // state, not the action — it shows what the window is doing now.
-                    BarButton {
+                    b-pin := BarButton {
+                        tip <=> root.tip;
                         icon: root.pinned ? "pin" : "pin-off";
                         color-key: root.sticky-color;
+                        label: root.pinned ? Strings.ui_sticky_unpin : Strings.ui_sticky_pin;
                         icon-size: 13px;
                         rest-opacity: root.pinned ? 0.85 : 0.45;
                         clicked => { root.toggle-pin(); }
@@ -538,6 +587,13 @@ export component StickyWindow inherits Window {
                     // red chip under the pointer, where the warning is worth something.
                     close-ta := TouchArea {
                         width: 22px;
+                        mouse-cursor: pointer;
+                        accessible-role: button;
+                        accessible-label: Strings.ui_sticky_close;
+                        changed has-hover => {
+                            if (self.has-hover) { root.tip = Strings.ui_sticky_close; }
+                            else if (root.tip == Strings.ui_sticky_close) { root.tip = ""; }
+                        }
                         Rectangle {
                             width: 17px;
                             height: 17px;

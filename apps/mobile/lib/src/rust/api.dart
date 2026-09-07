@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `lan_lock`, `rejected_lock`, `sanitize`, `share_with_peer`, `sync_lock`, `with_sync`, `with_vault`
+// These functions are ignored because they are not marked as `pub`: `field_label`, `lan_lock`, `rejected_lock`, `remember_delete`, `sanitize`, `share_with_peer`, `sync_lock`, `with_sync`, `with_vault`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `fmt`, `from`, `from`, `from`
 
 /// Sets the language of core error messages (`"ko"`, `"en"`, or a locale like `"ko-KR"`).
@@ -102,9 +102,35 @@ Future<String> memoUpsert(
         {String? id, required String title, required String body}) =>
     RustLib.instance.api.crateApiMemoUpsert(id: id, title: title, body: body);
 
-/// Deletes a memo.
+/// Deletes a memo, keeping it for one [`memo_undelete`].
 Future<void> memoDelete({required String id}) =>
     RustLib.instance.api.crateApiMemoDelete(id: id);
+
+/// Puts back whatever the last delete removed. Does nothing when there is nothing to undo.
+///
+/// Not a rollback: the deletion stays in the log and in the memo's history, and this is an
+/// ordinary edit on top of it — so two devices acting on the same deletion merge instead of
+/// fighting over it. See `Vault::undelete`.
+Future<bool> memoUndelete() => RustLib.instance.api.crateApiMemoUndelete();
+
+/// Whether a delete is still waiting to be taken back.
+Future<bool> memoCanUndelete() =>
+    RustLib.instance.api.crateApiMemoCanUndelete();
+
+/// Every past version of one memo, **newest first** — the one you want back is nearly always
+/// a recent one.
+///
+/// Read from the logs rather than the cache, so it is unaffected by the merge timer; see
+/// `ymemo_core::history`.
+Future<List<FfiRevision>> memoHistory({required String id}) =>
+    RustLib.instance.api.crateApiMemoHistory(id: id);
+
+/// Writes one past version back as a new edit; `index` comes from [`FfiRevision::index`].
+///
+/// The history is re-read rather than trusted from the caller: the list the phone is holding
+/// may be a merge old, and the index is into the core's ordering.
+Future<void> memoRestore({required String id, required int index}) =>
+    RustLib.instance.api.crateApiMemoRestore(id: id, index: index);
 
 /// Sets the palette key.
 Future<void> memoSetColor({required String id, required String color}) =>
@@ -635,6 +661,73 @@ class FfiRelease {
           file == other.file;
 }
 
+/// One past version of a memo, as the phone's history screen shows it.
+///
+/// The labels are built here rather than in Dart so that both platforms say the same words
+/// about the same thing — they are the desktop's own `ui.history_*` strings, which is the
+/// point: the two UIs drifting apart on wording is what makes them read as two products.
+class FfiRevision {
+  /// Position in the core's own ordering, oldest first. What [`memo_restore`] takes.
+  final int index;
+
+  /// Unix epoch millis; the phone formats it.
+  final PlatformInt64 at;
+
+  /// "This device" or "another device", already in the user's language.
+  final String device;
+
+  /// Created / edited / deleted.
+  final String kind;
+
+  /// The fields this revision changed, comma-separated and translated.
+  final String changed;
+  final String title;
+  final String body;
+  final String color;
+
+  /// False for the revision that recorded a deletion; there is nothing in it to go back to.
+  final bool restorable;
+
+  const FfiRevision({
+    required this.index,
+    required this.at,
+    required this.device,
+    required this.kind,
+    required this.changed,
+    required this.title,
+    required this.body,
+    required this.color,
+    required this.restorable,
+  });
+
+  @override
+  int get hashCode =>
+      index.hashCode ^
+      at.hashCode ^
+      device.hashCode ^
+      kind.hashCode ^
+      changed.hashCode ^
+      title.hashCode ^
+      body.hashCode ^
+      color.hashCode ^
+      restorable.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FfiRevision &&
+          runtimeType == other.runtimeType &&
+          index == other.index &&
+          at == other.at &&
+          device == other.device &&
+          kind == other.kind &&
+          changed == other.changed &&
+          title == other.title &&
+          body == other.body &&
+          color == other.color &&
+          restorable == other.restorable;
+}
+
 /// Preferences as Dart sees them. Every field has a default, so a file written by an older
 /// version still loads.
 class FfiSettings {
@@ -839,14 +932,24 @@ class FfiStrings {
   final String cancel;
   final String delete;
   final String deleteGroupHint;
+  final String deleted;
+  final String undo;
   final String emptyFolder;
   final String folderName;
   final String moveTo;
+  final String history;
+  final String historyEmpty;
+  final String historyPick;
+  final String historyRestore;
+  final String historyRestored;
   final String newGroup;
   final String ok;
   final String rename;
   final String rootFolder;
   final String listTitle;
+  final String search;
+  final String searchNone;
+  final String emptyHint;
   final String masterPassword;
   final String myCode;
   final String newMemo;
@@ -861,6 +964,7 @@ class FfiStrings {
   final String scanHint;
   final String scanQr;
   final String syncDevices;
+  final String connectedDevices;
   final String syncNow;
   final String syncStarting;
   final String syncUnavailable;
@@ -870,6 +974,8 @@ class FfiStrings {
   final String color;
   final String changePassword;
   final String confirmPassword;
+  final String repeatPassword;
+  final String repeatMismatch;
   final String createVault;
   final String currentPassword;
   final String forgotPassword;
@@ -975,14 +1081,24 @@ class FfiStrings {
     required this.cancel,
     required this.delete,
     required this.deleteGroupHint,
+    required this.deleted,
+    required this.undo,
     required this.emptyFolder,
     required this.folderName,
     required this.moveTo,
+    required this.history,
+    required this.historyEmpty,
+    required this.historyPick,
+    required this.historyRestore,
+    required this.historyRestored,
     required this.newGroup,
     required this.ok,
     required this.rename,
     required this.rootFolder,
     required this.listTitle,
+    required this.search,
+    required this.searchNone,
+    required this.emptyHint,
     required this.masterPassword,
     required this.myCode,
     required this.newMemo,
@@ -997,6 +1113,7 @@ class FfiStrings {
     required this.scanHint,
     required this.scanQr,
     required this.syncDevices,
+    required this.connectedDevices,
     required this.syncNow,
     required this.syncStarting,
     required this.syncUnavailable,
@@ -1006,6 +1123,8 @@ class FfiStrings {
     required this.color,
     required this.changePassword,
     required this.confirmPassword,
+    required this.repeatPassword,
+    required this.repeatMismatch,
     required this.createVault,
     required this.currentPassword,
     required this.forgotPassword,
@@ -1113,14 +1232,24 @@ class FfiStrings {
       cancel.hashCode ^
       delete.hashCode ^
       deleteGroupHint.hashCode ^
+      deleted.hashCode ^
+      undo.hashCode ^
       emptyFolder.hashCode ^
       folderName.hashCode ^
       moveTo.hashCode ^
+      history.hashCode ^
+      historyEmpty.hashCode ^
+      historyPick.hashCode ^
+      historyRestore.hashCode ^
+      historyRestored.hashCode ^
       newGroup.hashCode ^
       ok.hashCode ^
       rename.hashCode ^
       rootFolder.hashCode ^
       listTitle.hashCode ^
+      search.hashCode ^
+      searchNone.hashCode ^
+      emptyHint.hashCode ^
       masterPassword.hashCode ^
       myCode.hashCode ^
       newMemo.hashCode ^
@@ -1135,6 +1264,7 @@ class FfiStrings {
       scanHint.hashCode ^
       scanQr.hashCode ^
       syncDevices.hashCode ^
+      connectedDevices.hashCode ^
       syncNow.hashCode ^
       syncStarting.hashCode ^
       syncUnavailable.hashCode ^
@@ -1144,6 +1274,8 @@ class FfiStrings {
       color.hashCode ^
       changePassword.hashCode ^
       confirmPassword.hashCode ^
+      repeatPassword.hashCode ^
+      repeatMismatch.hashCode ^
       createVault.hashCode ^
       currentPassword.hashCode ^
       forgotPassword.hashCode ^
@@ -1253,14 +1385,24 @@ class FfiStrings {
           cancel == other.cancel &&
           delete == other.delete &&
           deleteGroupHint == other.deleteGroupHint &&
+          deleted == other.deleted &&
+          undo == other.undo &&
           emptyFolder == other.emptyFolder &&
           folderName == other.folderName &&
           moveTo == other.moveTo &&
+          history == other.history &&
+          historyEmpty == other.historyEmpty &&
+          historyPick == other.historyPick &&
+          historyRestore == other.historyRestore &&
+          historyRestored == other.historyRestored &&
           newGroup == other.newGroup &&
           ok == other.ok &&
           rename == other.rename &&
           rootFolder == other.rootFolder &&
           listTitle == other.listTitle &&
+          search == other.search &&
+          searchNone == other.searchNone &&
+          emptyHint == other.emptyHint &&
           masterPassword == other.masterPassword &&
           myCode == other.myCode &&
           newMemo == other.newMemo &&
@@ -1275,6 +1417,7 @@ class FfiStrings {
           scanHint == other.scanHint &&
           scanQr == other.scanQr &&
           syncDevices == other.syncDevices &&
+          connectedDevices == other.connectedDevices &&
           syncNow == other.syncNow &&
           syncStarting == other.syncStarting &&
           syncUnavailable == other.syncUnavailable &&
@@ -1284,6 +1427,8 @@ class FfiStrings {
           color == other.color &&
           changePassword == other.changePassword &&
           confirmPassword == other.confirmPassword &&
+          repeatPassword == other.repeatPassword &&
+          repeatMismatch == other.repeatMismatch &&
           createVault == other.createVault &&
           currentPassword == other.currentPassword &&
           forgotPassword == other.forgotPassword &&

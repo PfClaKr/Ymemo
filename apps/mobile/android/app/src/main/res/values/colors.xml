@@ -2,7 +2,7 @@
 <resources>
     <!-- The launcher icon's background layer. The app's Material seed color, so the icon,
          the theme and the sticky palette are all the same gold. -->
-    <color name="ic_launcher_background">#E6D24A</color>
+    <color name="ic_launcher_background">#E2C22A</color>
 
     <!-- Widget chrome. A home screen is not the app's screen: these follow the *system's*
          light/dark setting (values-night/) rather than anything the app can choose, because

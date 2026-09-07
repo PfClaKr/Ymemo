@@ -50,6 +50,10 @@ export component LockWindow inherits Window {
     callback reset-vault();
     // The user says the recovery code is written down; Rust opens the vault.
     callback recovery-ack();
+    // Whether the recovery code has been put on the clipboard, so the button can say so.
+    // Reset with the code itself: a new one is a new thing to copy.
+    private property <bool> code-copied: false;
+    changed new-recovery-code => { self.code-copied = false; }
     // Fires as the pairing panel opens and closes; Rust grows the window to fit it and
     // shrinks it back.
     callback sync-toggled(bool);
@@ -141,6 +145,11 @@ export component LockWindow inherits Window {
                         placeholder-text: Strings.ui_lock_password_placeholder;
                         input-type: InputType.password;
                         text <=> root.password-text;
+                        // The only thing to do on this screen is type the password, and this
+                        // `if` creates the field, so nothing else is competing for the focus.
+                        // Without it the window opened with the caret nowhere and typing
+                        // straight away went into the void.
+                        init => { self.focus(); }
                         accepted => { root.unlock(self.text); }
                     }
                     Button {
@@ -261,17 +270,39 @@ export component LockWindow inherits Window {
                     color: #b8b2a2;
                     wrap: word-wrap;
                 }
+                npw := LineEdit {
+                    placeholder-text: Strings.ui_lock_new_password_placeholder;
+                    input-type: InputType.password;
+                    init => { self.focus(); }
+                    accepted => { npw2.focus(); }
+                }
+                // Typed twice. This is the one password in the app that is never checked
+                // against anything before it is used: a slip here encrypts every memo under a
+                // password nobody knows, and the recovery code that would rescue it is only
+                // shown on the *next* screen. Changing the password already asks twice; the
+                // screen where it matters most did not.
                 HorizontalLayout {
                     spacing: 6px;
-                    npw := LineEdit {
-                        placeholder-text: Strings.ui_lock_new_password_placeholder;
+                    npw2 := LineEdit {
+                        placeholder-text: Strings.ui_lock_confirm_password;
                         input-type: InputType.password;
-                        accepted => { root.create-vault(self.text); }
+                        accepted => {
+                            if (npw.text != "" && npw.text == self.text) {
+                                root.create-vault(npw.text);
+                            }
+                        }
                     }
                     Button {
                         text: Strings.ui_lock_create;
+                        enabled: npw.text != "" && npw.text == npw2.text;
                         clicked => { root.create-vault(npw.text); }
                     }
+                }
+                if npw2.text != "" && npw.text != npw2.text: Text {
+                    text: Strings.ui_lock_password_mismatch;
+                    font-size: 11px;
+                    color: #e79a9a;
+                    wrap: word-wrap;
                 }
                 Button {
                     text: Strings.ui_lock_back;
@@ -295,8 +326,9 @@ export component LockWindow inherits Window {
                     border-color: #e8d98a;
                     VerticalLayout {
                         padding: 10px;
-                        // Selectable rather than a label, so it can be copied out.
-                        TextInput {
+                        // Selectable rather than a label, so it can be copied out — by hand
+                        // or by the button below, which drives this very field.
+                        code-field := TextInput {
                             text: root.new-recovery-code;
                             read-only: true;
                             font-size: 14px;
@@ -315,10 +347,25 @@ export component LockWindow inherits Window {
                 }
                 HorizontalLayout {
                     alignment: start;
+                    spacing: 6px;
                     Button {
                         text: Strings.ui_lock_code_saved;
                         primary: true;
                         clicked => { root.recovery-ack(); }
+                    }
+                    // The field above can be selected, but nothing says so, and this is a
+                    // 39-character code shown exactly once. The phone has had this button
+                    // since it shipped; the desktop was leaving people to transcribe it.
+                    // Copying goes through the field's own selection rather than a trip into
+                    // Rust: it is the same `copy()` the sticky's context menu uses, and it
+                    // costs no clipboard dependency.
+                    Button {
+                        text: root.code-copied ? Strings.ui_lock_code_copied : Strings.ui_lock_code_copy;
+                        clicked => {
+                            code-field.select-all();
+                            code-field.copy();
+                            root.code-copied = true;
+                        }
                     }
                 }
             }

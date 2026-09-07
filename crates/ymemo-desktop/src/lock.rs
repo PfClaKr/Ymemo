@@ -149,7 +149,7 @@ pub(crate) fn apply_opened_vault(
     list_weak: &slint::Weak<ListWindow>,
     unlocked: &Rc<Cell<bool>>,
 ) {
-    refresh_list(&v, &ctx.model, &ctx.collapsed.borrow());
+    refresh_list(&v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
     let name = v.name();
     *ctx.vault.borrow_mut() = Some(v);
     unlocked.set(true);
@@ -157,6 +157,14 @@ pub(crate) fn apply_opened_vault(
     if let Some(list) = list_weak.upgrade() {
         // The name comes out of the vault, so it is only knowable once one is open.
         list.set_vault_name(SharedString::from(name));
+        let saved = ctx.settings.borrow().list_window;
         present(&list);
+        match saved {
+            Some(geometry) => crate::window::restore_geometry(&list, geometry),
+            // First run: a Window whose root is a layout takes that layout's natural size and
+            // ignores `preferred-height`, so without this the list opened at its own minimum —
+            // six rows tall on any screen — and stayed there.
+            None => list.window().set_size(slint::LogicalSize::new(340.0, 460.0)),
+        }
     }
 }

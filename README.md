@@ -97,11 +97,24 @@ Nestable, drag and drop, with colours of their own. On the desktop they are a tr
 phone you go into one at a time, which is what a small screen has room for. Deleting a folder
 keeps what was in it and lifts it up a level.
 
+### Finding one again
+
+A find box above the list, on both. It looks through every folder at once — the folder a memo
+is in is exactly what you have forgotten — and through what is written in a note, not only its
+first line.
+
+### Deleting, and changing your mind
+
+Deleting takes a memo out of the list straight away, and offers it back: a bar on the desktop,
+a snackbar on the phone. Nothing here asks "are you sure" for the many deletions that were
+meant; the one that was not is a single click for the next few seconds.
+
 ### Every past version
 
 Every edit to a note or a folder is kept: when it changed, which device changed it, and what it
 said at the time. Any of them can be put back — and putting one back is itself just another
-edit, so nothing you stepped over is lost either.
+edit, so nothing you stepped over is lost either. On the phone it is behind a long press on
+the memo.
 
 ![Version history](docs/screenshots/history.png)
 
@@ -110,7 +123,7 @@ app reads it back out of them.
 
 ### On your phone
 
-The same memos, the same folders, the same photos.
+The same memos, the same folders, the same photos, the same history.
 
 <img src="docs/screenshots/mobile.png" alt="Ymemo on Android" width="620">
 

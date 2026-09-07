@@ -14,7 +14,18 @@ use crate::ListRow;
 ///
 /// Slint has no tree view, so the tree is walked depth-first into rows carrying a `depth`.
 /// A collapsed group's contents produce no rows at all.
-pub(crate) fn refresh_list(vault: &Vault, model: &VecModel<ListRow>, collapsed: &HashSet<String>) {
+///
+/// With a `query`, the tree is set aside and the rows are the matches, flat and undented:
+/// what is being answered is "where is the memo that said X", and an answer buried three
+/// folders deep, or hidden because one of them is collapsed, is not one. Folders match on
+/// their name, memos on their title **and their body** — a memo's title is only its first
+/// line, so title-only matching would miss most of what is written.
+pub(crate) fn refresh_list(
+    vault: &Vault,
+    model: &VecModel<ListRow>,
+    collapsed: &HashSet<String>,
+    query: &str,
+) {
     let (groups, memos) = match (vault.store().list_groups(), vault.store().list()) {
         (Ok(g), Ok(m)) => (g, m),
         (Err(e), _) | (_, Err(e)) => {
@@ -22,6 +33,27 @@ pub(crate) fn refresh_list(vault: &Vault, model: &VecModel<ListRow>, collapsed: 
             return;
         }
     };
+
+    let needle = query.trim().to_lowercase();
+    if !needle.is_empty() {
+        let mut rows: Vec<ListRow> = groups
+            .iter()
+            .filter(|g| g.name.to_lowercase().contains(&needle))
+            .map(|g| group_row(g, 0, false, 0))
+            .collect();
+        rows.extend(
+            memos
+                .iter()
+                .filter(|m| {
+                    m.title.to_lowercase().contains(&needle)
+                        || m.body.to_lowercase().contains(&needle)
+                })
+                .map(|m| memo_row(m, 0)),
+        );
+        model.set_vec(rows);
+        return;
+    }
+
     // The core lifts cyclic and orphaned groups to the top level.
     let children = ymemo_core::group_children(&groups);
     let valid: HashSet<&str> = groups.iter().map(|g| g.id.as_str()).collect();
@@ -95,7 +127,7 @@ pub(crate) fn move_row(ctx: &Ctx, src: i32, dst: i32) {
         diag!("move failed: {e}");
         return;
     }
-    refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+    refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
 }
 
 /// Drops a memo into a gap between two rows, which is how a folder gets arranged by hand.
@@ -165,7 +197,7 @@ pub(crate) fn reorder_row(ctx: &Ctx, src: i32, gap: i32) {
         diag!("could not rearrange the memo: {e}");
         return;
     }
-    refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+    refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
 }
 
 /// Recursively emits the groups under `parent`: subgroups first, then that group's memos.
@@ -182,15 +214,7 @@ pub(crate) fn push_group_rows(
         let child_groups = children.get(&g.id).map_or(0, |v| v.len());
         let child_memos = memos.iter().filter(|m| m.group_id == g.id).count();
         let is_collapsed = collapsed.contains(&g.id);
-        out.push(ListRow {
-            id: SharedString::from(g.id.clone()),
-            title: SharedString::from(g.name.clone()),
-            color: SharedString::from(g.color.clone()),
-            depth,
-            is_group: true,
-            expanded: !is_collapsed,
-            child_count: (child_groups + child_memos) as i32,
-        });
+        out.push(group_row(g, depth, !is_collapsed, (child_groups + child_memos) as i32));
         if is_collapsed {
             continue;
         }
@@ -232,7 +256,7 @@ pub(crate) fn set_row_color(ctx: &Ctx, id: &str, is_group: bool, color: &str) {
         diag!("could not change the colour: {e}");
         return;
     }
-    refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+    refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
 }
 
 /// Redraws the list, and an open sticky, after a history restore put old values back.
@@ -243,7 +267,7 @@ pub(crate) fn set_row_color(ctx: &Ctx, id: &str, is_group: bool, color: &str) {
 pub(crate) fn refresh_after_restore(ctx: &Ctx, entity: ymemo_core::history::Entity, id: &str) {
     let guard = ctx.vault.borrow();
     let Some(v) = guard.as_ref() else { return };
-    refresh_list(v, &ctx.model, &ctx.collapsed.borrow());
+    refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
 
     if entity == ymemo_core::history::Entity::Memo {
         if let (Ok(Some(memo)), Some(entry)) = (v.store().get(id), ctx.stickies.borrow().get(id)) {
@@ -258,6 +282,23 @@ pub(crate) fn refresh_after_restore(ctx: &Ctx, entity: ymemo_core::history::Enti
             entry.dirty.set(false);
             entry.window.window().request_redraw();
         }
+    }
+}
+
+pub(crate) fn group_row(
+    group: &ymemo_core::Group,
+    depth: i32,
+    expanded: bool,
+    child_count: i32,
+) -> ListRow {
+    ListRow {
+        id: SharedString::from(group.id.clone()),
+        title: SharedString::from(group.name.clone()),
+        color: SharedString::from(group.color.clone()),
+        depth,
+        is_group: true,
+        expanded,
+        child_count,
     }
 }
 
@@ -303,12 +344,13 @@ mod tests {
             ids.push(m.id);
         }
         let model = Rc::new(slint::VecModel::from(Vec::<ListRow>::new()));
-        refresh_list(&vault, &model, &HashSet::new());
+        refresh_list(&vault, &model, &HashSet::new(), "");
         let ctx = Ctx {
             vault: Rc::new(RefCell::new(Some(vault))),
             model,
             stickies: Rc::new(RefCell::new(HashMap::new())),
             collapsed: Rc::new(RefCell::new(HashSet::new())),
+            query: Rc::new(RefCell::new(String::new())),
             dir: Rc::new(dir),
             settings: Rc::new(RefCell::new(crate::settings::Settings::default())),
             last_activity: Rc::new(Cell::new(Instant::now())),
@@ -362,6 +404,42 @@ mod tests {
         assert_eq!(v.store().get(&ids[0]).unwrap().unwrap().updated_at, 1_000);
     }
 
+    /// A search flattens the tree and matches the body, not only the title.
+    #[test]
+    fn searching_matches_bodies_and_ignores_collapsed_folders() {
+        let (ctx, _) = ctx_with(&["alpha", "beta"]);
+        {
+            let mut guard = ctx.vault.borrow_mut();
+            let v = guard.as_mut().unwrap();
+            let folder = group("g", "recipes", "");
+            v.upsert_group(&folder).unwrap();
+            let mut hidden = Memo::new("cake", "flour and SUGAR");
+            hidden.group_id = folder.id.clone();
+            v.upsert(&hidden).unwrap();
+
+            // The folder is shut, so without a query its memo produces no row at all.
+            let collapsed = HashSet::from([folder.id.clone()]);
+            refresh_list(v, &ctx.model, &collapsed, "");
+            assert!(!titles(&ctx).contains(&"cake".to_string()));
+
+            // Matched on a word that is only in the body, and in the other case.
+            refresh_list(v, &ctx.model, &collapsed, "sugar");
+            assert_eq!(titles(&ctx), vec!["cake".to_string()]);
+
+            // Folders match on their own name.
+            refresh_list(v, &ctx.model, &collapsed, "recip");
+            assert_eq!(titles(&ctx), vec!["recipes".to_string()]);
+
+            // Nothing matching is an empty list, not the whole tree.
+            refresh_list(v, &ctx.model, &collapsed, "zzz");
+            assert!(titles(&ctx).is_empty());
+
+            // And clearing it brings the tree back.
+            refresh_list(v, &ctx.model, &collapsed, "  ");
+            assert!(titles(&ctx).contains(&"alpha".to_string()));
+        }
+    }
+
     /// Folders are dropped *on* rows, never between them; `move_row` owns that.
     #[test]
     fn a_folder_is_not_reordered_by_a_gap() {
@@ -370,7 +448,7 @@ mod tests {
             let mut guard = ctx.vault.borrow_mut();
             let v = guard.as_mut().unwrap();
             v.upsert_group(&group("g", "folder", "")).unwrap();
-            refresh_list(v, &ctx.model, &HashSet::new());
+            refresh_list(v, &ctx.model, &HashSet::new(), "");
         }
         let before = titles(&ctx);
         let folder_row = titles(&ctx).iter().position(|t| t == "folder").unwrap() as i32;
