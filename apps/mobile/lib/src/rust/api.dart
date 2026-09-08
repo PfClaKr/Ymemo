@@ -102,6 +102,19 @@ Future<String> memoUpsert(
         {String? id, required String title, required String body}) =>
     RustLib.instance.api.crateApiMemoUpsert(id: id, title: title, body: body);
 
+/// Throws away a memo that was opened and never written on, and says whether it did.
+///
+/// The composer creates the memo before the screen appears, so backing out of it without
+/// typing used to leave a "New memo" row with nothing in it — one for every time anyone
+/// tapped the button and changed their mind. The desktop discards the same way when a blank
+/// sticky is closed; this is that rule, over the wire.
+///
+/// Deliberately **not** [`memo_delete`]: this leaves no undo behind it. A note that never
+/// existed is not something to offer back, and putting it in the undo slot would stand in
+/// front of a real delete the user might still want to take back.
+Future<bool> memoDiscardIfBlank({required String id}) =>
+    RustLib.instance.api.crateApiMemoDiscardIfBlank(id: id);
+
 /// Deletes a memo, keeping it for one [`memo_undelete`].
 Future<void> memoDelete({required String id}) =>
     RustLib.instance.api.crateApiMemoDelete(id: id);

@@ -1374,6 +1374,14 @@ class _MemoListScreenState extends State<MemoListScreen> {
         ),
       ),
     );
+    // Backing out without writing anything leaves the memo this created behind, and one
+    // "New memo" row for every time anyone tapped the button and changed their mind. The
+    // core decides — a photo counts as writing.
+    try {
+      await memoDiscardIfBlank(id: id);
+    } catch (e) {
+      debugPrint('could not discard the blank memo: $e');
+    }
     await _reload();
   }
 

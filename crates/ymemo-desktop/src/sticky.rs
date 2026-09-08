@@ -134,12 +134,16 @@ pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) -> bool {
     true
 }
 
-/// Writes out every sticky's pending edit and stops its debounce timer. Returns the ids of
-/// the open stickies, in no particular order.
+/// Writes out every sticky's pending edit, stops its debounce timer and drops the notes that
+/// were never written on. Returns the ids of the open stickies, in no particular order.
 ///
 /// Called wherever the windows are about to stop existing — locking and quitting — because
 /// the autosave is debounced and the last keystrokes are otherwise still only in the widget.
 /// Two passes, since `save_memo` borrows the sticky map itself.
+///
+/// The blank ones go the same way they go when a note is closed by hand: a sticky opened and
+/// left empty is not a note, and locking used to leave "(empty memo)" in the list for good —
+/// the very row [`discard_if_blank`] exists to prevent.
 pub(crate) fn flush_dirty(ctx: &Ctx) -> Vec<String> {
     let ids: Vec<String> = ctx.stickies.borrow().keys().cloned().collect();
     for id in &ids {
@@ -160,6 +164,11 @@ pub(crate) fn flush_dirty(ctx: &Ctx) -> Vec<String> {
         if let Some(text) = pending {
             save_memo(ctx, id, &text);
         }
+    }
+    // After the saves, never before: a note whose only writing is still in the widget would
+    // otherwise look blank and be thrown away with it.
+    for id in &ids {
+        discard_if_blank(ctx, id);
     }
     ids
 }

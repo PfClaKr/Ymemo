@@ -612,6 +612,34 @@ pub fn memo_upsert(id: Option<String>, title: String, body: String) -> Result<St
     })
 }
 
+/// Throws away a memo that was opened and never written on, and says whether it did.
+///
+/// The composer creates the memo before the screen appears, so backing out of it without
+/// typing used to leave a "New memo" row with nothing in it — one for every time anyone
+/// tapped the button and changed their mind. The desktop discards the same way when a blank
+/// sticky is closed; this is that rule, over the wire.
+///
+/// Deliberately **not** [`memo_delete`]: this leaves no undo behind it. A note that never
+/// existed is not something to offer back, and putting it in the undo slot would stand in
+/// front of a real delete the user might still want to take back.
+pub fn memo_discard_if_blank(id: String) -> Result<bool> {
+    with_vault(|v| {
+        let Some(memo) = v.store().get(&id)? else {
+            return Ok(false);
+        };
+        if !memo.title.is_empty() || !memo.body.is_empty() {
+            return Ok(false);
+        }
+        // A photo makes it a note, and a cache that cannot be read is not grounds for
+        // deleting anything.
+        if !v.store().attachments_of(&id)?.is_empty() {
+            return Ok(false);
+        }
+        v.delete(&id)?;
+        Ok(true)
+    })
+}
+
 /// Deletes a memo, keeping it for one [`memo_undelete`].
 pub fn memo_delete(id: String) -> Result<()> {
     let removed = with_vault(|v| v.delete(&id))?;
