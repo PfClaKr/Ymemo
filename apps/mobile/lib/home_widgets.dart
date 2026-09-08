@@ -116,9 +116,12 @@ Future<void> publishWidgets() async {
         for (final memo in memos.take(_memoLimit))
           {
             'id': memo.id,
-            // Same fallback the list uses, so a memo reads the same in both places.
+            // The same title fallback the list uses, so an untitled memo has a name here
+            // instead of "(untitled)". The paper below keeps the **whole** body, though,
+            // and not the list's remainder-after-the-title: a sticky widget is mostly
+            // paper, and a one-line memo would leave it blank.
             'title': rowTitle(memo, ''),
-            'preview': _preview(rowPreview(memo)),
+            'preview': _preview(memo.body),
             'color': memo.color,
             // A memo whose folder is gone belongs to the top level, which is where the app's
             // own folder screen puts it (`memos_in_group`). Anything else reads as data loss.
