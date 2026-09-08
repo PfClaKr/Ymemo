@@ -59,7 +59,13 @@ pub(crate) fn wire(ctx: &Ctx, win: &HistoryWindow, subject: &Subject) {
                 }
             }
             // The restore is now the newest revision, and the list has to show it.
+            //
+            // Nothing stays selected afterwards. `selected` is an index into a list that has
+            // just grown a row at the top, so the highlight would sit on the revision *below*
+            // the one it was pointing at — and a second press of the button would put back a
+            // version nobody chose.
             refresh(&ctx, &w, entity, &id);
+            w.set_selected(-1);
             crate::list::refresh_after_restore(&ctx, entity, &id);
         });
     }

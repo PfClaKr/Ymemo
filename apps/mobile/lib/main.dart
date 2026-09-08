@@ -1915,6 +1915,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
     try {
       await memoRestore(id: widget.memoId, index: revision.index);
       _changed = true;
+      // Nothing stays open afterwards: `_selected` is an index into a list that has just
+      // grown a row at the top, so the expanded row would be the revision below the one it
+      // was showing.
+      if (mounted) setState(() => _selected = null);
       await _load();
       if (mounted) _say(widget.strings.historyRestored);
     } catch (e) {
