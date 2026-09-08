@@ -50,6 +50,13 @@ pub(crate) struct Ctx {
     /// otherwise quietly put the unfiltered list back while the user was still reading the
     /// matches.
     pub(crate) query: Rc<RefCell<String>>,
+    /// The last delete, while the bar in the list is still offering to put it back, and the
+    /// timer that withdraws the offer.
+    ///
+    /// Shared rather than private to `main` because locking has to empty it: the slot holds
+    /// the removed memo's title and body, and a locked vault must leave no memo text behind.
+    pub(crate) undo: Rc<RefCell<Option<ymemo_core::vault::Deleted>>>,
+    pub(crate) undo_timer: Rc<slint::Timer>,
     /// App data directory, holding settings.json and session.json.
     pub(crate) dir: Rc<PathBuf>,
     /// Device-local preferences (language, lock policy, new-memo defaults, ...).

@@ -351,6 +351,8 @@ mod tests {
             stickies: Rc::new(RefCell::new(HashMap::new())),
             collapsed: Rc::new(RefCell::new(HashSet::new())),
             query: Rc::new(RefCell::new(String::new())),
+            undo: Rc::new(RefCell::new(None)),
+            undo_timer: Rc::new(slint::Timer::default()),
             syncthing: Rc::new(RefCell::new(None)),
             dir: Rc::new(dir),
             settings: Rc::new(RefCell::new(crate::settings::Settings::default())),

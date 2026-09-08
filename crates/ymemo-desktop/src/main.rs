@@ -269,6 +269,8 @@ fn main() -> Result<()> {
         stickies: Rc::new(RefCell::new(HashMap::new())),
         collapsed: Rc::new(RefCell::new(HashSet::new())),
         query: Rc::new(RefCell::new(String::new())),
+        undo: Rc::new(RefCell::new(None)),
+        undo_timer: Rc::new(slint::Timer::default()),
         syncthing: syncthing.clone(),
         dir: Rc::new(dir.clone()),
         settings: Rc::new(RefCell::new(loaded)),
@@ -343,10 +345,6 @@ fn main() -> Result<()> {
     // Whether the vault on disk was made on this device. The watcher in `pairing` uses it to
     // tell a header that arrived over sync from one this device just wrote itself.
     let created_here: Rc<Cell<bool>> = Rc::new(Cell::new(false));
-
-    // The last delete, for as long as the bar in the list is offering to put it back.
-    let undo: Rc<RefCell<Option<ymemo_core::vault::Deleted>>> = Rc::new(RefCell::new(None));
-    let undo_timer = Rc::new(slint::Timer::default());
 
     // ---- Lock window: open an existing vault, or create one. ----
     {
@@ -559,8 +557,8 @@ fn main() -> Result<()> {
     {
         let ctx = ctx.clone();
         let list_weak = list.as_weak();
-        let undo = undo.clone();
-        let undo_timer = undo_timer.clone();
+        let undo = ctx.undo.clone();
+        let undo_timer = ctx.undo_timer.clone();
         list.on_delete_row(move |id, is_group| {
             touch(&ctx);
             let removed = {
@@ -616,8 +614,8 @@ fn main() -> Result<()> {
     {
         let ctx = ctx.clone();
         let list_weak = list.as_weak();
-        let undo = undo.clone();
-        let undo_timer = undo_timer.clone();
+        let undo = ctx.undo.clone();
+        let undo_timer = ctx.undo_timer.clone();
         list.on_undo_delete(move || {
             touch(&ctx);
             let Some(deleted) = undo.borrow_mut().take() else { return };
