@@ -146,6 +146,7 @@ export component SecurityWindow inherits Window {
                 color: root.has-recovery ? #a8d0a8 : #e8d98a;
                 wrap: word-wrap;
             }
+
             HorizontalLayout {
                 alignment: start;
                 Button {
@@ -163,32 +164,37 @@ export component SecurityWindow inherits Window {
             }
         }
 
-        // The code itself, shown once. Selectable so it can be copied rather than retyped.
-        if root.recovery-code != "": Rectangle {
-            background: #3a362f;
-            border-radius: 6px;
-            border-width: 1px;
-            border-color: #e8d98a;
-            VerticalLayout {
-                padding: 12px;
-                spacing: 6px;
-                TextInput {
-                    text: root.recovery-code;
-                    read-only: true;
-                    font-size: 15px;
-                    font-family: "monospace";
-                    color: #f7e98c;
-                    wrap: word-wrap;
-                    single-line: false;
+                // The code itself, shown once. The window grows to make room for it —
+                // see `show` in security.rs; a window sized for the two sections alone
+                // left it under the fold, so the screen said a code had been issued and
+                // then did not show it.
+                if root.recovery-code != "": VerticalLayout {
+                    spacing: 6px;
+                    Rectangle {
+                        background: #3a362f;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: #e8d98a;
+                        VerticalLayout {
+                            padding: 12px;
+                            TextInput {
+                                text: root.recovery-code;
+                                read-only: true;
+                                font-size: 15px;
+                                font-family: "monospace";
+                                color: #f7e98c;
+                                wrap: word-wrap;
+                                single-line: false;
+                            }
+                        }
+                    }
+                    Text {
+                        text: Strings.ui_security_code_warning;
+                        font-size: 10px;
+                        color: #e8d98a;
+                        wrap: word-wrap;
+                    }
                 }
-                Text {
-                    text: Strings.ui_security_code_warning;
-                    font-size: 10px;
-                    color: #e8d98a;
-                    wrap: word-wrap;
-                }
-            }
-        }
 
             }
         }

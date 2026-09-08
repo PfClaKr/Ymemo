@@ -66,6 +66,7 @@ pub(crate) fn wire(ctx: &Ctx, settings_win: &SettingsWindow, win: &SecurityWindo
                 Ok(code) => {
                     w.set_recovery_code(SharedString::from(code));
                     w.set_has_recovery(true);
+                    make_room_for_code(&w);
                     set_status(&w, t!("msg.recovery_issued"), false, false);
                 }
                 Err(e) => set_status(&w, format!("{e}"), true, false),
@@ -83,6 +84,23 @@ fn reset_window(ctx: &Ctx, win: &SecurityWindow) {
     win.set_has_recovery(
         ctx.vault.borrow().as_ref().is_some_and(|v| v.has_recovery_code()),
     );
+}
+
+/// Height (logical px) the window needs once a recovery code is on screen.
+///
+/// The window is sized for the two sections; the code and the line telling the user to write
+/// it down are another panel below them, and a window that does not grow puts the one thing
+/// that can never be shown again under the fold of a scroll view nobody knew to scroll.
+const CODE_PANEL_HEIGHT: f32 = 600.0;
+
+/// Grows the window so a freshly issued code is visible without scrolling. Only ever grows:
+/// a window the user has made larger is left alone.
+fn make_room_for_code(win: &SecurityWindow) {
+    let window = win.window();
+    let size = window.size().to_logical(window.scale_factor());
+    if size.height < CODE_PANEL_HEIGHT {
+        window.set_size(slint::LogicalSize::new(size.width, CODE_PANEL_HEIGHT));
+    }
 }
 
 /// Shows one message, under the section that produced it — `on_password` picks which.
