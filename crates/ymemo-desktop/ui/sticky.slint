@@ -70,6 +70,8 @@ component PhotoItem inherits Rectangle {
     callback remove();
     // Asked to change how it sits: true for the flow, false for lying on top.
     callback set-flow(bool);
+    // Asked to be written out somewhere the user picks.
+    callback save();
     // Raised while a pointer is down on this photo, so a merge landing mid-drag does not
     // replace the model underneath and drop the drag.
     callback busy(bool);
@@ -95,7 +97,7 @@ component PhotoItem inherits Rectangle {
     private property <bool> on-grip: move-ta.mouse-x > root.width - root.grip
         && move-ta.mouse-y > root.height - root.grip;
     private property <bool> active: root.dragging || move-ta.has-hover || close-ta.has-hover
-        || mode-ta.has-hover;
+        || mode-ta.has-hover || save-ta.has-hover;
 
     private property <length> w: Math.min(Math.max(root.photo.width-px + root.dw, root.min-w),
         Math.max(root.canvas-w, root.min-w));
@@ -210,6 +212,17 @@ component PhotoItem inherits Rectangle {
         clicked => { root.remove(); }
     }
 
+    // Keep a copy of the picture outside the vault: the file dialog asks where. Beside the
+    // others and under the same rule — only reachable once the photo is already active.
+    save-ta := TouchArea {
+        x: mode-ta.x - self.width - 3px;
+        y: 3px;
+        width: 18px;
+        height: 18px;
+        enabled: root.active;
+        clicked => { root.save(); }
+    }
+
     // Move it between lying on the writing and having a band of its own. Beside the detach
     // and under the same rule: only reachable once the photo is already active.
     mode-ta := TouchArea {
@@ -239,6 +252,23 @@ component PhotoItem inherits Rectangle {
             name: "close";
             stroke: #ffffff;
             stroke-width: 1.6px;
+        }
+    }
+    if root.active: Rectangle {
+        x: save-ta.x;
+        y: save-ta.y;
+        width: save-ta.width;
+        height: save-ta.height;
+        border-radius: self.width / 2;
+        background: save-ta.has-hover ? Palette.ink(root.color-key) : #000000a8;
+        Glyph {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 12px;
+            height: 12px;
+            name: "save";
+            stroke: #ffffff;
+            stroke-width: 1.4px;
         }
     }
     // The button shows what pressing it does, not what the photo is now.
@@ -437,6 +467,8 @@ export component StickyWindow inherits Window {
     in property <[NoteBlock]> blocks: [];
     // A photo was asked to move between the two. True means into the flow.
     callback set-photo-flow(string, bool);
+    // A photo was asked to be written out to a file the user picks.
+    callback save-photo(string);
     // True while a photo is being dragged or resized. Rust reads it before pushing a merged
     // photo list in, the way `dirty` protects text the user is still typing.
     out property <bool> photo-busy: false;
@@ -891,6 +923,7 @@ export component StickyWindow inherits Window {
                                 remove => { root.remove-photo(photo.id); }
                                 busy(b) => { root.photo-busy = b; }
                                 set-flow(f) => { root.set-photo-flow(photo.id, f); }
+                                save => { root.save-photo(photo.id); }
                             }
                         }
                     }
@@ -907,6 +940,7 @@ export component StickyWindow inherits Window {
                     remove => { root.remove-photo(photo.id); }
                     busy(b) => { root.photo-busy = b; }
                     set-flow(f) => { root.set-photo-flow(photo.id, f); }
+                    save => { root.save-photo(photo.id); }
                 }
             }
         }

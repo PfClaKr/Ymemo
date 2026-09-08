@@ -3055,6 +3055,17 @@ class _NotePhotoState extends State<NotePhoto> {
             ),
           ),
         ),
+        // Keep a copy of the picture outside the vault. The system's own picker asks where;
+        // nothing is written until it is answered.
+        Positioned(
+          right: _handle * 5 / 3,
+          top: -_handle / 3,
+          child: Semantics(
+            label: widget.strings.photoSave,
+            button: true,
+            child: GestureDetector(onTap: _save, child: _chip(widget.ink, Icons.save_alt)),
+          ),
+        ),
         // Move it between the two ways of sitting. Next to the detach, and labelled with
         // what it will do rather than with what the photo is now.
         Positioned(
@@ -3094,6 +3105,28 @@ class _NotePhotoState extends State<NotePhoto> {
           ),
         ),
       ];
+
+  /// Writes the photo wherever the user says, under the name it was attached with.
+  ///
+  /// The bytes are read from the vault rather than from what is on screen: what gets saved is
+  /// the original file, not the size it happens to be drawn at.
+  Future<void> _save() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final bytes = await attachmentBytes(hash: widget.attachment.hash);
+      final ok = await host.saveAs(
+        name: widget.attachment.name.isEmpty ? 'photo.jpg' : widget.attachment.name,
+        mime: widget.attachment.mime,
+        bytes: bytes,
+      );
+      messenger.showSnackBar(SnackBar(
+        content: Text(ok ? widget.strings.photoSaved : widget.strings.photoSaveFailed),
+      ));
+    } catch (e) {
+      // A photo that has not synced to this device yet has no bytes to save.
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
 
   Widget _chip(Color background, IconData icon) => Container(
         width: _handle,

@@ -2254,9 +2254,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FfiStrings dco_decode_ffi_strings(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 152)
+    if (arr.length != 155)
       throw Exception(
-          'unexpected arr length: expect 152 but see ${arr.length}');
+          'unexpected arr length: expect 155 but see ${arr.length}');
     return FfiStrings(
       addPhoto: dco_decode_String(arr[0]),
       bodyHint: dco_decode_String(arr[1]),
@@ -2358,58 +2358,61 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       photoSize: dco_decode_String(arr[97]),
       photoUnderText: dco_decode_String(arr[98]),
       photoOverText: dco_decode_String(arr[99]),
-      save: dco_decode_String(arr[100]),
-      scanHint: dco_decode_String(arr[101]),
-      scanQr: dco_decode_String(arr[102]),
-      syncDevices: dco_decode_String(arr[103]),
-      connectedDevices: dco_decode_String(arr[104]),
-      syncNow: dco_decode_String(arr[105]),
-      syncStarting: dco_decode_String(arr[106]),
-      syncUnavailable: dco_decode_String(arr[107]),
-      titleHint: dco_decode_String(arr[108]),
-      unlock: dco_decode_String(arr[109]),
-      unpair: dco_decode_String(arr[110]),
-      color: dco_decode_String(arr[111]),
-      changePassword: dco_decode_String(arr[112]),
-      confirmPassword: dco_decode_String(arr[113]),
-      repeatPassword: dco_decode_String(arr[114]),
-      repeatMismatch: dco_decode_String(arr[115]),
-      createVault: dco_decode_String(arr[116]),
-      currentPassword: dco_decode_String(arr[117]),
-      forgotPassword: dco_decode_String(arr[118]),
-      issueRecovery: dco_decode_String(arr[119]),
-      newPassword: dco_decode_String(arr[120]),
-      newVaultHint: dco_decode_String(arr[121]),
-      noRecovery: dco_decode_String(arr[122]),
-      passwordChanged: dco_decode_String(arr[123]),
-      passwordHint: dco_decode_String(arr[124]),
-      passwordMismatch: dco_decode_String(arr[125]),
-      recoveryAbsent: dco_decode_String(arr[126]),
-      recoveryAck: dco_decode_String(arr[127]),
-      recoveryCode: dco_decode_String(arr[128]),
-      recoveryHint: dco_decode_String(arr[129]),
-      recoveryIssued: dco_decode_String(arr[130]),
-      recoveryPresent: dco_decode_String(arr[131]),
-      recoveryPrompt: dco_decode_String(arr[132]),
-      recoveryWarning: dco_decode_String(arr[133]),
-      reissueRecovery: dco_decode_String(arr[134]),
-      resetDone: dco_decode_String(arr[135]),
-      resetPassword: dco_decode_String(arr[136]),
-      resetVault: dco_decode_String(arr[137]),
-      resetVaultConfirm: dco_decode_String(arr[138]),
-      resetVaultHint: dco_decode_String(arr[139]),
-      securitySection: dco_decode_String(arr[140]),
-      allow: dco_decode_String(arr[141]),
-      deviceId: dco_decode_String(arr[142]),
-      pairCancelWait: dco_decode_String(arr[143]),
-      pairConnected: dco_decode_String(arr[144]),
-      pairRequest: dco_decode_String(arr[145]),
-      pairRequestHint: dco_decode_String(arr[146]),
-      pairVerification: dco_decode_String(arr[147]),
-      pairVerify: dco_decode_String(arr[148]),
-      pairWaiting: dco_decode_String(arr[149]),
-      pairWaitingHint: dco_decode_String(arr[150]),
-      reject: dco_decode_String(arr[151]),
+      photoSave: dco_decode_String(arr[100]),
+      photoSaved: dco_decode_String(arr[101]),
+      photoSaveFailed: dco_decode_String(arr[102]),
+      save: dco_decode_String(arr[103]),
+      scanHint: dco_decode_String(arr[104]),
+      scanQr: dco_decode_String(arr[105]),
+      syncDevices: dco_decode_String(arr[106]),
+      connectedDevices: dco_decode_String(arr[107]),
+      syncNow: dco_decode_String(arr[108]),
+      syncStarting: dco_decode_String(arr[109]),
+      syncUnavailable: dco_decode_String(arr[110]),
+      titleHint: dco_decode_String(arr[111]),
+      unlock: dco_decode_String(arr[112]),
+      unpair: dco_decode_String(arr[113]),
+      color: dco_decode_String(arr[114]),
+      changePassword: dco_decode_String(arr[115]),
+      confirmPassword: dco_decode_String(arr[116]),
+      repeatPassword: dco_decode_String(arr[117]),
+      repeatMismatch: dco_decode_String(arr[118]),
+      createVault: dco_decode_String(arr[119]),
+      currentPassword: dco_decode_String(arr[120]),
+      forgotPassword: dco_decode_String(arr[121]),
+      issueRecovery: dco_decode_String(arr[122]),
+      newPassword: dco_decode_String(arr[123]),
+      newVaultHint: dco_decode_String(arr[124]),
+      noRecovery: dco_decode_String(arr[125]),
+      passwordChanged: dco_decode_String(arr[126]),
+      passwordHint: dco_decode_String(arr[127]),
+      passwordMismatch: dco_decode_String(arr[128]),
+      recoveryAbsent: dco_decode_String(arr[129]),
+      recoveryAck: dco_decode_String(arr[130]),
+      recoveryCode: dco_decode_String(arr[131]),
+      recoveryHint: dco_decode_String(arr[132]),
+      recoveryIssued: dco_decode_String(arr[133]),
+      recoveryPresent: dco_decode_String(arr[134]),
+      recoveryPrompt: dco_decode_String(arr[135]),
+      recoveryWarning: dco_decode_String(arr[136]),
+      reissueRecovery: dco_decode_String(arr[137]),
+      resetDone: dco_decode_String(arr[138]),
+      resetPassword: dco_decode_String(arr[139]),
+      resetVault: dco_decode_String(arr[140]),
+      resetVaultConfirm: dco_decode_String(arr[141]),
+      resetVaultHint: dco_decode_String(arr[142]),
+      securitySection: dco_decode_String(arr[143]),
+      allow: dco_decode_String(arr[144]),
+      deviceId: dco_decode_String(arr[145]),
+      pairCancelWait: dco_decode_String(arr[146]),
+      pairConnected: dco_decode_String(arr[147]),
+      pairRequest: dco_decode_String(arr[148]),
+      pairRequestHint: dco_decode_String(arr[149]),
+      pairVerification: dco_decode_String(arr[150]),
+      pairVerify: dco_decode_String(arr[151]),
+      pairWaiting: dco_decode_String(arr[152]),
+      pairWaitingHint: dco_decode_String(arr[153]),
+      reject: dco_decode_String(arr[154]),
     );
   }
 
@@ -2802,6 +2805,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_photoSize = sse_decode_String(deserializer);
     var var_photoUnderText = sse_decode_String(deserializer);
     var var_photoOverText = sse_decode_String(deserializer);
+    var var_photoSave = sse_decode_String(deserializer);
+    var var_photoSaved = sse_decode_String(deserializer);
+    var var_photoSaveFailed = sse_decode_String(deserializer);
     var var_save = sse_decode_String(deserializer);
     var var_scanHint = sse_decode_String(deserializer);
     var var_scanQr = sse_decode_String(deserializer);
@@ -2955,6 +2961,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         photoSize: var_photoSize,
         photoUnderText: var_photoUnderText,
         photoOverText: var_photoOverText,
+        photoSave: var_photoSave,
+        photoSaved: var_photoSaved,
+        photoSaveFailed: var_photoSaveFailed,
         save: var_save,
         scanHint: var_scanHint,
         scanQr: var_scanQr,
@@ -3401,6 +3410,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.photoSize, serializer);
     sse_encode_String(self.photoUnderText, serializer);
     sse_encode_String(self.photoOverText, serializer);
+    sse_encode_String(self.photoSave, serializer);
+    sse_encode_String(self.photoSaved, serializer);
+    sse_encode_String(self.photoSaveFailed, serializer);
     sse_encode_String(self.save, serializer);
     sse_encode_String(self.scanHint, serializer);
     sse_encode_String(self.scanQr, serializer);

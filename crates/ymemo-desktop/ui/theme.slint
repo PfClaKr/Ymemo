@@ -141,6 +141,9 @@ export component Glyph inherits Path {
         // them with the lines stopping above it. Each button shows the state it switches to.
         : root.name == "photo-float"
             ? "M 2.4 4.2 L 13.6 4.2 M 2.4 11.8 L 13.6 11.8 M 5.0 6.0 L 11.0 6.0 L 11.0 10.0 L 5.0 10.0 Z"
+        // A page going into a tray: "keep a copy of this outside the app".
+        : root.name == "save"
+            ? "M 8 3.2 L 8 9.6 M 5.2 7.2 L 8 10 L 10.8 7.2 M 3.2 11.2 L 3.2 12.4 C 3.2 12.9 3.6 13.2 4 13.2 L 12 13.2 C 12.4 13.2 12.8 12.9 12.8 12.4 L 12.8 11.2"
         : root.name == "photo-flow"
             ? "M 2.4 3.6 L 13.6 3.6 M 2.4 6.0 L 10.0 6.0 M 4.0 8.4 L 12.0 8.4 L 12.0 13.0 L 4.0 13.0 Z"
             : "";

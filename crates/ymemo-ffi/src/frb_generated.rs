@@ -2925,6 +2925,9 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_photoSize = <String>::sse_decode(deserializer);
         let mut var_photoUnderText = <String>::sse_decode(deserializer);
         let mut var_photoOverText = <String>::sse_decode(deserializer);
+        let mut var_photoSave = <String>::sse_decode(deserializer);
+        let mut var_photoSaved = <String>::sse_decode(deserializer);
+        let mut var_photoSaveFailed = <String>::sse_decode(deserializer);
         let mut var_save = <String>::sse_decode(deserializer);
         let mut var_scanHint = <String>::sse_decode(deserializer);
         let mut var_scanQr = <String>::sse_decode(deserializer);
@@ -3078,6 +3081,9 @@ impl SseDecode for crate::api::FfiStrings {
             photo_size: var_photoSize,
             photo_under_text: var_photoUnderText,
             photo_over_text: var_photoOverText,
+            photo_save: var_photoSave,
+            photo_saved: var_photoSaved,
+            photo_save_failed: var_photoSaveFailed,
             save: var_save,
             scan_hint: var_scanHint,
             scan_qr: var_scanQr,
@@ -3672,6 +3678,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.photo_size.into_into_dart().into_dart(),
             self.photo_under_text.into_into_dart().into_dart(),
             self.photo_over_text.into_into_dart().into_dart(),
+            self.photo_save.into_into_dart().into_dart(),
+            self.photo_saved.into_into_dart().into_dart(),
+            self.photo_save_failed.into_into_dart().into_dart(),
             self.save.into_into_dart().into_dart(),
             self.scan_hint.into_into_dart().into_dart(),
             self.scan_qr.into_into_dart().into_dart(),
@@ -3962,6 +3971,9 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.photo_size, serializer);
         <String>::sse_encode(self.photo_under_text, serializer);
         <String>::sse_encode(self.photo_over_text, serializer);
+        <String>::sse_encode(self.photo_save, serializer);
+        <String>::sse_encode(self.photo_saved, serializer);
+        <String>::sse_encode(self.photo_save_failed, serializer);
         <String>::sse_encode(self.save, serializer);
         <String>::sse_encode(self.scan_hint, serializer);
         <String>::sse_encode(self.scan_qr, serializer);

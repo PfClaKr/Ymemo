@@ -428,6 +428,49 @@ fn pick_photo(title: &str) -> Option<PhotoPick> {
     Some(PhotoPick { bytes, name, mime, width, height })
 }
 
+/// Writes a photo out to a file the user picks, on a worker thread.
+///
+/// The bytes are read here, on the event loop, and only they cross to the worker: the vault
+/// is an `Rc` and cannot. The dialog itself blocks, for the same reason `spawn_photo_picker`
+/// exists — see its comment.
+///
+/// What is written is the file as it was attached, not the size it happens to be drawn at.
+fn save_photo(ctx: &Ctx, photo_id: &str, title: String, saving: Arc<AtomicBool>) {
+    if saving.swap(true, Ordering::SeqCst) {
+        return; // a dialog is already open
+    }
+    let picked = {
+        let guard = ctx.vault.borrow();
+        guard.as_ref().and_then(|v| match v.store().get_attachment(photo_id) {
+            Ok(Some(a)) => match v.attachment_bytes(&a.hash) {
+                Ok(bytes) => Some((a.name, bytes)),
+                // Not on this device yet: there is nothing to write.
+                Err(e) => {
+                    diag!("could not read the photo to save it: {e}");
+                    None
+                }
+            },
+            _ => None,
+        })
+    };
+    let Some((name, bytes)) = picked else {
+        saving.store(false, Ordering::SeqCst);
+        return;
+    };
+    std::thread::spawn(move || {
+        let chosen = rfd::FileDialog::new()
+            .set_title(&title)
+            .set_file_name(if name.is_empty() { "photo.png" } else { &name })
+            .save_file();
+        if let Some(path) = chosen {
+            if let Err(e) = std::fs::write(&path, &bytes) {
+                diag!("could not save the photo: {e}");
+            }
+        }
+        let _ = slint::invoke_from_event_loop(move || saving.store(false, Ordering::SeqCst));
+    });
+}
+
 /// (Event loop) Attaches the chosen photo to the vault and redraws the sticky.
 ///
 /// The idle auto-lock may have fired while the dialog was open; without a vault the photo is
@@ -541,6 +584,16 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
                 }
             }
             refresh_photos(&ctx, &id);
+        });
+    }
+
+    // Write a photo out to a file the user picks.
+    {
+        let ctx = ctx.clone();
+        let saving = Arc::new(AtomicBool::new(false));
+        window.on_save_photo(move |photo_id| {
+            touch(&ctx);
+            save_photo(&ctx, photo_id.as_str(), t!("ui.sticky_photo_save"), saving.clone());
         });
     }
 

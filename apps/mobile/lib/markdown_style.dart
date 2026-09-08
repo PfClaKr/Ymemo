@@ -16,6 +16,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'code_highlight.dart';
+
 /// One run of the text and how it is drawn.
 class _Run {
   _Run(this.start, this.end, this.style);
@@ -41,6 +43,10 @@ List<TextSpan> markdownSpans(
 
   var offset = 0;
   var inFence = false;
+  // The scanner for the block being typed, made when a fence names a language and thrown
+  // away when it closes. Null means the block is drawn plainly, which is what an unnamed
+  // fence has always done.
+  CodeScanner? scanner;
   final lines = _lines(text);
   for (var i = 0; i < lines.length; i++) {
     final line = lines[i];
@@ -56,13 +62,24 @@ List<TextSpan> markdownSpans(
     // A fence line toggles the block. The line itself is drawn as code, so an unclosed
     // fence looks unfinished rather than looking like ordinary writing.
     if (trimmed.startsWith('```')) {
+      // Only the opening fence names a language; the closing one is bare.
+      scanner = inFence ? null : CodeScanner(trimmed.substring(3));
       inFence = !inFence;
       runs.add(_Run(offset, end, mono.copyWith(color: marker)));
       endLine(mono);
       continue;
     }
     if (inFence) {
-      runs.add(_Run(offset, end, mono));
+      final colouring = scanner;
+      if (colouring != null && colouring.colours) {
+        var at = offset;
+        for (final run in colouring.scan(line)) {
+          runs.add(_Run(at, at + run.length, mono.copyWith(color: codeColors[run.kind])));
+          at += run.length;
+        }
+      } else {
+        runs.add(_Run(offset, end, mono));
+      }
       endLine(mono);
       continue;
     }

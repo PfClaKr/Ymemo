@@ -50,6 +50,18 @@ Future<Map<Object?, Object?>?> takeWidgetAction() =>
 /// there is no network at all, and on a platform with no host side to ask.
 Future<bool> isUnmetered() async => await _invoke<bool>('isUnmetered') ?? true;
 
+/// Hands `bytes` to the system's own "save as", under `name`. True when a file was written.
+///
+/// The picker is the whole of the permission story: the user names the place and the app
+/// writes the one file they chose. False covers every way it can not happen — cancelled, no
+/// picker on the device, a host that does not implement this — and the caller says so.
+Future<bool> saveAs({
+  required String name,
+  required String mime,
+  required Uint8List bytes,
+}) async =>
+    await _invoke<bool>('saveAs', {'name': name, 'mime': mime, 'bytes': bytes}) ?? false;
+
 /// Calls the host pushes at us, by method name.
 ///
 /// One map rather than one `setMethodCallHandler` per feature: the channel keeps a **single**

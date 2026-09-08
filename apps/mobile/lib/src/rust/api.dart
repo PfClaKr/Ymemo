@@ -1007,6 +1007,9 @@ class FfiStrings {
   /// The two ways a photo can sit on a note; each label says what pressing it does.
   final String photoUnderText;
   final String photoOverText;
+  final String photoSave;
+  final String photoSaved;
+  final String photoSaveFailed;
   final String save;
   final String scanHint;
   final String scanQr;
@@ -1161,6 +1164,9 @@ class FfiStrings {
     required this.photoSize,
     required this.photoUnderText,
     required this.photoOverText,
+    required this.photoSave,
+    required this.photoSaved,
+    required this.photoSaveFailed,
     required this.save,
     required this.scanHint,
     required this.scanQr,
@@ -1317,6 +1323,9 @@ class FfiStrings {
       photoSize.hashCode ^
       photoUnderText.hashCode ^
       photoOverText.hashCode ^
+      photoSave.hashCode ^
+      photoSaved.hashCode ^
+      photoSaveFailed.hashCode ^
       save.hashCode ^
       scanHint.hashCode ^
       scanQr.hashCode ^
@@ -1475,6 +1484,9 @@ class FfiStrings {
           photoSize == other.photoSize &&
           photoUnderText == other.photoUnderText &&
           photoOverText == other.photoOverText &&
+          photoSave == other.photoSave &&
+          photoSaved == other.photoSaved &&
+          photoSaveFailed == other.photoSaveFailed &&
           save == other.save &&
           scanHint == other.scanHint &&
           scanQr == other.scanQr &&

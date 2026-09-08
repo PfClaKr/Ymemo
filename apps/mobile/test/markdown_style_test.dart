@@ -8,6 +8,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ymemo_mobile/code_highlight.dart';
 import 'package:ymemo_mobile/markdown_style.dart';
 
 const _base = TextStyle(fontSize: 14);
@@ -79,6 +80,67 @@ void main() {
     const text = 'prose\n```\nstill code\nand this too';
     expect(styleOf(text, 'still code').fontFamily, 'monospace');
     expect(styleOf(text, 'and this too').fontFamily, 'monospace');
+  });
+
+  group('a fence that names a language is coloured', () {
+    /// The runs of one line, as (text, kind).
+    List<(String, CodeKind)> runs(String line, String lang) {
+      final scanner = CodeScanner(lang);
+      var at = 0;
+      return [
+        for (final run in scanner.scan(line))
+          (line.substring(at, at += run.length), run.kind),
+      ];
+    }
+
+    test('every character survives, whatever the language', () {
+      for (final (line, lang) in <(String, String)>[
+        ('fn main() { let x = 1; }', 'rust'),
+        ('// just a comment', 'rust'),
+        (r'let s = "a " b"; // after', 'rust'),
+        ('/* open', 'rust'),
+        ("x = 'unterminated", 'python'),
+        ('가나다 = "한글"  # 주석', 'python'),
+        ("SELECT * FROM t WHERE a = 'b'", 'sql'),
+        ('', 'rust'),
+        ('utf8 and 3.14 and x2', 'rust'),
+      ]) {
+        expect(runs(line, lang).map((r) => r.$1).join(), line, reason: line);
+      }
+    });
+
+    test('keywords, strings, numbers and comments are told apart', () {
+      final got = runs('let x = 42; // note', 'rust');
+      expect(got, contains(('let', CodeKind.keyword)));
+      expect(got, contains(('42', CodeKind.number)));
+      expect(got, contains(('// note', CodeKind.comment)));
+      expect(runs('s = "hi"', 'python'), contains(('"hi"', CodeKind.string)));
+    });
+
+    test('only whole words count', () {
+      expect(runs('letter = 1', 'rust'), isNot(contains(('let', CodeKind.keyword))));
+      expect(runs('utf8 = 1', 'rust'), isNot(contains(('8', CodeKind.number))));
+    });
+
+    test('a block comment runs past the end of a line', () {
+      final scanner = CodeScanner('rust');
+      scanner.scan('code /* start');
+      // The second line is still inside the comment it opened.
+      final second = scanner.scan('still comment */ code');
+      expect(second.first.kind, CodeKind.comment);
+    });
+
+    test('an unknown language, or none, is left plain', () {
+      expect(knownLanguage(''), isFalse);
+      expect(knownLanguage('brainfuck'), isFalse);
+      expect(CodeScanner('').colours, isFalse);
+      expect(knownLanguage('rust') && knownLanguage('Python'), isTrue);
+    });
+
+    test('the whole memo still comes back with a coloured fence in it', () {
+      const text = '```rust\nlet x = 1; // hi\n```\nafter';
+      expect(rebuilt(text), text);
+    });
   });
 
   test('emphasis does not span a blank pair or reach across lines', () {
