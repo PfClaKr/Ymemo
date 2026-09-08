@@ -20,6 +20,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'src/rust/api.dart';
 import 'home_widgets.dart' as widgets;
+import 'memo_title.dart';
 import 'host.dart' as host;
 import 'palette.dart';
 import 'security.dart';
@@ -1125,10 +1126,11 @@ class _MemoListScreenState extends State<MemoListScreen> {
               context,
               memo.color,
               ListTile(
-                title: Text(memo.title.isEmpty ? widget.strings.newMemo : memo.title),
-                subtitle: memo.body.isEmpty
+                title: Text(rowTitle(memo, widget.strings.newMemo)),
+                subtitle: rowPreview(memo).isEmpty
                     ? null
-                    : Text(memo.body, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    : Text(rowPreview(memo),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
                 onTap: () => _open(memo),
                 onLongPress: () => _memoMenu(memo),
                 // A handle of its own, rather than a long press: a long press already

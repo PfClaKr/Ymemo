@@ -18,6 +18,7 @@ import 'dart:convert';
 import 'package:flutter/widgets.dart';
 
 import 'host.dart' as host;
+import 'memo_title.dart';
 import 'src/rust/api.dart';
 
 /// What a tapped widget, or a launcher shortcut, asked the app to do.
@@ -115,8 +116,9 @@ Future<void> publishWidgets() async {
         for (final memo in memos.take(_memoLimit))
           {
             'id': memo.id,
-            'title': memo.title,
-            'preview': _preview(memo.body),
+            // Same fallback the list uses, so a memo reads the same in both places.
+            'title': rowTitle(memo, ''),
+            'preview': _preview(rowPreview(memo)),
             'color': memo.color,
             // A memo whose folder is gone belongs to the top level, which is where the app's
             // own folder screen puts it (`memos_in_group`). Anything else reads as data loss.

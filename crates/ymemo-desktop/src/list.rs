@@ -339,10 +339,22 @@ pub(crate) fn group_row(
     }
 }
 
+/// One memo's row.
+///
+/// A memo written on the phone can have an empty title and a body full of writing: the phone
+/// has a title field of its own and leaving it blank is the ordinary way to use it, while a
+/// sticky has no such field and derives the title from the first line. Falling back to that
+/// same first line here is what stops a phoneful of memos from arriving as a column of
+/// "(untitled)". The stored title is left alone — this is only how the row reads.
 pub(crate) fn memo_row(memo: &Memo, depth: i32) -> ListRow {
+    let title = if memo.title.is_empty() {
+        crate::sticky::derive_title(&memo.body)
+    } else {
+        memo.title.clone()
+    };
     ListRow {
         id: SharedString::from(memo.id.clone()),
-        title: SharedString::from(memo.title.clone()),
+        title: SharedString::from(title),
         color: SharedString::from(memo.color.clone()),
         depth,
         is_group: false,
