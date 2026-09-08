@@ -1855,6 +1855,9 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                                       controller: _body,
                                       decoration: InputDecoration(
                                         hintText: widget.strings.bodyHint,
+                                        // The hint is also the only place the app says what
+                                        // ``` does, so it has room to say it.
+                                        hintMaxLines: 3,
                                         border: InputBorder.none,
                                       ),
                                       maxLines: null,

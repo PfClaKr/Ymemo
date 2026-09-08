@@ -393,6 +393,22 @@ component NotePad {
             }
         }
 
+        // What an empty note says. `TextInput` has no placeholder of its own, so this sits
+        // under it and goes the moment anything is typed.
+        //
+        // It is also the only place the app says what ``` does: the formatting is marked off
+        // deliberately, which is what keeps a shopping list from being reformatted, and a
+        // rule nobody is told about is a rule nobody uses.
+        if root.text == "": Text {
+            x: 8px;
+            y: 5px;
+            width: parent.width - 16px;
+            text: Strings.ui_sticky_hint;
+            font-size: root.font-size - 1px;
+            color: root.ink.with-alpha(0.45);
+            wrap: word-wrap;
+        }
+
         scroll := ScrollView {
             x: 7px;
             y: 5px;
