@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `field_label`, `lan_lock`, `rejected_lock`, `remember_delete`, `sanitize`, `share_with_peer`, `sync_lock`, `with_sync`, `with_vault`
+// These functions are ignored because they are not marked as `pub`: `apply_revocations`, `field_label`, `lan_lock`, `rejected_lock`, `remember_delete`, `sanitize`, `share_with_peer`, `sync_lock`, `with_sync`, `with_vault`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `fmt`, `from`, `from`, `from`
 
 /// Sets the language of core error messages (`"ko"`, `"en"`, or a locale like `"ko-KR"`).
@@ -334,8 +334,12 @@ Future<String> syncPairWith({required String code}) =>
 Future<List<FfiSharedDevice>> syncDevices() =>
     RustLib.instance.api.crateApiSyncDevices();
 
-/// Drops a peer. Only this side stops syncing; the other device keeps its own entry until it
-/// unpairs too.
+/// Removes a peer from the vault, on every device that shares it.
+///
+/// The decision goes into the vault first so it travels: every peer is an introducer, so a
+/// peer dropped here alone is handed straight back by the devices that still have it. The
+/// device being removed keeps the memos it already has — this is not a remote wipe, and not
+/// a lock either; see `RevokedDevice`.
 Future<void> syncUnpair({required String deviceId}) =>
     RustLib.instance.api.crateApiSyncUnpair(deviceId: deviceId);
 
@@ -952,6 +956,9 @@ class FfiStrings {
   final String emptyHint;
   final String masterPassword;
   final String myCode;
+  final String peerCode;
+  final String peerCodeHint;
+  final String addDevice;
   final String newMemo;
   final String noDevices;
   final String opening;
@@ -1101,6 +1108,9 @@ class FfiStrings {
     required this.emptyHint,
     required this.masterPassword,
     required this.myCode,
+    required this.peerCode,
+    required this.peerCodeHint,
+    required this.addDevice,
     required this.newMemo,
     required this.noDevices,
     required this.opening,
@@ -1252,6 +1262,9 @@ class FfiStrings {
       emptyHint.hashCode ^
       masterPassword.hashCode ^
       myCode.hashCode ^
+      peerCode.hashCode ^
+      peerCodeHint.hashCode ^
+      addDevice.hashCode ^
       newMemo.hashCode ^
       noDevices.hashCode ^
       opening.hashCode ^
@@ -1405,6 +1418,9 @@ class FfiStrings {
           emptyHint == other.emptyHint &&
           masterPassword == other.masterPassword &&
           myCode == other.myCode &&
+          peerCode == other.peerCode &&
+          peerCodeHint == other.peerCodeHint &&
+          addDevice == other.addDevice &&
           newMemo == other.newMemo &&
           noDevices == other.noDevices &&
           opening == other.opening &&

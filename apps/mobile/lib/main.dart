@@ -2089,6 +2089,9 @@ class _SyncScreenState extends State<SyncScreen> {
   List<FfiSharedDevice> _devices = const [];
 
   final _lanInput = TextEditingController();
+  /// The other device's pairing code, typed or pasted rather than scanned.
+  final _peerInput = TextEditingController();
+  bool _adding = false;
   String? _lanCode;
   String? _lanMessage;
   bool _joining = false;
@@ -2113,6 +2116,7 @@ class _SyncScreenState extends State<SyncScreen> {
     _lanPoll?.cancel();
     _waitPoll?.cancel();
     _lanInput.dispose();
+    _peerInput.dispose();
     // Leaves pairing mode: closes the socket and drops the wifi multicast lock. Anything
     // still in flight is finished by the Rust side on its own thread.
     widget.sync.lanStop();
@@ -2208,6 +2212,29 @@ class _SyncScreenState extends State<SyncScreen> {
     );
     if (peer != null) await _startWaiting(peer);
     await _reloadDevices();
+  }
+
+  /// Registers a peer from a code that was typed or pasted.
+  ///
+  /// The same half of pairing that scanning does — the core validates the code and does the
+  /// registering — for the cases a camera cannot cover: a device with no working camera, a
+  /// desktop across the room whose QR is not in front of you, or a code sent in a message.
+  Future<void> _addTypedPeer() async {
+    final raw = _peerInput.text.trim();
+    if (raw.isEmpty || _adding) return;
+    setState(() => _adding = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final peer = await widget.sync.pairWith(raw);
+      _peerInput.clear();
+      await _startWaiting(peer);
+      await _reloadDevices();
+    } catch (e) {
+      // The core's message says what is wrong with the code; show it as it is.
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    } finally {
+      if (mounted) setState(() => _adding = false);
+    }
   }
 
   /// Enters the waiting state for a peer that has just been registered.
@@ -2581,6 +2608,30 @@ class _SyncScreenState extends State<SyncScreen> {
               onPressed: _scan,
               icon: const Icon(Icons.qr_code_scanner, size: 18),
               label: Text(widget.strings.scanQr),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Text(widget.strings.peerCodeHint, style: Theme.of(context).textTheme.bodySmall),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _peerInput,
+                autocorrect: false,
+                enableSuggestions: false,
+                decoration: InputDecoration(labelText: widget.strings.peerCode),
+                onSubmitted: (_) => _addTypedPeer(),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: FilledButton(
+                onPressed: _adding ? null : _addTypedPeer,
+                child: Text(widget.strings.addDevice),
+              ),
             ),
           ],
         ),

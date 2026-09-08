@@ -2804,6 +2804,9 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_emptyHint = <String>::sse_decode(deserializer);
         let mut var_masterPassword = <String>::sse_decode(deserializer);
         let mut var_myCode = <String>::sse_decode(deserializer);
+        let mut var_peerCode = <String>::sse_decode(deserializer);
+        let mut var_peerCodeHint = <String>::sse_decode(deserializer);
+        let mut var_addDevice = <String>::sse_decode(deserializer);
         let mut var_newMemo = <String>::sse_decode(deserializer);
         let mut var_noDevices = <String>::sse_decode(deserializer);
         let mut var_opening = <String>::sse_decode(deserializer);
@@ -2952,6 +2955,9 @@ impl SseDecode for crate::api::FfiStrings {
             empty_hint: var_emptyHint,
             master_password: var_masterPassword,
             my_code: var_myCode,
+            peer_code: var_peerCode,
+            peer_code_hint: var_peerCodeHint,
+            add_device: var_addDevice,
             new_memo: var_newMemo,
             no_devices: var_noDevices,
             opening: var_opening,
@@ -3537,6 +3543,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.empty_hint.into_into_dart().into_dart(),
             self.master_password.into_into_dart().into_dart(),
             self.my_code.into_into_dart().into_dart(),
+            self.peer_code.into_into_dart().into_dart(),
+            self.peer_code_hint.into_into_dart().into_dart(),
+            self.add_device.into_into_dart().into_dart(),
             self.new_memo.into_into_dart().into_dart(),
             self.no_devices.into_into_dart().into_dart(),
             self.opening.into_into_dart().into_dart(),
@@ -3821,6 +3830,9 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.empty_hint, serializer);
         <String>::sse_encode(self.master_password, serializer);
         <String>::sse_encode(self.my_code, serializer);
+        <String>::sse_encode(self.peer_code, serializer);
+        <String>::sse_encode(self.peer_code_hint, serializer);
+        <String>::sse_encode(self.add_device, serializer);
         <String>::sse_encode(self.new_memo, serializer);
         <String>::sse_encode(self.no_devices, serializer);
         <String>::sse_encode(self.opening, serializer);

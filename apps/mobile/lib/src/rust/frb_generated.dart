@@ -2172,9 +2172,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FfiStrings dco_decode_ffi_strings(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 147)
+    if (arr.length != 150)
       throw Exception(
-          'unexpected arr length: expect 147 but see ${arr.length}');
+          'unexpected arr length: expect 150 but see ${arr.length}');
     return FfiStrings(
       addPhoto: dco_decode_String(arr[0]),
       bodyHint: dco_decode_String(arr[1]),
@@ -2263,66 +2263,69 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       emptyHint: dco_decode_String(arr[84]),
       masterPassword: dco_decode_String(arr[85]),
       myCode: dco_decode_String(arr[86]),
-      newMemo: dco_decode_String(arr[87]),
-      noDevices: dco_decode_String(arr[88]),
-      opening: dco_decode_String(arr[89]),
-      photoCamera: dco_decode_String(arr[90]),
-      photoGallery: dco_decode_String(arr[91]),
-      photoMissing: dco_decode_String(arr[92]),
-      photoRemove: dco_decode_String(arr[93]),
-      photoSize: dco_decode_String(arr[94]),
-      save: dco_decode_String(arr[95]),
-      scanHint: dco_decode_String(arr[96]),
-      scanQr: dco_decode_String(arr[97]),
-      syncDevices: dco_decode_String(arr[98]),
-      connectedDevices: dco_decode_String(arr[99]),
-      syncNow: dco_decode_String(arr[100]),
-      syncStarting: dco_decode_String(arr[101]),
-      syncUnavailable: dco_decode_String(arr[102]),
-      titleHint: dco_decode_String(arr[103]),
-      unlock: dco_decode_String(arr[104]),
-      unpair: dco_decode_String(arr[105]),
-      color: dco_decode_String(arr[106]),
-      changePassword: dco_decode_String(arr[107]),
-      confirmPassword: dco_decode_String(arr[108]),
-      repeatPassword: dco_decode_String(arr[109]),
-      repeatMismatch: dco_decode_String(arr[110]),
-      createVault: dco_decode_String(arr[111]),
-      currentPassword: dco_decode_String(arr[112]),
-      forgotPassword: dco_decode_String(arr[113]),
-      issueRecovery: dco_decode_String(arr[114]),
-      newPassword: dco_decode_String(arr[115]),
-      newVaultHint: dco_decode_String(arr[116]),
-      noRecovery: dco_decode_String(arr[117]),
-      passwordChanged: dco_decode_String(arr[118]),
-      passwordHint: dco_decode_String(arr[119]),
-      passwordMismatch: dco_decode_String(arr[120]),
-      recoveryAbsent: dco_decode_String(arr[121]),
-      recoveryAck: dco_decode_String(arr[122]),
-      recoveryCode: dco_decode_String(arr[123]),
-      recoveryHint: dco_decode_String(arr[124]),
-      recoveryIssued: dco_decode_String(arr[125]),
-      recoveryPresent: dco_decode_String(arr[126]),
-      recoveryPrompt: dco_decode_String(arr[127]),
-      recoveryWarning: dco_decode_String(arr[128]),
-      reissueRecovery: dco_decode_String(arr[129]),
-      resetDone: dco_decode_String(arr[130]),
-      resetPassword: dco_decode_String(arr[131]),
-      resetVault: dco_decode_String(arr[132]),
-      resetVaultConfirm: dco_decode_String(arr[133]),
-      resetVaultHint: dco_decode_String(arr[134]),
-      securitySection: dco_decode_String(arr[135]),
-      allow: dco_decode_String(arr[136]),
-      deviceId: dco_decode_String(arr[137]),
-      pairCancelWait: dco_decode_String(arr[138]),
-      pairConnected: dco_decode_String(arr[139]),
-      pairRequest: dco_decode_String(arr[140]),
-      pairRequestHint: dco_decode_String(arr[141]),
-      pairVerification: dco_decode_String(arr[142]),
-      pairVerify: dco_decode_String(arr[143]),
-      pairWaiting: dco_decode_String(arr[144]),
-      pairWaitingHint: dco_decode_String(arr[145]),
-      reject: dco_decode_String(arr[146]),
+      peerCode: dco_decode_String(arr[87]),
+      peerCodeHint: dco_decode_String(arr[88]),
+      addDevice: dco_decode_String(arr[89]),
+      newMemo: dco_decode_String(arr[90]),
+      noDevices: dco_decode_String(arr[91]),
+      opening: dco_decode_String(arr[92]),
+      photoCamera: dco_decode_String(arr[93]),
+      photoGallery: dco_decode_String(arr[94]),
+      photoMissing: dco_decode_String(arr[95]),
+      photoRemove: dco_decode_String(arr[96]),
+      photoSize: dco_decode_String(arr[97]),
+      save: dco_decode_String(arr[98]),
+      scanHint: dco_decode_String(arr[99]),
+      scanQr: dco_decode_String(arr[100]),
+      syncDevices: dco_decode_String(arr[101]),
+      connectedDevices: dco_decode_String(arr[102]),
+      syncNow: dco_decode_String(arr[103]),
+      syncStarting: dco_decode_String(arr[104]),
+      syncUnavailable: dco_decode_String(arr[105]),
+      titleHint: dco_decode_String(arr[106]),
+      unlock: dco_decode_String(arr[107]),
+      unpair: dco_decode_String(arr[108]),
+      color: dco_decode_String(arr[109]),
+      changePassword: dco_decode_String(arr[110]),
+      confirmPassword: dco_decode_String(arr[111]),
+      repeatPassword: dco_decode_String(arr[112]),
+      repeatMismatch: dco_decode_String(arr[113]),
+      createVault: dco_decode_String(arr[114]),
+      currentPassword: dco_decode_String(arr[115]),
+      forgotPassword: dco_decode_String(arr[116]),
+      issueRecovery: dco_decode_String(arr[117]),
+      newPassword: dco_decode_String(arr[118]),
+      newVaultHint: dco_decode_String(arr[119]),
+      noRecovery: dco_decode_String(arr[120]),
+      passwordChanged: dco_decode_String(arr[121]),
+      passwordHint: dco_decode_String(arr[122]),
+      passwordMismatch: dco_decode_String(arr[123]),
+      recoveryAbsent: dco_decode_String(arr[124]),
+      recoveryAck: dco_decode_String(arr[125]),
+      recoveryCode: dco_decode_String(arr[126]),
+      recoveryHint: dco_decode_String(arr[127]),
+      recoveryIssued: dco_decode_String(arr[128]),
+      recoveryPresent: dco_decode_String(arr[129]),
+      recoveryPrompt: dco_decode_String(arr[130]),
+      recoveryWarning: dco_decode_String(arr[131]),
+      reissueRecovery: dco_decode_String(arr[132]),
+      resetDone: dco_decode_String(arr[133]),
+      resetPassword: dco_decode_String(arr[134]),
+      resetVault: dco_decode_String(arr[135]),
+      resetVaultConfirm: dco_decode_String(arr[136]),
+      resetVaultHint: dco_decode_String(arr[137]),
+      securitySection: dco_decode_String(arr[138]),
+      allow: dco_decode_String(arr[139]),
+      deviceId: dco_decode_String(arr[140]),
+      pairCancelWait: dco_decode_String(arr[141]),
+      pairConnected: dco_decode_String(arr[142]),
+      pairRequest: dco_decode_String(arr[143]),
+      pairRequestHint: dco_decode_String(arr[144]),
+      pairVerification: dco_decode_String(arr[145]),
+      pairVerify: dco_decode_String(arr[146]),
+      pairWaiting: dco_decode_String(arr[147]),
+      pairWaitingHint: dco_decode_String(arr[148]),
+      reject: dco_decode_String(arr[149]),
     );
   }
 
@@ -2700,6 +2703,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_emptyHint = sse_decode_String(deserializer);
     var var_masterPassword = sse_decode_String(deserializer);
     var var_myCode = sse_decode_String(deserializer);
+    var var_peerCode = sse_decode_String(deserializer);
+    var var_peerCodeHint = sse_decode_String(deserializer);
+    var var_addDevice = sse_decode_String(deserializer);
     var var_newMemo = sse_decode_String(deserializer);
     var var_noDevices = sse_decode_String(deserializer);
     var var_opening = sse_decode_String(deserializer);
@@ -2848,6 +2854,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         emptyHint: var_emptyHint,
         masterPassword: var_masterPassword,
         myCode: var_myCode,
+        peerCode: var_peerCode,
+        peerCodeHint: var_peerCodeHint,
+        addDevice: var_addDevice,
         newMemo: var_newMemo,
         noDevices: var_noDevices,
         opening: var_opening,
@@ -3288,6 +3297,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.emptyHint, serializer);
     sse_encode_String(self.masterPassword, serializer);
     sse_encode_String(self.myCode, serializer);
+    sse_encode_String(self.peerCode, serializer);
+    sse_encode_String(self.peerCodeHint, serializer);
+    sse_encode_String(self.addDevice, serializer);
     sse_encode_String(self.newMemo, serializer);
     sse_encode_String(self.noDevices, serializer);
     sse_encode_String(self.opening, serializer);
