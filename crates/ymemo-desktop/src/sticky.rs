@@ -61,10 +61,16 @@ pub(crate) fn sticky_text(memo: &Memo) -> String {
     }
 }
 
-/// First non-empty line of the body, used as the title in the list and title bar.
+/// First line of the body worth naming a memo by, used as the title in the list and title
+/// bar.
+///
+/// Fence lines are skipped: a memo that opens with ` ```rust ` is about what is inside it,
+/// and calling it "```rust" in the list says nothing at all.
+///
+/// **Keep in step with `firstLine` in the phone's `memo_title.dart`.**
 pub(crate) fn derive_title(text: &str) -> String {
     text.lines()
-        .find(|l| !l.trim().is_empty())
+        .find(|l| !l.trim().is_empty() && !l.trim_start().starts_with("```"))
         .unwrap_or("")
         .trim()
         .chars()
@@ -1199,6 +1205,15 @@ mod tests {
         // And a memo that never had one gets one.
         memo.title = String::new();
         assert_eq!(title_for(&memo, "first\nsecond"), "first");
+    }
+
+    /// A memo that opens with a fence is named by what is inside it, not by the fence.
+    #[test]
+    fn a_fence_is_not_a_title() {
+        assert_eq!(derive_title("```rust\nfn hello() {}\n```"), "fn hello() {}");
+        assert_eq!(derive_title("```\n**bold**\n```"), "**bold**");
+        // A memo that is nothing but an empty block has no name to give.
+        assert_eq!(derive_title("```\n```"), "");
     }
 
     /// A title typed on the phone survives an edit made here.

@@ -46,6 +46,9 @@ struct Syntax {
     /// Characters that open and close a string.
     quotes: &'static [char],
     keywords: &'static [&'static str],
+    /// Markup: the word after a `<` or `</` is the name of a tag, and reads as one. A tag
+    /// name is not a word from a fixed list, so this is a rule rather than a keyword set.
+    tags: bool,
 }
 
 const RUSTISH: &[&str] = &[
@@ -92,12 +95,13 @@ const SQLISH: &[&str] = &[
     "set", "table", "update", "values", "where",
 ];
 
-/// The four things one arm of [`syntax`] answers, in the order [`Syntax`] takes them.
+/// The five things one arm of [`syntax`] answers, in the order [`Syntax`] takes them.
 type Rules = (
     &'static [&'static str],
     Option<(&'static str, &'static str)>,
     &'static [char],
     &'static [&'static str],
+    bool,
 );
 
 /// The language a fence named, or `None` when it named nothing this build knows.
@@ -105,24 +109,30 @@ type Rules = (
 /// Unknown is not an error: the block is drawn plainly, which is what a fence did before any
 /// of this and what a name nobody recognises should do.
 fn syntax(lang: &str) -> Option<Syntax> {
-    let (line_comment, block_comment, quotes, keywords): Rules =
+    let (line_comment, block_comment, quotes, keywords, tags): Rules =
         match lang.trim().to_ascii_lowercase().as_str() {
-        "rust" | "rs" => (&["//"], Some(("/*", "*/")), &['"'], RUSTISH),
+        "rust" | "rs" => (&["//"], Some(("/*", "*/")), &['"'], RUSTISH, false),
         "c" | "cpp" | "c++" | "java" | "kotlin" | "kt" | "cs" | "go" | "swift" => {
-            (&["//"], Some(("/*", "*/")), &['"', '\''], CISH)
+            (&["//"], Some(("/*", "*/")), &['"', '\''], CISH, false)
         }
         "js" | "javascript" | "ts" | "typescript" | "jsx" | "tsx" => {
-            (&["//"], Some(("/*", "*/")), &['"', '\'', '`'], JSISH)
+            (&["//"], Some(("/*", "*/")), &['"', '\'', '`'], JSISH, false)
         }
-        "dart" => (&["//"], Some(("/*", "*/")), &['"', '\''], DARTISH),
-        "py" | "python" => (&["#"], None, &['"', '\''], PYISH),
-        "sh" | "bash" | "zsh" | "shell" => (&["#"], None, &['"', '\''], SHISH),
-        "sql" => (&["--"], Some(("/*", "*/")), &['\''], SQLISH),
-        "json" => (&[], None, &['"'], &["false", "null", "true"]),
-        "yaml" | "yml" | "toml" | "ini" => (&["#"], None, &['"', '\''], &["false", "true"]),
+        "dart" => (&["//"], Some(("/*", "*/")), &['"', '\''], DARTISH, false),
+        "py" | "python" => (&["#"], None, &['"', '\''], PYISH, false),
+        "sh" | "bash" | "zsh" | "shell" => (&["#"], None, &['"', '\''], SHISH, false),
+        "sql" => (&["--"], Some(("/*", "*/")), &['\''], SQLISH, false),
+        "json" => (&[], None, &['"'], &["false", "null", "true"], false),
+        "yaml" | "yml" | "toml" | "ini" => (&["#"], None, &['"', '\''], &["false", "true"], false),
+        // Markup: the tag names carry the meaning, and there is no list of them to check
+        // against — anything after a `<` is one.
+        "html" | "xml" | "svg" | "xhtml" => {
+            (&[], Some(("<!--", "-->")), &['"', '\''], &[], true)
+        }
+        "css" | "scss" => (&["//"], Some(("/*", "*/")), &['"', '\''], &[], false),
         _ => return None,
     };
-    Some(Syntax { line_comment, block_comment, quotes, keywords })
+    Some(Syntax { line_comment, block_comment, quotes, keywords, tags })
 }
 
 /// Splits code into coloured lines. `lang` is whatever followed the opening fence.
@@ -221,6 +231,19 @@ fn scan<'a>(line: &'a str, syntax: &Syntax, in_block: &mut bool) -> Vec<(&'a str
             i = end;
             plain_from = i;
             continue;
+        }
+
+        // Markup: `<tag`, `</tag`. The name is whatever follows, not a word from a list.
+        if syntax.tags && ch == '<' {
+            let after = i + 1 + usize::from(rest[1..].starts_with('/'));
+            let end = word_end(line, after, |c| c.is_alphanumeric() || c == '-' || c == ':');
+            if end > after {
+                flush(&mut out, line, plain_from, i);
+                out.push((&line[i..end], Kind::Keyword));
+                i = end;
+                plain_from = i;
+                continue;
+            }
         }
 
         if ch.is_alphabetic() || ch == '_' {
@@ -333,6 +356,18 @@ mod tests {
         let second = scan("still comment */ code", &syntax, &mut in_block);
         assert!(!in_block, "and closes on the next line");
         assert!(second.contains(&("still comment */", Kind::Comment)));
+    }
+
+    /// Markup has no keyword list: what reads as a tag is whatever follows a `<`.
+    #[test]
+    fn markup_colours_its_tags_and_attributes() {
+        let got = runs("<b class=\"x\">hi</b>", "html");
+        assert!(got.contains(&("<b", Kind::Keyword)));
+        assert!(got.contains(&("</b", Kind::Keyword)));
+        assert!(got.contains(&("\"x\"", Kind::String)));
+        // And nothing is lost on the way.
+        let joined: String = got.iter().map(|(t, _)| *t).collect();
+        assert_eq!(joined, "<b class=\"x\">hi</b>");
     }
 
     /// A fence with no language, or one nobody here knows, is left plain.

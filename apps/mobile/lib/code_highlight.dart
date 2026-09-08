@@ -41,11 +41,16 @@ class _Syntax {
     required this.blockComment,
     required this.quotes,
     required this.keywords,
+    this.tags = false,
   });
   final List<String> lineComment;
   final List<String>? blockComment; // [open, close]
   final List<String> quotes;
   final Set<String> keywords;
+
+  /// Markup: the word after a `<` or `</` is the name of a tag, and reads as one. A tag name
+  /// is not a word from a fixed list, so this is a rule rather than a keyword set.
+  final bool tags;
 }
 
 const _rustish = {
@@ -158,6 +163,25 @@ _Syntax? _syntaxFor(String lang) {
           blockComment: null,
           quotes: ['"', "'"],
           keywords: {'false', 'true'});
+    // Markup: the tag names carry the meaning, and there is no list of them to check
+    // against — anything after a `<` is one.
+    case 'html':
+    case 'xml':
+    case 'svg':
+    case 'xhtml':
+      return const _Syntax(
+          lineComment: [],
+          blockComment: ['<!--', '-->'],
+          quotes: ['"', "'"],
+          keywords: {},
+          tags: true);
+    case 'css':
+    case 'scss':
+      return const _Syntax(
+          lineComment: ['//'],
+          blockComment: ['/*', '*/'],
+          quotes: ['"', "'"],
+          keywords: {});
     default:
       return null;
   }
@@ -239,6 +263,19 @@ class CodeScanner {
         i = end;
         plainFrom = i;
         continue;
+      }
+
+      // Markup: `<tag`, `</tag`. The name is whatever follows, not a word from a list.
+      if (syntax.tags && ch == '<') {
+        final after = i + 1 + (rest.startsWith('</') ? 1 : 0);
+        final end = _wordEnd(line, after, (c) => _isLetter(c) || _isDigit(c) || c == '-' || c == ':');
+        if (end > after) {
+          flush(i);
+          runs.add(CodeRun(end - i, CodeKind.keyword));
+          i = end;
+          plainFrom = i;
+          continue;
+        }
       }
 
       if (_isLetter(ch) || ch == '_') {

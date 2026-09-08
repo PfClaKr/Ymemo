@@ -1,5 +1,14 @@
 /// Markdown, styled where it is typed.
 ///
+/// A memo is plain writing with marked-off regions in it, the way a chat message is:
+///
+/// - ordinary lines are **plain text**. `**stars**` typed in a shopping list are stars.
+/// - a bare ` ``` ` fence opens a **markdown region**: inside it the marks mean what they say.
+/// - ` ```rust ` and friends open a **code block**, coloured by `code_highlight.dart`.
+///
+/// Marking the formatting off is the point: nobody has to escape anything, and a memo that
+/// was never meant to be markdown cannot be reformatted behind the user's back.
+///
 /// The memo keeps its markers: `**like this**` is stored exactly as written, and what
 /// changes is only how it is drawn. That is the whole reason this is a `TextEditingController`
 /// and not a rich-text editor — every character the field shows is a character in the memo,
@@ -47,6 +56,8 @@ List<TextSpan> markdownSpans(
   // away when it closes. Null means the block is drawn plainly, which is what an unnamed
   // fence has always done.
   CodeScanner? scanner;
+  /// Whether the fence we are inside is a bare one, where the marks are read.
+  var markdownRegion = false;
   final lines = _lines(text);
   for (var i = 0; i < lines.length; i++) {
     final line = lines[i];
@@ -62,14 +73,23 @@ List<TextSpan> markdownSpans(
     // A fence line toggles the block. The line itself is drawn as code, so an unclosed
     // fence looks unfinished rather than looking like ordinary writing.
     if (trimmed.startsWith('```')) {
-      // Only the opening fence names a language; the closing one is bare.
-      scanner = inFence ? null : CodeScanner(trimmed.substring(3));
-      inFence = !inFence;
+      if (inFence) {
+        inFence = false;
+        scanner = null;
+        markdownRegion = false;
+      } else {
+        inFence = true;
+        // Only the opening fence names a language; the closing one is bare. A bare fence is
+        // not code at all — it is where the markdown marks start meaning something.
+        final tag = trimmed.substring(3).trim();
+        markdownRegion = tag.isEmpty;
+        scanner = markdownRegion ? null : CodeScanner(tag);
+      }
       runs.add(_Run(offset, end, mono.copyWith(color: marker)));
       endLine(mono);
       continue;
     }
-    if (inFence) {
+    if (inFence && !markdownRegion) {
       final colouring = scanner;
       if (colouring != null && colouring.colours) {
         var at = offset;
@@ -81,6 +101,12 @@ List<TextSpan> markdownSpans(
         runs.add(_Run(offset, end, mono));
       }
       endLine(mono);
+      continue;
+    }
+    if (!inFence) {
+      // Outside a region the writing is writing: no marks are read, nothing is restyled.
+      runs.add(_Run(offset, end, base));
+      endLine(base);
       continue;
     }
 

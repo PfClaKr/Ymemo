@@ -49,37 +49,68 @@ void main() {
     }
   });
 
-  test('bold, italic, strike and code each get their own style', () {
-    expect(styleOf('a **b** c', 'b').fontWeight, FontWeight.w700);
-    expect(styleOf('a *b* c', 'b').fontStyle, FontStyle.italic);
-    expect(styleOf('a _b_ c', 'b').fontStyle, FontStyle.italic);
-    expect(styleOf('a ~~b~~ c', 'b').decoration, TextDecoration.lineThrough);
-    expect(styleOf('a `b` c', 'b').fontFamily, 'monospace');
+  /// Writing outside a region is writing: the marks are characters, not instructions.
+  test('ordinary lines are left exactly as typed', () {
+    expect(styleOf('a **b** c', 'a **b** c').fontWeight, isNull);
+    expect(styleOf('# Title', '# Title').fontSize, 14);
+    expect(styleOf('a `b` c', 'a `b` c').fontFamily, isNull);
   });
 
-  test('the markers stay in the text, drawn faded', () {
-    expect(rebuilt('**b**'), '**b**');
-    expect(styleOf('**b**', '**').color, const Color(0xFF888888));
+  group('inside a bare fence the marks mean something', () {
+    /// `text` wrapped in a bare fence, which is where markdown is read.
+    String md(String body) => '```\n$body\n```';
+
+    test('bold, italic, strike and code each get their own style', () {
+      expect(styleOf(md('a **b** c'), 'b').fontWeight, FontWeight.w700);
+      expect(styleOf(md('a *b* c'), 'b').fontStyle, FontStyle.italic);
+      expect(styleOf(md('a _b_ c'), 'b').fontStyle, FontStyle.italic);
+      expect(styleOf(md('a ~~b~~ c'), 'b').decoration, TextDecoration.lineThrough);
+      expect(styleOf(md('a `b` c'), 'b').fontFamily, 'monospace');
+    });
+
+    test('the markers stay in the text, drawn faded', () {
+      expect(rebuilt(md('**b**')), md('**b**'));
+      expect(styleOf(md('**b**'), '**').color, const Color(0xFF888888));
+    });
+
+    test('a heading is bigger, and only with a space after the hashes', () {
+      expect(styleOf(md('# Title'), 'Title').fontSize, greaterThan(14));
+      expect(styleOf(md('## Title'), 'Title').fontSize, greaterThan(14));
+      // Seven is too many to be a heading, and `#tag` is a word.
+      expect(styleOf(md('####### too deep'), '####### too deep').fontSize, 14);
+      expect(styleOf(md('#tag here'), '#tag here').fontSize, 14);
+    });
+
+    test('emphasis does not reach across a line or wrap nothing', () {
+      expect(rebuilt(md('** **')), md('** **'));
+      expect(styleOf(md('*a\nb*'), '*a').fontStyle, isNull);
+    });
   });
 
-  test('a heading is bigger, and only with a space after the hashes', () {
-    expect(styleOf('# Title', 'Title').fontSize, greaterThan(14));
-    expect(styleOf('## Title', 'Title').fontSize, greaterThan(14));
-    // Seven is too many to be a heading, and `#tag` is a word.
-    expect(styleOf('####### too deep', '####### too deep').fontSize, 14);
-    expect(styleOf('#tag here', '#tag here').fontSize, 14);
+  test('a named fence is code, and a bare one is not', () {
+    const code = '```c\nint x;\n```\nprose';
+    expect(styleOf(code, 'int').fontFamily, 'monospace');
+    expect(styleOf(code, 'prose').fontFamily, isNull);
+    // A bare fence holds markdown, so its lines are not monospace.
+    expect(styleOf('```\njust words\n```', 'just words').fontFamily, isNull);
   });
 
-  test('a fence turns the lines between it into code', () {
-    const text = '```\ncode line\n```\nprose';
-    expect(styleOf(text, 'code line').fontFamily, 'monospace');
-    expect(styleOf(text, 'prose').fontFamily, isNull);
-  });
-
-  test('an unclosed fence takes the rest of the memo, rather than half a line', () {
-    const text = 'prose\n```\nstill code\nand this too';
+  test('an unclosed named fence takes the rest of the memo', () {
+    // Nothing in these lines is a C keyword, so each stays one run and can be looked up.
+    const text = 'prose\n```c\nstill code\nand more of it';
     expect(styleOf(text, 'still code').fontFamily, 'monospace');
-    expect(styleOf(text, 'and this too').fontFamily, 'monospace');
+    expect(styleOf(text, 'and more of it').fontFamily, 'monospace');
+  });
+
+  /// The shape the whole thing is meant to make: writing, a markdown region, code in two
+  /// languages, writing again.
+  test('regions follow one another', () {
+    const text = '```\n**md**\n```\nplain\n```c\nint x;\n```\n```html\n<b>hi</b>\n```\ntail';
+    expect(rebuilt(text), text);
+    expect(styleOf(text, 'md').fontWeight, FontWeight.w700);
+    expect(styleOf(text, 'plain').fontFamily, isNull);
+    expect(styleOf(text, 'int').fontFamily, 'monospace');
+    expect(styleOf(text, 'tail').fontFamily, isNull);
   });
 
   group('a fence that names a language is coloured', () {
@@ -130,6 +161,14 @@ void main() {
       expect(second.first.kind, CodeKind.comment);
     });
 
+    test('markup colours its tags and attributes', () {
+      final got = runs('<b class="x">hi</b>', 'html');
+      expect(got, contains(('<b', CodeKind.keyword)));
+      expect(got, contains(('</b', CodeKind.keyword)));
+      expect(got, contains(('"x"', CodeKind.string)));
+      expect(got.map((r) => r.$1).join(), '<b class="x">hi</b>');
+    });
+
     test('an unknown language, or none, is left plain', () {
       expect(knownLanguage(''), isFalse);
       expect(knownLanguage('brainfuck'), isFalse);
@@ -143,10 +182,4 @@ void main() {
     });
   });
 
-  test('emphasis does not span a blank pair or reach across lines', () {
-    // Nothing between the markers is not emphasis, so the text is left alone.
-    expect(rebuilt('** **'), '** **');
-    // A marker opened on one line and closed on the next is two loose markers.
-    expect(styleOf('*a\nb*', '*a').fontStyle, isNull);
-  });
 }

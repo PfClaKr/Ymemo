@@ -8,14 +8,19 @@ library;
 
 import 'src/rust/api.dart';
 
-/// The first non-empty line of `text`, capped the way a sticky's derived title is.
+/// The first line of `text` worth naming a memo by, capped the way a sticky's derived title
+/// is.
+///
+/// Fence lines are skipped: a memo that opens with ` ```rust ` is about what is inside it,
+/// and calling it "```rust" in the list says nothing at all.
 ///
 /// **Must match `derive_title` in the desktop's `sticky.rs`**, so the same memo reads the
 /// same on both devices.
 String firstLine(String text) {
   final line = text
       .split('\n')
-      .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '')
+      .firstWhere((l) => l.trim().isNotEmpty && !l.trimLeft().startsWith('```'),
+          orElse: () => '')
       .trim();
   // Code points, not grapheme clusters: `chars().take(40)` on the other side counts the
   // same units, and a title that reads one way on the phone and another on the desktop is
