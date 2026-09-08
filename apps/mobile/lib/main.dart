@@ -20,6 +20,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'src/rust/api.dart';
 import 'home_widgets.dart' as widgets;
+import 'markdown_style.dart';
 import 'memo_title.dart';
 import 'host.dart' as host;
 import 'palette.dart';
@@ -1590,7 +1591,13 @@ class MemoEditScreen extends StatefulWidget {
 
 class _MemoEditScreenState extends State<MemoEditScreen> {
   late final TextEditingController _title = TextEditingController(text: widget.title);
-  late final TextEditingController _body = TextEditingController(text: widget.body);
+  /// The body draws its own markdown as it is typed; the text it holds is the plain string
+  /// with every marker still in it, which is what gets saved. See `markdown_style.dart`.
+  late final MarkdownEditingController _body = MarkdownEditingController(
+    text: widget.body,
+    marker: paletteInk(_color).withValues(alpha: 0.45),
+    codeBackground: paletteInk(_color).withValues(alpha: 0.10),
+  );
   late String _color = widget.color;
   List<FfiAttachment> _photos = [];
 
@@ -1603,7 +1610,12 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   /// Not batched into `_save` with the text: the color *is* what the screen looks like, and a
   /// swatch that did nothing until you left would read as a broken button.
   Future<void> _setColor(String color) async {
-    setState(() => _color = color);
+    setState(() {
+      _color = color;
+      // The markdown is drawn in the note's own ink, so it follows the paper.
+      _body.marker = paletteInk(color).withValues(alpha: 0.45);
+      _body.codeBackground = paletteInk(color).withValues(alpha: 0.10);
+    });
     await memoSetColor(id: widget.id, color: color);
   }
 
