@@ -6,12 +6,17 @@
 //! `sync.rs` or `pairing.rs`:
 //!
 //! ```text
-//! YMEMO_SYNCTHING_BIN=/path/to/syncthing cargo test -p ymemo-core --test pairing_approval -- --ignored --nocapture
+//! YMEMO_SYNCTHING_BIN=/path/to/syncthing \
+//!   cargo test -p ymemo-core --test pairing_approval -- --ignored --nocapture --test-threads=1
 //! ```
 //!
-//! What it pins down is the claim the whole flow rests on: a device that is dialled by a
-//! stranger files the caller as pending rather than silently dropping it, and sharing the
-//! folder back is all it takes to complete the link.
+//! **One at a time.** Between them these tests run five daemons, and in parallel they find
+//! each other's announcements and time out on the wrong device.
+//!
+//! What they pin down are the two claims the whole flow rests on: a device that is dialled by
+//! a stranger files the caller as pending rather than silently dropping it and sharing the
+//! folder back is all it takes to complete the link, and a vault with three devices in it
+//! closes into a mesh instead of leaving the last two unable to reach each other.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -90,10 +95,12 @@ fn a_scanned_device_shows_up_as_pending_and_approving_it_links_both_sides() {
 
     // --- B scans A's code. This is B's half and nothing more. ---
     b.st.share_folder_with(VAULT_FOLDER_ID, &a.id).unwrap();
-    assert!(
-        a.st.pending_devices().unwrap().is_empty(),
-        "A cannot know about B before B has dialled it"
-    );
+    // There used to be an assertion here that A's pending list was still empty, standing for
+    // "A can only have heard of B by being dialled". It was a race the test cannot win — on
+    // one machine B's dial lands before the next REST call returns — and it started failing
+    // once peers became introducers, which is a timing change and not a behavioural one.
+    // The claim it was making is the `wait_for` below: A learns of B with nothing scanned
+    // back, and the only way that can happen is an inbound connection.
 
     // --- A learns of the request without anyone scanning anything back. ---
     wait_for("B to appear as a pending device on A", || {
@@ -120,3 +127,60 @@ fn a_scanned_device_shows_up_as_pending_and_approving_it_links_both_sides() {
         "A should list B once the link is up"
     );
 }
+
+/// Every device that shares the vault ends up knowing every other one, even the ones it was
+/// never paired with by hand.
+///
+/// The shape this is about: a user pairs their laptop with their phone, and later pairs the
+/// laptop with a tablet. Nobody pairs the phone with the tablet, and without introduction
+/// nobody ever does — the two hold the same vault and cannot reach each other, so a memo
+/// written on the phone waits for the laptop to be switched on before the tablet sees it.
+///
+/// Syncthing's answer is the introducer flag, which `share_folder_with` sets on every peer:
+/// a device passes on the peers it shares the folder with, so the mesh closes itself.
+#[test]
+#[ignore = "spawns three syncthing daemons; needs YMEMO_SYNCTHING_BIN"]
+fn a_new_device_reaches_the_others_without_being_paired_with_each() {
+    let Some(binary) = std::env::var_os("YMEMO_SYNCTHING_BIN").map(PathBuf::from) else {
+        eprintln!("YMEMO_SYNCTHING_BIN not set; skipping");
+        return;
+    };
+
+    let a = start(&binary, "A (the first device)");
+    let b = start(&binary, "B (paired with A)");
+    let c = start(&binary, "C (paired with A, later)");
+
+    // Both pairings go through A, which is what the app's two flows produce: one device
+    // shows a code and the other scans it, and only those two exchange anything.
+    for peer in [&b, &c] {
+        a.st.share_folder_with(VAULT_FOLDER_ID, &peer.id).unwrap();
+        peer.st.share_folder_with(VAULT_FOLDER_ID, &a.id).unwrap();
+    }
+
+    let knows = |d: &Device, id: &str| {
+        d.st.shared_devices(VAULT_FOLDER_ID).unwrap().iter().any(|s| s.id == id)
+    };
+
+    // Wait until the pairings themselves are live, so a failure below is about introduction
+    // and not about two daemons that never found each other.
+    wait_for("B and C to connect to A", || {
+        let up = |d: &Device| {
+            d.st.shared_devices(VAULT_FOLDER_ID).unwrap().iter().any(|s| s.id == a.id && s.connected)
+        };
+        up(&b) && up(&c)
+    });
+
+    wait_for("B to learn about C through A", || knows(&b, &c.id));
+    wait_for("C to learn about B through A", || knows(&c, &b.id));
+
+    // And the point of knowing: they talk to each other rather than through A.
+    wait_for("B and C to connect directly", || {
+        let direct = |d: &Device, id: &str| {
+            d.st.shared_devices(VAULT_FOLDER_ID).unwrap().iter().any(|s| s.id == id && s.connected)
+        };
+        direct(&b, &c.id) && direct(&c, &b.id)
+    });
+}
+
+
+

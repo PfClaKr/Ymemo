@@ -1021,6 +1021,8 @@ pub fn sync_start(binary_path: String, home_dir: String, vault_dir: String) -> R
     std::fs::create_dir_all(&vault_dir)?;
     let st = Syncthing::spawn(Path::new(&binary_path), Path::new(&home_dir))?;
     st.ensure_folder(VAULT_FOLDER_ID, "Ymemo Vault", Path::new(&vault_dir))?;
+    // For the peers paired before the app asked for introductions; see `ensure_introducers`.
+    st.ensure_introducers(VAULT_FOLDER_ID)?;
     let id = st.device_id()?;
     *guard = Some(st);
     Ok(PairingCode::new(&id).encode())
@@ -1035,7 +1037,8 @@ pub fn sync_start(binary_path: String, home_dir: String, vault_dir: String) -> R
 pub fn sync_ensure_folder(vault_dir: String) -> Result<()> {
     let guard = sync_lock()?;
     let Some(st) = guard.as_ref() else { return Ok(()) };
-    st.ensure_folder(VAULT_FOLDER_ID, "Ymemo Vault", Path::new(&vault_dir))
+    st.ensure_folder(VAULT_FOLDER_ID, "Ymemo Vault", Path::new(&vault_dir))?;
+    st.ensure_introducers(VAULT_FOLDER_ID)
 }
 
 /// Applies the sync timings to the vault folder of the running daemon.

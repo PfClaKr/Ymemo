@@ -111,6 +111,11 @@ pub(crate) fn start_syncthing(data_dir: &std::path::Path, vault_dir: &std::path:
             if let Err(e) = st.ensure_folder(SYNC_FOLDER_ID, "Ymemo Vault", vault_dir) {
                 diag!("could not register the shared folder: {e}");
             }
+            // For the peers paired before the app asked for introductions; a pairing made
+            // since carries the flag already. Idempotent, so it costs nothing to repeat.
+            if let Err(e) = st.ensure_introducers(SYNC_FOLDER_ID) {
+                diag!("could not mark the peers as introducers: {e}");
+            }
             Some(st)
         }
         Err(e) => {

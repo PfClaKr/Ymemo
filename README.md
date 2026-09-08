@@ -151,8 +151,12 @@ which trades a little of one for the other and says so where you turn it on.
 
 Scan the other one's QR code, or type its pairing code. The other device is asked to allow it,
 and both screens show the same eight characters to compare, so you can tell you paired with
-what you meant to. On one network a 6-digit code links them outright. Devices can be revoked
-later from either end.
+what you meant to. On one network a 6-digit code links them outright.
+
+Pairing is between two devices, but the vault is not: from the third device on, each one
+**introduces the others**, so a phone paired with a laptop and a tablet paired with the same
+laptop end up talking to each other directly. Without that the laptop would have to be awake
+for a memo to travel between the other two.
 
 ### Korean and English
 

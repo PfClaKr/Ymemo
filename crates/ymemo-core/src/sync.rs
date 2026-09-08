@@ -351,10 +351,8 @@ impl Syncthing {
 
     /// Adds a peer and shares the folder with it — half of pairing; the peer must do the same.
     pub fn share_folder_with(&self, folder_id: &str, peer_device_id: &str) -> Result<()> {
-        // 1. Register the device (harmless to overwrite).
-        ureq::put(format!("{}/rest/config/devices/{peer_device_id}", self.base_url))
-            .header("X-API-Key", &self.api_key)
-            .send_json(serde_json::json!({ "deviceID": peer_device_id }))?;
+        // 1. Register the device, as an introducer.
+        self.upsert_peer(peer_device_id)?;
 
         // 2. Add it to the folder config.
         let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
@@ -366,6 +364,67 @@ impl Syncthing {
         if !devices.iter().any(|d| d["deviceID"] == peer_device_id) {
             devices.push(serde_json::json!({ "deviceID": peer_device_id }));
             ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
+        }
+        Ok(())
+    }
+
+    /// Registers a peer, or updates the one already there, **as an introducer**.
+    ///
+    /// The flag is what makes a vault with three devices in it a mesh rather than a star.
+    /// Pairing is always between two devices — one shows a code, the other scans it — so
+    /// without introduction a third device is known only to whichever device it was paired
+    /// with. The other two hold the same vault and have never heard of each other, and a memo
+    /// written on one waits for the middle device to be switched on before it reaches the
+    /// last. With it, each device passes on the peers it shares the vault with and the
+    /// missing links fill themselves in.
+    ///
+    /// It is not a new grant of trust: a device that another device let in already holds the
+    /// vault and its data key, so it can already read everything. What changes is only
+    /// whether the two talk directly or through the device that introduced them.
+    ///
+    /// Read-modify-write, because a PUT replaces the whole device entry: building one from
+    /// `{deviceID}` alone would throw away the name Syncthing learned from the peer, its
+    /// addresses, and whether it is paused.
+    fn upsert_peer(&self, peer_device_id: &str) -> Result<()> {
+        let url = format!("{}/rest/config/devices/{peer_device_id}", self.base_url);
+        let mut device: serde_json::Value =
+            match ureq::get(&url).header("X-API-Key", &self.api_key).call() {
+                Ok(mut res) => res.body_mut().read_json()?,
+                // Not registered yet, which is the usual case here.
+                Err(_) => serde_json::json!({ "deviceID": peer_device_id }),
+            };
+        if device["introducer"] == serde_json::json!(true) {
+            // Already as we want it. Saying so again would restart the connection to a peer
+            // that may be in the middle of a transfer, and this runs on every start.
+            return Ok(());
+        }
+        device["introducer"] = serde_json::json!(true);
+        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&device)?;
+        Ok(())
+    }
+
+    /// Marks every peer already sharing the folder as an introducer.
+    ///
+    /// For the devices that were paired before the app asked for introductions; a pairing made
+    /// since gets the flag from [`Syncthing::share_folder_with`]. Idempotent and silent when
+    /// nothing has to change, so it belongs on every start rather than behind a migration
+    /// flag — there is no record of which version paired a given device.
+    ///
+    /// Does nothing when the folder is not registered, which is a device that has not
+    /// unlocked a vault yet.
+    pub fn ensure_introducers(&self, folder_id: &str) -> Result<()> {
+        let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
+        let Ok(mut res) = ureq::get(&url).header("X-API-Key", &self.api_key).call() else {
+            return Ok(());
+        };
+        let folder: serde_json::Value = res.body_mut().read_json()?;
+        let my_id = self.device_id()?;
+        let peers: Vec<String> = folder["devices"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|d| d["deviceID"].as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        for peer in peers.iter().filter(|id| **id != my_id) {
+            self.upsert_peer(peer)?;
         }
         Ok(())
     }
