@@ -151,7 +151,7 @@ pub(crate) fn lines(code: &str, lang: &str) -> Vec<CodeLine> {
                 tokens: ModelRc::new(VecModel::from(
                     runs.into_iter()
                         .map(|(text, kind)| CodeToken {
-                            text: SharedString::from(text),
+                            text: SharedString::from(crate::hangul::for_slint(text)),
                             color: kind.color(),
                         })
                         .collect::<Vec<_>>(),

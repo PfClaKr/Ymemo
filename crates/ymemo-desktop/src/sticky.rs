@@ -133,7 +133,7 @@ pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) -> bool {
     refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
     // Reflect the new title in the title bar.
     if let Some(entry) = ctx.stickies.borrow().get(id) {
-        entry.window.set_memo_title(SharedString::from(memo.title));
+        entry.window.set_memo_title(SharedString::from(crate::hangul::for_slint(&memo.title)));
         // The save went through, so whatever the last one said no longer holds.
         entry.window.set_notice(SharedString::new());
     }
@@ -506,7 +506,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     let window = StickyWindow::new()?;
     // The globals are per instance, so fill this one with the current strings.
     apply_strings(&window.global::<Strings>());
-    window.set_memo_title(SharedString::from(memo.title.clone()));
+    window.set_memo_title(SharedString::from(crate::hangul::for_slint(&memo.title)));
     set_body_text(&window, &sticky_text(memo));
     window.set_sticky_color(SharedString::from(memo.color.clone()));
     window.set_sticky_opacity(memo.opacity as f32);

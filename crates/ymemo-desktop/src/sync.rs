@@ -55,7 +55,7 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
                 if let Some(w) = list_weak.upgrade() {
                     // The vault's name is in the document too, so another device renaming it
                     // arrives here like any other change.
-                    let name = v.name();
+                    let name = crate::hangul::for_slint(&v.name());
                     if w.get_vault_name() != name.as_str() {
                         w.set_vault_name(name.into());
                     }

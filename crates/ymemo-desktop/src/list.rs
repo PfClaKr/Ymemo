@@ -330,7 +330,7 @@ pub(crate) fn group_row(
 ) -> ListRow {
     ListRow {
         id: SharedString::from(group.id.clone()),
-        title: SharedString::from(group.name.clone()),
+        title: SharedString::from(crate::hangul::for_slint(&group.name)),
         color: SharedString::from(group.color.clone()),
         depth,
         is_group: true,
@@ -354,7 +354,7 @@ pub(crate) fn memo_row(memo: &Memo, depth: i32) -> ListRow {
     };
     ListRow {
         id: SharedString::from(memo.id.clone()),
-        title: SharedString::from(title),
+        title: SharedString::from(crate::hangul::for_slint(&title)),
         color: SharedString::from(memo.color.clone()),
         depth,
         is_group: false,

@@ -357,6 +357,7 @@ component BarButton inherits TouchArea {
 // ---------------------------------------------------------------------------
 component NotePad {
     in property <length> font-size: 12px;
+    in property <string> font-family;
     in property <color> ink;
     in property <length> pad-bottom: 4px;
     in-out property <string> text <=> input.text;
@@ -406,6 +407,7 @@ component NotePad {
                 single-line: false;
                 wrap: word-wrap;
                 font-size: root.font-size;
+                font-family: root.font-family;
                 color: root.ink;
                 // The widget's own selection colours came from the style; set them here or a
                 // selection is invisible against the pale paper.

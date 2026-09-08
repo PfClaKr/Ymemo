@@ -30,6 +30,7 @@ use ymemo_core::diag;
 /// with, so a memo — which only exists at runtime — has to arrive as styled text. `text`
 /// keeps the markdown it came from: nothing draws it, and it is what the tests read back.
 fn prose_block(markdown: &str, font_size: f32) -> NoteBlock {
+    let markdown = &crate::hangul::for_slint(markdown);
     let styled = slint::StyledText::from_markdown(markdown).unwrap_or_else(|e| {
         // Markdown that will not parse is still writing, and dropping it would look like the
         // memo had lost a paragraph. Shown as it was typed instead.
@@ -47,6 +48,7 @@ fn prose_block(markdown: &str, font_size: f32) -> NoteBlock {
 
 /// A block of writing that is not in a markdown region: shown exactly as it was typed.
 fn plain_block(text: &str) -> NoteBlock {
+    let text = &crate::hangul::for_slint(text);
     NoteBlock {
         styled: slint::StyledText::from_plain_text(text),
         text: text.into(),
@@ -65,7 +67,7 @@ fn plain_block(text: &str) -> NoteBlock {
 fn code_block(text: &str, lang: &str) -> NoteBlock {
     NoteBlock {
         styled: Default::default(),
-        text: text.into(),
+        text: crate::hangul::for_slint(text).into(),
         code: true,
         lines: slint::ModelRc::new(slint::VecModel::from(crate::highlight::lines(text, lang))),
         font_size: BODY_FONT_PX,
