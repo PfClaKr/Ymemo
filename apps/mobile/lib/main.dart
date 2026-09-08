@@ -1822,36 +1822,79 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, box) {
-                    final canvas = Size(box.maxWidth, box.maxHeight);
                     final baseFont = DefaultTextStyle.of(context).style.fontSize ?? 14.0;
-                    return Stack(
+                    final floating = _photos.where((p) => !p.flow).toList();
+                    final flowing = _photos.where((p) => p.flow).toList();
+                    // The writing, and under it the photos that asked not to be written
+                    // over. A column rather than one surface, because that *is* the
+                    // difference between the two modes: what is in this column cannot have
+                    // text behind it. Same arrangement as the desktop sticky.
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Positioned.fill(
-                          child: TextField(
-                            controller: _body,
-                            decoration: InputDecoration(
-                              hintText: widget.strings.bodyHint,
-                              border: InputBorder.none,
-                            ),
-                            maxLines: null,
-                            expands: true,
-                            textAlignVertical: TextAlignVertical.top,
-                            // Writing puts the photo handles away; they would otherwise sit
-                            // over the line being typed.
-                            onTap: () => setState(() => _selectedPhoto = null),
+                        Expanded(
+                          child: LayoutBuilder(
+                            builder: (context, area) {
+                              final canvas = Size(area.maxWidth, area.maxHeight);
+                              return Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: TextField(
+                                      controller: _body,
+                                      decoration: InputDecoration(
+                                        hintText: widget.strings.bodyHint,
+                                        border: InputBorder.none,
+                                      ),
+                                      maxLines: null,
+                                      expands: true,
+                                      textAlignVertical: TextAlignVertical.top,
+                                      // Writing puts the photo handles away; they would
+                                      // otherwise sit over the line being typed.
+                                      onTap: () =>
+                                          setState(() => _selectedPhoto = null),
+                                    ),
+                                  ),
+                                  for (final photo in floating)
+                                    NotePhoto(
+                                      key: ValueKey(photo.id),
+                                      strings: widget.strings,
+                                      attachment: photo,
+                                      canvas: canvas,
+                                      baseFont: baseFont,
+                                      ink: ink,
+                                      selected: _selectedPhoto == photo.id,
+                                      onSelect: () =>
+                                          setState(() => _selectedPhoto = photo.id),
+                                      onChanged: _reloadPhotos,
+                                    ),
+                                ],
+                              );
+                            },
                           ),
                         ),
-                        for (final photo in _photos)
-                          NotePhoto(
-                            key: ValueKey(photo.id),
-                            strings: widget.strings,
-                            attachment: photo,
-                            canvas: canvas,
-                            baseFont: baseFont,
-                            ink: ink,
-                            selected: _selectedPhoto == photo.id,
-                            onSelect: () => setState(() => _selectedPhoto = photo.id),
-                            onChanged: _reloadPhotos,
+                        if (flowing.isNotEmpty)
+                          SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                for (final photo in flowing)
+                                  NotePhoto(
+                                    key: ValueKey(photo.id),
+                                    strings: widget.strings,
+                                    attachment: photo,
+                                    flow: true,
+                                    // The band is as wide as the note; the width the core
+                                    // stores is what caps the picture inside it.
+                                    canvas: Size(box.maxWidth, box.maxHeight),
+                                    baseFont: baseFont,
+                                    ink: ink,
+                                    selected: _selectedPhoto == photo.id,
+                                    onSelect: () =>
+                                        setState(() => _selectedPhoto = photo.id),
+                                    onChanged: _reloadPhotos,
+                                  ),
+                              ],
+                            ),
                           ),
                       ],
                     );
@@ -2803,12 +2846,16 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 }
 
-/// One photo lying on the note: drag it anywhere, pull its corner to resize, ✕ to detach.
+/// One photo on the note: drag it anywhere, pull its corner to resize, ✕ to detach.
 ///
 /// Nothing is written until the finger lifts — a drag would otherwise leave one entry in the
 /// change log per frame. Both numbers that get written are platform-independent: the width
 /// in **em**, multiples of the body font, and the position as a **fraction of the note**. A
 /// photo half way down a phone screen is half way down the desktop sticky as well.
+///
+/// In [`flow`] the photo is placed by the column under the writing instead of by its stored
+/// corner, so there is nothing to drag — only the resize stays. The corner it *would* go back
+/// to is left untouched, so taking it out of the flow puts it where it was.
 class NotePhoto extends StatefulWidget {
   const NotePhoto({
     super.key,
@@ -2820,10 +2867,14 @@ class NotePhoto extends StatefulWidget {
     required this.selected,
     required this.onSelect,
     required this.onChanged,
+    this.flow = false,
   });
 
   final FfiStrings strings;
   final FfiAttachment attachment;
+
+  /// Whether this one sits in the band under the writing rather than on top of it.
+  final bool flow;
 
   /// Size of the note the photo lies on; positions are a fraction of it.
   final Size canvas;
@@ -2890,8 +2941,14 @@ class _NotePhotoState extends State<NotePhoto> {
   Future<void> _commit() async {
     await attachmentSetLayout(
       id: widget.attachment.id,
-      xPermille: (_x / max(widget.canvas.width, 1) * 1000).round(),
-      yPermille: (_y / max(widget.canvas.height, 1) * 1000).round(),
+      // A photo in the flow is placed by the column, so the corner it would return to is
+      // written back unchanged: only its width is the user's to set here.
+      xPermille: widget.flow
+          ? widget.attachment.xPermille
+          : (_x / max(widget.canvas.width, 1) * 1000).round(),
+      yPermille: widget.flow
+          ? widget.attachment.yPermille
+          : (_y / max(widget.canvas.height, 1) * 1000).round(),
       widthEmMilli: (_w / widget.baseFont * 1000).round(),
     );
     // Cleared without a setState of their own: reloading rebuilds this widget with the
@@ -2906,40 +2963,46 @@ class _NotePhotoState extends State<NotePhoto> {
   @override
   Widget build(BuildContext context) {
     final selected = widget.selected;
-    return Positioned(
-      left: _x,
-      top: _y,
-      width: _w,
-      height: _h,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          GestureDetector(
-            onTap: widget.onSelect,
-            onPanStart: (_) => widget.onSelect(),
-            onPanUpdate: (d) => setState(() {
-              _dx += d.delta.dx;
-              _dy += d.delta.dy;
-            }),
-            onPanEnd: (_) => _commit(),
-            child: Container(
-              width: _w,
-              height: _h,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(
-                  color: selected ? widget.ink : widget.ink.withValues(alpha: 0.35),
-                  width: selected ? 2 : 1,
-                ),
+    final frame = Stack(
+      clipBehavior: Clip.none,
+      children: [
+        GestureDetector(
+          onTap: widget.onSelect,
+          onPanStart: (_) => widget.onSelect(),
+          // Nowhere to drag one in the flow; the column decides where it goes.
+          onPanUpdate: widget.flow
+              ? null
+              : (d) => setState(() {
+                    _dx += d.delta.dx;
+                    _dy += d.delta.dy;
+                  }),
+          onPanEnd: widget.flow ? null : (_) => _commit(),
+          child: Container(
+            width: _w,
+            height: _h,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: selected ? widget.ink : widget.ink.withValues(alpha: 0.35),
+                width: selected ? 2 : 1,
               ),
-              clipBehavior: Clip.antiAlias,
-              child: _picture(),
             ),
+            clipBehavior: Clip.antiAlias,
+            child: _picture(),
           ),
-          if (selected) ..._furniture(),
-        ],
-      ),
+        ),
+        if (selected) ..._furniture(),
+      ],
     );
+    // In the flow the column places it; on top of the writing it places itself. The padding
+    // is for the controls, which hang outside the frame.
+    if (widget.flow) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(0, 12, 12, 4),
+        child: SizedBox(width: _w, height: _h, child: frame),
+      );
+    }
+    return Positioned(left: _x, top: _y, width: _w, height: _h, child: frame);
   }
 
   Widget _picture() {
@@ -2977,6 +3040,31 @@ class _NotePhotoState extends State<NotePhoto> {
                 await widget.onChanged();
               },
               child: _chip(const Color(0xFFD64541), Icons.close),
+            ),
+          ),
+        ),
+        // Move it between the two ways of sitting. Next to the detach, and labelled with
+        // what it will do rather than with what the photo is now.
+        Positioned(
+          right: _handle * 2 / 3,
+          top: -_handle / 3,
+          child: Semantics(
+            label: widget.flow
+                ? widget.strings.photoOverText
+                : widget.strings.photoUnderText,
+            button: true,
+            child: GestureDetector(
+              onTap: () async {
+                await attachmentSetFlow(
+                  id: widget.attachment.id,
+                  flow: !widget.flow,
+                );
+                await widget.onChanged();
+              },
+              child: _chip(
+                widget.ink,
+                widget.flow ? Icons.flip_to_front : Icons.vertical_align_bottom,
+              ),
             ),
           ),
         ),

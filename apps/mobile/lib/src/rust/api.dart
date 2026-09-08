@@ -211,6 +211,13 @@ Future<void> attachmentSetLayout(
         yPermille: yPermille,
         widthEmMilli: widthEmMilli);
 
+/// Moves a photo between lying on the writing and having a band of its own under it.
+///
+/// A fact about the memo, not about this device: a photo put in the flow here is out of the
+/// way of the writing on the desktop sticky too.
+Future<void> attachmentSetFlow({required String id, required bool flow}) =>
+    RustLib.instance.api.crateApiAttachmentSetFlow(id: id, flow: flow);
+
 /// Detaches a photo; the blob file stays (no GC).
 Future<void> attachmentRemove({required String id}) =>
     RustLib.instance.api.crateApiAttachmentRemove(id: id);
@@ -486,6 +493,10 @@ class FfiAttachment {
   /// Top-left corner on the note, in per-mille of the note area (0..=1000 across and down).
   final PlatformInt64 xPermille;
   final PlatformInt64 yPermille;
+
+  /// Whether the photo takes a band of its own under the writing instead of lying on top
+  /// of it. False is what every photo was before there was a choice.
+  final bool flow;
   final PlatformInt64 createdAt;
 
   const FfiAttachment({
@@ -499,6 +510,7 @@ class FfiAttachment {
     required this.widthEmMilli,
     required this.xPermille,
     required this.yPermille,
+    required this.flow,
     required this.createdAt,
   });
 
@@ -514,6 +526,7 @@ class FfiAttachment {
       widthEmMilli.hashCode ^
       xPermille.hashCode ^
       yPermille.hashCode ^
+      flow.hashCode ^
       createdAt.hashCode;
 
   @override
@@ -531,6 +544,7 @@ class FfiAttachment {
           widthEmMilli == other.widthEmMilli &&
           xPermille == other.xPermille &&
           yPermille == other.yPermille &&
+          flow == other.flow &&
           createdAt == other.createdAt;
 }
 
@@ -989,6 +1003,10 @@ class FfiStrings {
   final String photoMissing;
   final String photoRemove;
   final String photoSize;
+
+  /// The two ways a photo can sit on a note; each label says what pressing it does.
+  final String photoUnderText;
+  final String photoOverText;
   final String save;
   final String scanHint;
   final String scanQr;
@@ -1141,6 +1159,8 @@ class FfiStrings {
     required this.photoMissing,
     required this.photoRemove,
     required this.photoSize,
+    required this.photoUnderText,
+    required this.photoOverText,
     required this.save,
     required this.scanHint,
     required this.scanQr,
@@ -1295,6 +1315,8 @@ class FfiStrings {
       photoMissing.hashCode ^
       photoRemove.hashCode ^
       photoSize.hashCode ^
+      photoUnderText.hashCode ^
+      photoOverText.hashCode ^
       save.hashCode ^
       scanHint.hashCode ^
       scanQr.hashCode ^
@@ -1451,6 +1473,8 @@ class FfiStrings {
           photoMissing == other.photoMissing &&
           photoRemove == other.photoRemove &&
           photoSize == other.photoSize &&
+          photoUnderText == other.photoUnderText &&
+          photoOverText == other.photoOverText &&
           save == other.save &&
           scanHint == other.scanHint &&
           scanQr == other.scanQr &&

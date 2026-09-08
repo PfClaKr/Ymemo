@@ -92,11 +92,15 @@ pub struct FfiAttachment {
     /// Top-left corner on the note, in per-mille of the note area (0..=1000 across and down).
     pub x_permille: i64,
     pub y_permille: i64,
+    /// Whether the photo takes a band of its own under the writing instead of lying on top
+    /// of it. False is what every photo was before there was a choice.
+    pub flow: bool,
     pub created_at: i64,
 }
 
 impl From<Attachment> for FfiAttachment {
     fn from(a: Attachment) -> Self {
+        let flow = a.mode() == ymemo_core::PhotoMode::Flow;
         Self {
             id: a.id,
             memo_id: a.memo_id,
@@ -108,6 +112,7 @@ impl From<Attachment> for FfiAttachment {
             width_em_milli: a.width_em_milli,
             x_permille: a.x_permille,
             y_permille: a.y_permille,
+            flow,
             created_at: a.created_at,
         }
     }
@@ -256,6 +261,9 @@ pub struct FfiStrings {
     pub photo_missing: String,
     pub photo_remove: String,
     pub photo_size: String,
+    /// The two ways a photo can sit on a note; each label says what pressing it does.
+    pub photo_under_text: String,
+    pub photo_over_text: String,
     pub save: String,
     pub scan_hint: String,
     pub scan_qr: String,
@@ -416,6 +424,8 @@ pub fn mobile_strings() -> FfiStrings {
         photo_missing: t!("mobile.photo_missing"),
         photo_remove: t!("mobile.photo_remove"),
         photo_size: t!("mobile.photo_size"),
+        photo_under_text: t!("mobile.photo_under_text"),
+        photo_over_text: t!("mobile.photo_over_text"),
         save: t!("mobile.save"),
         scan_hint: t!("mobile.scan_hint"),
         scan_qr: t!("mobile.scan_qr"),
@@ -856,6 +866,19 @@ pub fn attachment_set_layout(
     width_em_milli: i64,
 ) -> Result<()> {
     with_vault(|v| v.set_attachment_layout(&id, x_permille, y_permille, width_em_milli))
+}
+
+/// Moves a photo between lying on the writing and having a band of its own under it.
+///
+/// A fact about the memo, not about this device: a photo put in the flow here is out of the
+/// way of the writing on the desktop sticky too.
+pub fn attachment_set_flow(id: String, flow: bool) -> Result<()> {
+    let mode = if flow {
+        ymemo_core::PhotoMode::Flow
+    } else {
+        ymemo_core::PhotoMode::Float
+    };
+    with_vault(|v| v.set_attachment_mode(&id, mode))
 }
 
 /// Detaches a photo; the blob file stays (no GC).
