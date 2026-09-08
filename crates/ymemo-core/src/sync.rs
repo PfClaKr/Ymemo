@@ -172,7 +172,7 @@ impl Syncthing {
             std::thread::sleep(Duration::from_millis(200));
         };
 
-        // Wait for REST to answer.
+        // Wait for REST to answer us specifically.
         while st.ping().is_err() {
             if Instant::now() > deadline {
                 bail!(t!("core.syncthing_rest_timeout", url = st.base_url));
@@ -181,6 +181,13 @@ impl Syncthing {
                 bail!(t!("core.syncthing_exited_early", status = status));
             }
             std::thread::sleep(Duration::from_millis(200));
+            // Re-read the key on every turn. The daemon writes config.xml as it starts, and a
+            // key read a moment too early — or one left by a previous run that this start
+            // replaced — is refused by everything afterwards. Picking the new one up here is
+            // the difference between sync working and sync silently not.
+            if let Some(key) = std::fs::read_to_string(&config_path).ok().and_then(|x| parse_api_key(&x)) {
+                st.api_key = key;
+            }
         }
 
         // Best effort: a daemon that will not take this still syncs, and refusing to start
@@ -214,10 +221,23 @@ impl Syncthing {
         Ok(())
     }
 
+    /// Whether the daemon is up **and** accepts our API key.
+    ///
+    /// It used to call `/rest/system/ping` and treat any answer as success — and a refusal is
+    /// an answer. With a key the daemon did not accept, startup looked healthy and then every
+    /// call failed with `json: expected value at line 1 column 1`: the plain-text "missing or
+    /// invalid authentication code" body, being parsed as JSON. The app went on to report
+    /// sync as unavailable, blaming a missing binary for an authentication problem, and left
+    /// the daemon it had spawned running. Reading a field out of the response proves both
+    /// halves at once.
     fn ping(&self) -> Result<()> {
-        ureq::get(format!("{}/rest/system/ping", self.base_url))
+        let mut res = ureq::get(format!("{}/rest/system/status", self.base_url))
             .header("X-API-Key", &self.api_key)
             .call()?;
+        let status: serde_json::Value = res.body_mut().read_json()?;
+        if status["myID"].as_str().is_none_or(str::is_empty) {
+            bail!(t!("core.syncthing_no_my_id"));
+        }
         Ok(())
     }
 
@@ -433,6 +453,35 @@ impl Syncthing {
         for peer in peers.iter().filter(|id| **id != my_id) {
             self.upsert_peer(peer)?;
         }
+        Ok(())
+    }
+
+    /// Names this device, which is what the other devices show in their list.
+    ///
+    /// Syncthing names a device after its hostname and announces that to its peers. On a
+    /// desktop that is the machine's name and exactly right; on Android the hostname is
+    /// **`localhost`**, so every phone anyone paired arrived under the same label. This lets
+    /// the platform say something better.
+    ///
+    /// Only ever raises the name over the daemon's own default, and only for peers that learn
+    /// it **after** it is set: Syncthing keeps the name it first learned for a device
+    /// (`overwriteRemoteDeviceNamesOnConnect` is off by default), so a pairing made before
+    /// this keeps whatever it recorded then. Which is why it runs at startup rather than at
+    /// pairing time — the name is in place before any peer asks.
+    pub fn set_my_name(&self, name: &str) -> Result<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Ok(());
+        }
+        let my_id = self.device_id()?;
+        let url = format!("{}/rest/config/devices/{my_id}", self.base_url);
+        let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
+        let mut device: serde_json::Value = res.body_mut().read_json()?;
+        if device["name"] == serde_json::json!(name) {
+            return Ok(()); // already so; a PUT would restart the connections
+        }
+        device["name"] = serde_json::json!(name);
+        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&device)?;
         Ok(())
     }
 

@@ -23,6 +23,10 @@ Future<T?> _invoke<T>(String method, [Object? argument]) async {
 /// Path of the bundled sync daemon, or null when this build ships none.
 Future<String?> syncBinaryPath() => _invoke<String>('syncBinaryPath');
 
+/// What this phone should be called on the other devices' screens; see `deviceName` in
+/// MainActivity. Null on a platform that has no answer, where the daemon's own default stands.
+Future<String?> deviceName() => _invoke<String>('deviceName');
+
 /// Wifi multicast lock, without which the stack drops the LAN pairing broadcast. Held only
 /// while the pairing screen is open.
 Future<void> acquireMulticastLock() => _invoke<bool>('acquireMulticastLock');

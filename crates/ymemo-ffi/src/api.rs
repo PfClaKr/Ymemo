@@ -1072,6 +1072,18 @@ pub fn sync_start(binary_path: String, home_dir: String, vault_dir: String) -> R
     Ok(PairingCode::new(&id).encode())
 }
 
+/// Tells the daemon what to call this device, which is the name its peers show.
+///
+/// Android has no useful hostname — Syncthing falls back to `localhost` — so Dart passes the
+/// name the platform knows. Doing nothing when the daemon is down is correct; Dart calls this
+/// again once it is up. See `Syncthing::set_my_name` for why the name has to be in place
+/// before a peer first connects.
+pub fn sync_set_device_name(name: String) -> Result<()> {
+    let guard = sync_lock()?;
+    let Some(st) = guard.as_ref() else { return Ok(()) };
+    st.set_my_name(&name)
+}
+
 /// Re-registers the vault directory with the running daemon.
 ///
 /// [`sync_start`] does this on its first run and then short-circuits, so a vault created

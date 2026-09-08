@@ -275,6 +275,15 @@ Future<String> syncStart(
     RustLib.instance.api.crateApiSyncStart(
         binaryPath: binaryPath, homeDir: homeDir, vaultDir: vaultDir);
 
+/// Tells the daemon what to call this device, which is the name its peers show.
+///
+/// Android has no useful hostname — Syncthing falls back to `localhost` — so Dart passes the
+/// name the platform knows. Doing nothing when the daemon is down is correct; Dart calls this
+/// again once it is up. See `Syncthing::set_my_name` for why the name has to be in place
+/// before a peer first connects.
+Future<void> syncSetDeviceName({required String name}) =>
+    RustLib.instance.api.crateApiSyncSetDeviceName(name: name);
+
 /// Re-registers the vault directory with the running daemon.
 ///
 /// [`sync_start`] does this on its first run and then short-circuits, so a vault created
