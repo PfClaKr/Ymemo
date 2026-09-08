@@ -313,6 +313,7 @@ class _LockScreenState extends State<LockScreen> {
   /// Recovery inputs, only built while the forgotten-password panel is open.
   final _recoveryCode = TextEditingController();
   final _recoveryPassword = TextEditingController();
+  final _recoveryConfirm = TextEditingController();
 
   String? _error;
 
@@ -417,6 +418,7 @@ class _LockScreenState extends State<LockScreen> {
     _confirm.dispose();
     _recoveryCode.dispose();
     _recoveryPassword.dispose();
+    _recoveryConfirm.dispose();
     super.dispose();
   }
 
@@ -500,7 +502,12 @@ class _LockScreenState extends State<LockScreen> {
   /// Only the header is rewritten, so a wrong code costs one Argon2id run and leaves the
   /// vault exactly as it was.
   Future<void> _recover() async {
-    if (_recoveryCode.text.isEmpty || _recoveryPassword.text.isEmpty || _busy) return;
+    if (_recoveryCode.text.isEmpty ||
+        _recoveryPassword.text.isEmpty ||
+        _recoveryPassword.text != _recoveryConfirm.text ||
+        _busy) {
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -560,6 +567,7 @@ class _LockScreenState extends State<LockScreen> {
   void _leaveRecovery() {
     _recoveryCode.clear();
     _recoveryPassword.clear();
+    _recoveryConfirm.clear();
     if (mounted) {
       setState(() {
         _recovering = false;
@@ -724,8 +732,28 @@ class _LockScreenState extends State<LockScreen> {
             controller: _recoveryPassword,
             obscureText: true,
             decoration: InputDecoration(labelText: s.newPassword),
-            onSubmitted: (_) => _recover(),
+            textInputAction: TextInputAction.next,
+            onChanged: (_) => setState(() {}),
           ),
+          const SizedBox(height: 8),
+          // Typed twice, for the same reason the first-run screen asks twice: this password
+          // is never checked against anything before it is used, and the header it rewrites
+          // is synced — so a slip hands every device a password nobody knows. The recovery
+          // code still works afterwards, which is the only reason this is a nuisance rather
+          // than a disaster.
+          TextField(
+            controller: _recoveryConfirm,
+            obscureText: true,
+            decoration: InputDecoration(labelText: s.repeatPassword),
+            onSubmitted: (_) => _recover(),
+            onChanged: (_) => setState(() {}),
+          ),
+          if (_recoveryConfirm.text.isNotEmpty &&
+              _recoveryConfirm.text != _recoveryPassword.text)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(s.repeatMismatch, style: const TextStyle(color: Colors.red)),
+            ),
           const SizedBox(height: 12),
           FilledButton(
             onPressed: _busy ? null : _recover,

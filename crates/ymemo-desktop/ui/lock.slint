@@ -78,7 +78,7 @@ export component LockWindow inherits Window {
     }
     // The panels that do not fit the password prompt's height: the first-run choice with a
     // paragraph on each card, a new recovery code, and the "forgot the password" panel with
-    // its code, its two fields and the wipe behind them.
+    // its code, its three fields and the wipe behind them.
     private property <bool> tall-panel: root.new-recovery-code != "" || root.recovering
         || (!root.vault-exists && !root.creating);
     changed tall-panel => { root.needs-room(self.tall-panel); }
@@ -191,14 +191,34 @@ export component LockWindow inherits Window {
                     newpw := LineEdit {
                         placeholder-text: Strings.ui_lock_recovery_new_password;
                         input-type: InputType.password;
-                        accepted => { root.recover(code.text, self.text); }
+                        accepted => { newpw2.focus(); }
+                    }
+                    // Typed twice, for the same reason the create screen asks twice: this
+                    // password is never checked against anything before it is used, and the
+                    // header it rewrites is synced — so a slip here hands every device a
+                    // password nobody knows. The recovery code still works afterwards, which
+                    // is the only reason this is a nuisance rather than a disaster.
+                    newpw2 := LineEdit {
+                        placeholder-text: Strings.ui_lock_confirm_password;
+                        input-type: InputType.password;
+                        accepted => {
+                            if (newpw.text != "" && newpw.text == self.text) {
+                                root.recover(code.text, newpw.text);
+                            }
+                        }
+                    }
+                    if newpw2.text != "" && newpw.text != newpw2.text: Text {
+                        text: Strings.ui_lock_password_mismatch;
+                        font-size: 11px;
+                        color: #e79a9a;
+                        wrap: word-wrap;
                     }
                     HorizontalLayout {
                         alignment: start;
                         Button {
                             text: Strings.ui_lock_recover;
                             primary: true;
-                            enabled: code.text != "" && newpw.text != "";
+                            enabled: code.text != "" && newpw.text != "" && newpw.text == newpw2.text;
                             clicked => { root.recover(code.text, newpw.text); }
                         }
                     }
