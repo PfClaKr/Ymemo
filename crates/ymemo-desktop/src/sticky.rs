@@ -352,6 +352,16 @@ pub(crate) fn refresh_photos(ctx: &Ctx, memo_id: &str) {
     }
 }
 
+/// Sets a sticky's body and the blocks its read view draws, which must never disagree: the
+/// read view is the same words, and showing yesterday's next to today's would be worse than
+/// showing none.
+pub(crate) fn set_body_text(window: &StickyWindow, text: &str) {
+    window.set_memo_text(SharedString::from(text));
+    window.set_blocks(slint::ModelRc::new(slint::VecModel::from(
+        crate::markdown::blocks(text),
+    )));
+}
+
 /// Hands both photo models to a sticky window; the two always change together.
 pub(crate) fn set_photo_models(window: &StickyWindow, (float, flow): (Vec<PhotoRow>, Vec<PhotoRow>)) {
     window.set_photos(slint::ModelRc::new(slint::VecModel::from(float)));
@@ -448,7 +458,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     // The globals are per instance, so fill this one with the current strings.
     apply_strings(&window.global::<Strings>());
     window.set_memo_title(SharedString::from(memo.title.clone()));
-    window.set_memo_text(SharedString::from(sticky_text(memo)));
+    set_body_text(&window, &sticky_text(memo));
     window.set_sticky_color(SharedString::from(memo.color.clone()));
     window.set_sticky_opacity(memo.opacity as f32);
     window.set_pinned(ctx.settings.borrow().memo_pinned(&memo.id));
@@ -566,8 +576,15 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         let id = memo.id.clone();
         let dirty = dirty.clone();
         let weak = window.as_weak();
-        window.on_edited(move |_| {
+        window.on_edited(move |text| {
             touch(&ctx);
+            // The read view is rebuilt as it is typed rather than when the caret leaves: it
+            // is cheap, and doing it on the way out would show the old words for a frame.
+            if let Some(w) = weak.upgrade() {
+                w.set_blocks(slint::ModelRc::new(slint::VecModel::from(
+                    crate::markdown::blocks(text.as_str()),
+                )));
+            }
             dirty.set(true);
             let ctx2 = ctx.clone();
             let id2 = id.clone();

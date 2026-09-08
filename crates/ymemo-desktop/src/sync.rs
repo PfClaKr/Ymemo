@@ -70,7 +70,7 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
                         Ok(Some(m)) => {
                             let text = sticky_text(&m);
                             if entry.window.get_memo_text() != text.as_str() {
-                                entry.window.set_memo_text(text.into());
+                                crate::sticky::set_body_text(&entry.window, &text);
                             }
                             entry.window.set_memo_title(m.title.into());
                             entry.window.set_sticky_color(m.color.into());

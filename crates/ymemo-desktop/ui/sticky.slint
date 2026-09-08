@@ -14,6 +14,18 @@ import { Palette, Glyph } from "theme.slint";
 /// window's body font. The position arrives as a **fraction of the note** instead, and is
 /// turned into pixels here, so resizing the window keeps a photo on the same part of the
 /// note without a round trip through Rust.
+// One piece of a memo as the read view draws it: either markdown for Slint's own styled text,
+// or the inside of a fenced code block. See `markdown.rs`.
+export struct NoteBlock {
+    // The prose, already parsed: `@markdown()` reads its *literal* at compile time, so text
+    // that only exists at runtime has to arrive styled. `markdown.rs` does the parsing.
+    styled: styled-text,
+    // The inside of a fenced code block, drawn as it was typed.
+    text: string,
+    code: bool,
+    font-size: length,
+}
+
 export struct PhotoRow {
     id: string,
     image: image,
@@ -409,6 +421,8 @@ export component StickyWindow inherits Window {
     // completely different places — one lying on the writing, one in a band under it.
     in property <[PhotoRow]> photos: [];
     in property <[PhotoRow]> flow-photos: [];
+    // The memo as it reads, for the moments nobody is writing in it. See `markdown.rs`.
+    in property <[NoteBlock]> blocks: [];
     // A photo was asked to move between the two. True means into the flow.
     callback set-photo-flow(string, bool);
     // True while a photo is being dragged or resized. Rust reads it before pushing a merged
@@ -746,12 +760,61 @@ export component StickyWindow inherits Window {
                             height: 100%;
                             // Must match BODY_FONT_PX in sticky.rs, which sizes the photos.
                             font-size: 13px;
-                            ink: #2b2b22;
+                            // Transparent while the read view is over it. The field stays
+                            // where it is — it has to, or a click could not hand the caret
+                            // back to it — and simply draws nothing; painting the read view
+                            // over it instead showed the raw markers through the paper,
+                            // which is translucent on purpose.
+                            ink: body.has-focus ? #2b2b22 : #00000000;
                             // Room along the bottom edge for the date, so the last line of a
                             // full note is not written underneath it.
                             pad-bottom: root.created-at == "" ? 4px : 14px;
                             text <=> root.memo-text;
                             edited => { root.edited(self.text); }
+                        }
+
+                        // ---- The memo as it reads: markdown drawn as markdown, over the
+                        // markdown as it is typed.
+                        //
+                        // Slint's editor has one font weight for the whole field, so there
+                        // is no styling the text *while* it is being written. What there is
+                        // instead: the moment the caret leaves, this covers the field with
+                        // the same words set properly, and a click hands the caret back and
+                        // takes it away again. Writing is always the plain memo, with every
+                        // marker where the user put it. ----
+                        if !body.has-focus && root.blocks.length > 0: Rectangle {
+                            read-ta := TouchArea {
+                                mouse-cursor: MouseCursor.text;
+                                clicked => { body.focus(); }
+                            }
+                            VerticalLayout {
+                                padding: 2px;
+                                padding-bottom: root.created-at == "" ? 2px : 14px;
+                                spacing: 4px;
+                                alignment: start;
+                                for block in root.blocks: VerticalLayout {
+                                    if block.code: Rectangle {
+                                        background: Palette.ink(root.sticky-color)
+                                            .with-alpha(0.07);
+                                        border-radius: 4px;
+                                        VerticalLayout {
+                                            padding: 5px;
+                                            Text {
+                                                text: block.text;
+                                                font-family: "monospace";
+                                                font-size: block.font-size;
+                                                color: #2b2b22;
+                                                wrap: word-wrap;
+                                            }
+                                        }
+                                    }
+                                    if !block.code: StyledText {
+                                        text: block.styled;
+                                        default-font-size: block.font-size;
+                                        default-color: #2b2b22;
+                                    }
+                                }
+                            }
                         }
 
                         // ---- Created-at, along the bottom of the *writing*. Declared after

@@ -40,6 +40,7 @@ mod icon;
 mod instance;
 mod list;
 mod lock;
+mod markdown;
 mod pairing;
 mod security;
 mod settings;
