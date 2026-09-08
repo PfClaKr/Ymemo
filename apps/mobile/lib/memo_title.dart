@@ -24,9 +24,13 @@ String firstLine(String text) {
 }
 
 /// What a memo's row is headed by. `fallback` is used when there is no writing at all.
-String rowTitle(FfiMemo memo, String fallback) {
-  if (memo.title.isNotEmpty) return memo.title;
-  final line = firstLine(memo.body);
+String rowTitle(FfiMemo memo, String fallback) =>
+    headingFor(memo.title, memo.body, fallback);
+
+/// [`rowTitle`] for a memo held as two loose fields, which is how the editor has it.
+String headingFor(String title, String body, String fallback) {
+  if (title.isNotEmpty) return title;
+  final line = firstLine(body);
   return line.isEmpty ? fallback : line;
 }
 

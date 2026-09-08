@@ -1772,7 +1772,9 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
           // The memo's own title, as the list shows it — the bar said "New memo" over every
           // memo ever opened, including ones written months ago. Fixed at the title it
           // arrived with rather than following the field below it, which is right there.
-          title: Text(widget.title.isEmpty ? widget.strings.newMemo : widget.title),
+          // A memo with no title of its own reads by its first line, the same fallback the
+          // list uses, or the two would name the same memo differently.
+          title: Text(headingFor(widget.title, widget.body, widget.strings.newMemo)),
           backgroundColor: paletteBar(_color),
           foregroundColor: ink,
           actions: [
