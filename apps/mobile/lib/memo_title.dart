@@ -6,8 +6,6 @@
 /// the home screen alike. Nothing here changes a memo: the stored title stays empty.
 library;
 
-import 'package:flutter/widgets.dart';
-
 import 'src/rust/api.dart';
 
 /// The first non-empty line of `text`, capped the way a sticky's derived title is.
@@ -19,7 +17,10 @@ String firstLine(String text) {
       .split('\n')
       .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '')
       .trim();
-  return line.characters.take(40).toString();
+  // Code points, not grapheme clusters: `chars().take(40)` on the other side counts the
+  // same units, and a title that reads one way on the phone and another on the desktop is
+  // exactly what this file exists to prevent.
+  return String.fromCharCodes(line.runes.take(40));
 }
 
 /// What a memo's row is headed by. `fallback` is used when there is no writing at all.
