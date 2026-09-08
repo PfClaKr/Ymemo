@@ -84,10 +84,34 @@ const UNDO_WINDOW: Duration = Duration::from_secs(30);
 /// driver or only legacy GL 1.1 under a VM or RDP, where even `glCreateShader` is missing.
 /// So Windows defaults to the CPU renderer, which is plenty for this UI. Override with
 /// `YMEMO_RENDERER=femtovg|software|skia`. Linux and macOS keep the default.
+/// Whether the kernel is offering a device that GL could be accelerated on.
+///
+/// Always true off Linux, where the question is asked differently and answered above.
+fn has_render_device() -> bool {
+    if !cfg!(target_os = "linux") {
+        return true;
+    }
+    // An empty `/dev/dri` counts as none: the directory outlives the driver that filled it.
+    std::fs::read_dir("/dev/dri").is_ok_and(|mut entries| entries.any(|e| e.is_ok()))
+}
+
 fn select_renderer() {
     let name = match std::env::var("YMEMO_RENDERER") {
         Ok(n) if !n.is_empty() => n,
         _ if cfg!(windows) => "software".to_string(),
+        // Linux with no rendering device: Mesa has nothing to fall back to but `swrast`,
+        // and that is not a renderer this app survives. Measured on a machine with no
+        // `/dev/dri` — a VM, a container, an X session forwarded from elsewhere: the fourth
+        // sticky window aborts the process with `malloc(): unsorted double linked list
+        // corrupted`, inside `swrast_dri.so`, under the `glTexSubImage2D` that femtovg uses
+        // to add a glyph to its atlas. Nothing above it can catch that. Slint's own software
+        // renderer draws the same UI without a GL context at all, which is the route Windows
+        // already takes for the same reason.
+        //
+        // Only the plain absence of a device is taken as the signal. A box that has one and
+        // still lands on llvmpipe keeps the default, and `YMEMO_RENDERER=femtovg` overrides
+        // either way.
+        _ if !has_render_device() => "software".to_string(),
         _ => return, // keep the default where GL works
     };
     match i_slint_backend_winit::Backend::builder()
