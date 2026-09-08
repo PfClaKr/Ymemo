@@ -45,6 +45,10 @@ export component SecurityWindow inherits Window {
     in property <string> recovery-code;
     in property <string> status;
     in property <bool> status-is-error: false;
+    // Which section the message belongs under. A single line at the foot of the window sat
+    // below the recovery section and a one-time code, so "Wrong password" appeared 150px
+    // under the button that produced it, next to a button it had nothing to do with.
+    in property <bool> status-on-password: true;
 
     callback change-password(string, string); // current, new
     callback issue-recovery();
@@ -122,6 +126,12 @@ export component SecurityWindow inherits Window {
                             clicked => { root.change-password(root.current-pw, root.new-pw); }
                         }
             }
+            if root.status != "" && root.status-on-password: Text {
+                text: root.status;
+                font-size: 11px;
+                color: root.status-is-error ? #e79a9a : #a8d0a8;
+                wrap: word-wrap;
+            }
         }
 
         // ---- Recovery code ----
@@ -144,6 +154,12 @@ export component SecurityWindow inherits Window {
                         : Strings.ui_security_issue_button;
                     clicked => { root.issue-recovery(); }
                 }
+            }
+            if root.status != "" && !root.status-on-password: Text {
+                text: root.status;
+                font-size: 11px;
+                color: root.status-is-error ? #e79a9a : #a8d0a8;
+                wrap: word-wrap;
             }
         }
 
@@ -172,13 +188,6 @@ export component SecurityWindow inherits Window {
                     wrap: word-wrap;
                 }
             }
-        }
-
-        if root.status != "": Text {
-            text: root.status;
-            font-size: 11px;
-            color: root.status-is-error ? #e79a9a : #a8d0a8;
-            wrap: word-wrap;
         }
 
             }
