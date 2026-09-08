@@ -2,8 +2,11 @@
 <!-- 4x2 and up: the folders and the most recent memos, with the two things worth doing
      without opening the app first.
 
-     The card tint and the heading are here for the widget picker, which inflates this
-     layout without running the provider; a placed widget overwrites both. -->
+     **No `android:tint` on the card.** A tint set here is applied to the same drawable the
+     provider's `setColorFilter` writes to and wins, so a widget given a paper colour and an
+     opacity in its settings drew neither — measured. The picker gets its picture from the
+     widget's `previewImage` instead. The heading below is still what it would show if it
+     ever inflated this. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -15,8 +18,7 @@
         android:layout_height="match_parent"
         android:contentDescription="@null"
         android:scaleType="fitXY"
-        android:src="@drawable/widget_card"
-        android:tint="@color/widget_surface" />
+        android:src="@drawable/widget_card" />
 
     <LinearLayout
         android:layout_width="match_parent"
