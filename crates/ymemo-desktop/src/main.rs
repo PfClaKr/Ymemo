@@ -570,6 +570,7 @@ fn main() -> Result<()> {
                     Ok(removed) => removed,
                     Err(e) => {
                         diag!("delete failed: {e}");
+                        list::report_write_failure(&e);
                         return;
                     }
                 };
@@ -627,6 +628,7 @@ fn main() -> Result<()> {
             let Some(v) = guard.as_mut() else { return };
             if let Err(e) = v.undelete(&deleted) {
                 diag!("undo failed: {e}");
+                list::report_write_failure(&e);
                 return;
             }
             refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
@@ -658,6 +660,7 @@ fn main() -> Result<()> {
                 let Some(v) = guard.as_mut() else { return };
                 if let Err(e) = v.upsert_group(&group) {
                     diag!("could not create the group: {e}");
+                    list::report_write_failure(&e);
                     return;
                 }
                 refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
@@ -698,6 +701,7 @@ fn main() -> Result<()> {
             g.updated_at = now_millis();
             if let Err(e) = v.upsert_group(&g) {
                 diag!("could not rename the group: {e}");
+                list::report_write_failure(&e);
                 return;
             }
             refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());

@@ -92,29 +92,46 @@ pub(crate) fn title_for(memo: &Memo, text: &str) -> String {
 }
 
 /// Saves an edited body to the vault, deriving the title from its first line.
-pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) {
+///
+/// Returns whether the vault now holds `text`. **False means the writing is only in the
+/// window**, so the caller must leave the sticky marked dirty: the merge timer skips a dirty
+/// note, and that is what stops the next tick from painting the last stored version over
+/// what is still being typed.
+pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) -> bool {
     let mut guard = ctx.vault.borrow_mut();
-    let Some(v) = guard.as_mut() else { return };
+    let Some(v) = guard.as_mut() else { return false };
     let mut memo = match v.store().get(id) {
         Ok(Some(m)) => m,
-        _ => return, // drop leftover edits of a deleted memo
+        // Deleted: the edits have nowhere to go and nothing is waiting to be written.
+        _ => return true,
     };
     let title = title_for(&memo, text);
     if memo.body == text && memo.title == title {
-        return;
+        return true;
     }
     memo.title = title;
     memo.body = text.to_string();
     memo.updated_at = now_millis();
     if let Err(e) = v.upsert(&memo) {
         diag!("could not save the memo: {e}");
-        return;
+        crate::list::report_write_failure(&e);
+        // On the note as well: this is the one place where what is lost is still on screen,
+        // and the list saying so is no use behind a closed window.
+        if let Some(entry) = ctx.stickies.borrow().get(id) {
+            entry
+                .window
+                .set_notice(SharedString::from(t!("msg.write_failed", error = e)));
+        }
+        return false;
     }
     refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
     // Reflect the new title in the title bar.
     if let Some(entry) = ctx.stickies.borrow().get(id) {
         entry.window.set_memo_title(SharedString::from(memo.title));
+        // The save went through, so whatever the last one said no longer holds.
+        entry.window.set_notice(SharedString::new());
     }
+    true
 }
 
 /// Writes out every sticky's pending edit and stops its debounce timer. Returns the ids of
@@ -163,6 +180,7 @@ pub(crate) fn new_memo(ctx: &Ctx) {
         let Some(v) = guard.as_mut() else { return };
         if let Err(e) = v.upsert(&memo) {
             diag!("could not create the memo: {e}");
+            crate::list::report_write_failure(&e);
             return;
         }
         refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
@@ -513,8 +531,11 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
             if let Some(entry) = ctx.stickies.borrow().get(&id) {
                 entry.save_timer.start(TimerMode::SingleShot, SAVE_DEBOUNCE, move || {
                     if let Some(w) = weak2.upgrade() {
-                        save_memo(&ctx2, &id2, w.get_memo_text().as_str());
-                        dirty2.set(false);
+                        // Stays dirty when the write failed, so the note keeps what was
+                        // typed instead of being merged back to the last stored version.
+                        if save_memo(&ctx2, &id2, w.get_memo_text().as_str()) {
+                            dirty2.set(false);
+                        }
                     }
                 });
             }
@@ -532,8 +553,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
             if let Some(w) = weak.upgrade() {
                 // Where it was when it was closed, not where the last poll saw it.
                 remember_one(&ctx, &id, w.window());
-                if dirty.get() {
-                    save_memo(&ctx, &id, w.get_memo_text().as_str());
+                if dirty.get() && save_memo(&ctx, &id, w.get_memo_text().as_str()) {
                     dirty.set(false);
                 }
             }

@@ -392,6 +392,10 @@ export component StickyWindow inherits Window {
 
     // Creation time, already formatted by Rust; empty until it is set.
     in property <string> created-at;
+    // Set when the last save failed. A note that cannot be written has to say so on the note
+    // itself: the list is where the same failure is reported, and the list is often closed
+    // while a sticky is being typed into.
+    in property <string> notice: "";
     private property <bool> show-palette: false;
     changed show-palette => { root.palette-toggled(self.show-palette); }
     // The bar button under the pointer, by name; empty when there is none. The title bar
@@ -705,6 +709,24 @@ export component StickyWindow inherits Window {
                     remove => { root.remove-photo(photo.id); }
                     busy(b) => { root.photo-busy = b; }
                 }
+            }
+        }
+
+        // ---- What could not be saved, across the bottom of the note. Painted over the body
+        // like the date, and deliberately hard to write past: everything typed after it is
+        // only in this window. ----
+        if !root.collapsed && root.notice != "": Rectangle {
+            background: #7a2b2b;
+            height: 16px;
+            y: parent.height - self.height;
+            Text {
+                text: root.notice;
+                font-size: 9px;
+                color: #ffe3e3;
+                overflow: elide;
+                width: parent.width - 8px;
+                x: 4px;
+                vertical-alignment: center;
             }
         }
 

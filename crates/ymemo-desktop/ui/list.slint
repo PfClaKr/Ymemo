@@ -49,6 +49,8 @@ export component ListWindow inherits Window {
     // Set while a delete can still be taken back, and the line the bar shows.
     in property <string> undo-message: "";
     callback undo-delete();
+    // A write that did not happen. Empty unless something failed; stays until dismissed.
+    in-out property <string> notice: "";
     in property <bool> sync-available: false;
     in property <string> my-pairing-code;
     in property <image> qr-image;
@@ -378,6 +380,45 @@ export component ListWindow inherits Window {
                     icon: "close";
                     label: Strings.ui_list_search;
                     clicked => { find.text = ""; root.search(""); }
+                }
+            }
+        }
+
+        // A change that could not be written — a full disk, a vault directory gone read-only,
+        // a removable drive pulled out. Nothing else in this window says so, and a memo app
+        // that silently drops what was typed is the one failure it cannot have. No timeout:
+        // this is not an offer that expires, it is a fact about the vault, and it stays until
+        // it is read and dismissed.
+        if root.notice != "": Rectangle {
+            height: 26px;
+            border-radius: 6px;
+            background: #4a2f2f;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 4px;
+                spacing: 6px;
+                Text {
+                    text: root.notice;
+                    font-size: 11px;
+                    color: #f0c9c9;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                dismiss := TouchArea {
+                    width: 20px;
+                    mouse-cursor: pointer;
+                    accessible-role: button;
+                    accessible-label: Strings.ui_list_notice_dismiss;
+                    Glyph {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        width: 11px;
+                        height: 11px;
+                        name: "close";
+                        stroke: dismiss.has-hover ? #ffffff : #f0c9c9;
+                    }
+                    clicked => { root.notice = ""; }
                 }
             }
         }

@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use slint::{ComponentHandle, SharedString, VecModel};
 use ymemo_core::{now_millis, vault::Vault, Memo};
+use ymemo_i18n::t;
 
 use crate::state::Ctx;
 use crate::ListRow;
@@ -65,6 +66,22 @@ pub(crate) fn refresh_list(
         rows.push(memo_row(m, 0));
     }
     model.set_vec(rows);
+}
+
+/// Puts a failed write in front of the user, as well as in the log.
+///
+/// Every write returns a `Result`, and every caller here used to do the same thing with a
+/// failed one — write a line to `ymemo.log` and carry on — which on a full disk or a vault
+/// directory gone read-only made the app look like it had simply ignored the click, and made
+/// a note typed into a sticky vanish on close with nothing said. The log is for a bug report;
+/// this is for the person who is about to lose what they wrote.
+pub(crate) fn report_write_failure(err: &anyhow::Error) {
+    crate::state::APP.with(|a| {
+        if let Some(app) = a.borrow().as_ref() {
+            app.list
+                .set_notice(slint::SharedString::from(t!("msg.write_failed", error = err)));
+        }
+    });
 }
 
 /// Drops the find box's filter, on both sides: the query the model is rebuilt from and the
@@ -144,6 +161,7 @@ pub(crate) fn move_row(ctx: &Ctx, src: i32, dst: i32) {
     };
     if let Err(e) = res {
         diag!("move failed: {e}");
+        report_write_failure(&e);
         return;
     }
     refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());

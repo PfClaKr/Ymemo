@@ -990,7 +990,14 @@ class _MemoListScreenState extends State<MemoListScreen> {
     final name = await _askForName(context, widget.strings, widget.strings.newGroup, '');
     if (name == null || name.isEmpty) return;
     _clearSearch();
-    await groupCreate(name: name, parentId: widget.groupId);
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await groupCreate(name: name, parentId: widget.groupId);
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
     await _reload();
   }
 
@@ -1313,8 +1320,17 @@ class _MemoListScreenState extends State<MemoListScreen> {
 
   Future<void> _add({bool withPhoto = false}) async {
     _clearSearch();
-    final id = await memoUpsert(title: '', body: '');
-    if (!_atRoot) await memoSetGroup(id: id, groupId: widget.groupId);
+    final messenger = ScaffoldMessenger.of(context);
+    final String id;
+    try {
+      id = await memoUpsert(title: '', body: '');
+      if (!_atRoot) await memoSetGroup(id: id, groupId: widget.groupId);
+    } catch (e) {
+      // Without this the button simply did nothing, which reads as a broken app rather
+      // than as storage the vault cannot be written to.
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -1664,9 +1680,21 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   }
 
   /// Skips the write when nothing changed; an empty change is pure sync traffic.
-  Future<void> _save() async {
-    if (_title.text == widget.title && _body.text == widget.body) return;
-    await memoUpsert(id: widget.id, title: _title.text, body: _body.text);
+  ///
+  /// Returns whether the memo is safely in the vault. A write can fail — a full disk, or
+  /// storage the app cannot reach — and leaving the screen on a false would throw away what
+  /// is typed in it with nothing said, so the caller stays put and shows why. The core's
+  /// message says what went wrong; it is shown as it is.
+  Future<bool> _save() async {
+    if (_title.text == widget.title && _body.text == widget.body) return true;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await memoUpsert(id: widget.id, title: _title.text, body: _body.text);
+      return true;
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      return false;
+    }
   }
 
   @override
@@ -1698,8 +1726,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
         if (didPop) return;
         // Grab the navigator up front; context cannot be used across the await.
         final navigator = Navigator.of(context);
-        await _save();
-        navigator.pop();
+        if (await _save()) navigator.pop();
       },
       child: Scaffold(
         backgroundColor: paletteBg(_color),
@@ -1725,8 +1752,8 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
               icon: const Icon(Icons.check),
               tooltip: widget.strings.save,
               onPressed: () async {
-                await _save();
-                if (context.mounted) Navigator.of(context).pop();
+                final saved = await _save();
+                if (saved && context.mounted) Navigator.of(context).pop();
               },
             ),
           ],
