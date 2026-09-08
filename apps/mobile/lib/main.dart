@@ -989,6 +989,7 @@ class _MemoListScreenState extends State<MemoListScreen> {
   Future<void> _newFolder() async {
     final name = await _askForName(context, widget.strings, widget.strings.newGroup, '');
     if (name == null || name.isEmpty) return;
+    _clearSearch();
     await groupCreate(name: name, parentId: widget.groupId);
     await _reload();
   }
@@ -1298,7 +1299,20 @@ class _MemoListScreenState extends State<MemoListScreen> {
   ///
   /// [withPhoto] goes straight on to the photo picker, which is what the camera button on
   /// the quick-write widget and the launcher shortcut of the same name are for.
+  /// Drops the find box's filter, on both sides: the text in the field and the query the
+  /// list is rebuilt from.
+  ///
+  /// Called before anything new appears. A memo or a folder made while a search is on does
+  /// not match it, so it is written, saved — and nowhere to be seen. Wanting a new note is
+  /// the end of the search that was running.
+  void _clearSearch() {
+    if (_query.isEmpty) return;
+    _search.clear();
+    _query = '';
+  }
+
   Future<void> _add({bool withPhoto = false}) async {
+    _clearSearch();
     final id = await memoUpsert(title: '', body: '');
     if (!_atRoot) await memoSetGroup(id: id, groupId: widget.groupId);
     if (!mounted) return;

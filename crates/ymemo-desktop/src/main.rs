@@ -651,6 +651,7 @@ fn main() -> Result<()> {
         let list_weak = list.as_weak();
         list.on_new_group(move || {
             touch(&ctx);
+            list::clear_search(&ctx);
             let group = ymemo_core::Group::new(t!("msg.new_group_name"));
             {
                 let mut guard = ctx.vault.borrow_mut();

@@ -150,6 +150,7 @@ pub(crate) fn flush_dirty(ctx: &Ctx) -> Vec<String> {
 /// Creates a memo and opens its sticky; shared by the + button in both windows.
 pub(crate) fn new_memo(ctx: &Ctx) {
     touch(ctx);
+    crate::list::clear_search(ctx);
     let mut memo = Memo::new("", "");
     {
         // Color and opacity defaults come from the settings.

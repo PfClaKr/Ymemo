@@ -67,6 +67,25 @@ pub(crate) fn refresh_list(
     model.set_vec(rows);
 }
 
+/// Drops the find box's filter, on both sides: the query the model is rebuilt from and the
+/// text in the box.
+///
+/// Called before anything new appears in the list. A memo or a folder made while a search is
+/// on does not match it, so it is written, saved — and nowhere to be seen; the folder is
+/// worse, since the rename it opens into has no row to draw on. Wanting a new note is the end
+/// of the search that was running.
+pub(crate) fn clear_search(ctx: &Ctx) {
+    if ctx.query.borrow().is_empty() {
+        return;
+    }
+    ctx.query.borrow_mut().clear();
+    crate::state::APP.with(|a| {
+        if let Some(app) = a.borrow().as_ref() {
+            app.list.set_query(slint::SharedString::new());
+        }
+    });
+}
+
 /// Moves row `src` into the group implied by row `dst`.
 ///
 /// - Dropped on a group: into that group.
