@@ -32,16 +32,23 @@ fn prose_block(markdown: &str, font_size: f32) -> NoteBlock {
         styled,
         text: markdown.into(),
         code: false,
+        lines: Default::default(),
         font_size,
     }
 }
 
 /// A block of code, drawn as it was typed.
-fn code_block(text: &str) -> NoteBlock {
+///
+/// `lang` is whatever followed the opening fence. Naming a language colours the block, the
+/// way it does in a chat box; naming nothing — or something this build does not know — leaves
+/// it plain, which is what a fence has always done. `lines` empty means "draw `text` as it
+/// is", so the two never disagree about what the block says.
+fn code_block(text: &str, lang: &str) -> NoteBlock {
     NoteBlock {
         styled: Default::default(),
         text: text.into(),
         code: true,
+        lines: slint::ModelRc::new(slint::VecModel::from(crate::highlight::lines(text, lang))),
         font_size: BODY_FONT_PX,
     }
 }
@@ -63,6 +70,7 @@ pub(crate) fn blocks(body: &str) -> Vec<NoteBlock> {
     let mut para: Vec<&str> = Vec::new();
     let mut fence: Vec<&str> = Vec::new();
     let mut in_fence = false;
+    let mut lang = String::new();
 
     // Flushes whatever prose has been gathered, so a heading or a fence cannot swallow it.
     fn flush(lines: &mut Vec<&str>, out: &mut Vec<NoteBlock>) {
@@ -73,14 +81,16 @@ pub(crate) fn blocks(body: &str) -> Vec<NoteBlock> {
     }
 
     for line in body.lines() {
-        if line.trim_start().starts_with("```") {
+        if let Some(tag) = line.trim_start().strip_prefix("```") {
             if in_fence {
                 // The fence closes: everything gathered is one card, even if it is empty —
                 // an empty block someone deliberately opened is worth showing as empty.
-                out.push(code_block(&fence.join("\n")));
+                out.push(code_block(&fence.join("\n"), &lang));
                 fence.clear();
             } else {
                 flush(&mut para, &mut out);
+                // Only the opening fence names the language; the closing one is bare.
+                lang = tag.trim().to_string();
             }
             in_fence = !in_fence;
             continue;
@@ -105,7 +115,7 @@ pub(crate) fn blocks(body: &str) -> Vec<NoteBlock> {
     }
     // A fence left open runs to the end of the memo rather than being thrown away.
     if in_fence {
-        out.push(code_block(&fence.join("\n")));
+        out.push(code_block(&fence.join("\n"), &lang));
     }
     flush(&mut para, &mut out);
     out

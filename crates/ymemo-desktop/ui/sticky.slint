@@ -16,6 +16,17 @@ import { Palette, Glyph } from "theme.slint";
 /// note without a round trip through Rust.
 // One piece of a memo as the read view draws it: either markdown for Slint's own styled text,
 // or the inside of a fenced code block. See `markdown.rs`.
+// A fenced code block, coloured. One line of it, and one run of one line — see
+// `highlight.rs`. Empty `lines` means the fence named no language this build knows, and the
+// block is drawn from `NoteBlock.text` exactly as it was typed.
+export struct CodeToken {
+    text: string,
+    color: color,
+}
+export struct CodeLine {
+    tokens: [CodeToken],
+}
+
 export struct NoteBlock {
     // The prose, already parsed: `@markdown()` reads its *literal* at compile time, so text
     // that only exists at runtime has to arrive styled. `markdown.rs` does the parsing.
@@ -23,6 +34,7 @@ export struct NoteBlock {
     // The inside of a fenced code block, drawn as it was typed.
     text: string,
     code: bool,
+    lines: [CodeLine],
     font-size: length,
 }
 
@@ -783,10 +795,6 @@ export component StickyWindow inherits Window {
                         // takes it away again. Writing is always the plain memo, with every
                         // marker where the user put it. ----
                         if !body.has-focus && root.blocks.length > 0: Rectangle {
-                            read-ta := TouchArea {
-                                mouse-cursor: MouseCursor.text;
-                                clicked => { body.focus(); }
-                            }
                             VerticalLayout {
                                 padding: 2px;
                                 padding-bottom: root.created-at == "" ? 2px : 14px;
@@ -799,7 +807,22 @@ export component StickyWindow inherits Window {
                                         border-radius: 4px;
                                         VerticalLayout {
                                             padding: 5px;
-                                            Text {
+                                            // Coloured when the fence named a language, and
+                                            // one plain block when it did not. Code is not
+                                            // wrapped either way: a line broken in the middle
+                                            // is harder to read than one that runs off.
+                                            if block.lines.length > 0: VerticalLayout {
+                                                for codeline in block.lines: HorizontalLayout {
+                                                    alignment: start;
+                                                    for run in codeline.tokens: Text {
+                                                        text: run.text;
+                                                        font-family: "monospace";
+                                                        font-size: block.font-size;
+                                                        color: run.color;
+                                                    }
+                                                }
+                                            }
+                                            if block.lines.length == 0: Text {
                                                 text: block.text;
                                                 font-family: "monospace";
                                                 font-size: block.font-size;
@@ -814,6 +837,19 @@ export component StickyWindow inherits Window {
                                         default-color: #2b2b22;
                                     }
                                 }
+                            }
+
+                            // Declared last so it is on top of what it covers: `StyledText`
+                            // takes pointer events of its own (it can hold links), and a
+                            // touch area under it never saw the click — which left the read
+                            // view a trap with no way back into the writing.
+                            //
+                            // `focus-text`, not `focus`: NotePad is a component, and focusing
+                            // a component does nothing — the caret lives in the TextInput
+                            // inside it.
+                            read-ta := TouchArea {
+                                mouse-cursor: MouseCursor.text;
+                                clicked => { body.focus-text(); }
                             }
                         }
 
