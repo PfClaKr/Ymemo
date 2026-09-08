@@ -24,8 +24,13 @@ use std::time::{Duration, Instant};
 use ymemo_core::pairing;
 use ymemo_core::sync::{Syncthing, VAULT_FOLDER_ID};
 
-/// How long to wait for one side to notice the other. Discovery plus a dial attempt.
-const REACH_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long to wait for one side to notice the other: discovery, a dial attempt, and — for
+/// the mesh — a reconnect for the introduction to ride on.
+///
+/// Generous on purpose. Nothing waits the whole time when things are working, and run one
+/// after another these tests put half a dozen daemons through one machine's discovery, where
+/// a minute is not always enough.
+const REACH_TIMEOUT: Duration = Duration::from_secs(120);
 const POLL: Duration = Duration::from_millis(500);
 
 struct Device {
@@ -250,4 +255,52 @@ fn a_removed_device_is_not_introduced_back() {
 
     // And the two that remain are still a working pair, so a removal is not a fallen mesh.
     assert!(knows(&a, &b.id) && knows(&b, &a.id), "A and B should still share the vault");
+}
+
+/// A device that was removed can be connected again, and the vault reaches it.
+///
+/// The scenario a user actually hits: two devices, one is removed by mistake or on purpose,
+/// and later it is paired again. Both halves have to work — the removal has to stop the sync,
+/// and pairing again has to start it, with nothing left over from the removal getting in the
+/// way. It nearly does not: a removed peer is parked **paused** rather than deleted (see
+/// `Syncthing::apply_revocations`), so re-pairing has to wake it rather than assume a fresh
+/// device.
+#[test]
+#[ignore = "spawns two syncthing daemons; needs YMEMO_SYNCTHING_BIN"]
+fn a_removed_device_can_be_connected_again() {
+    let Some(binary) = std::env::var_os("YMEMO_SYNCTHING_BIN").map(PathBuf::from) else {
+        eprintln!("YMEMO_SYNCTHING_BIN not set; skipping");
+        return;
+    };
+    let a = start(&binary, "A");
+    let b = start(&binary, "B");
+
+    a.st.share_folder_with(VAULT_FOLDER_ID, &b.id).unwrap();
+    b.st.share_folder_with(VAULT_FOLDER_ID, &a.id).unwrap();
+
+    let connected = |d: &Device, id: &str| {
+        d.st.shared_devices(VAULT_FOLDER_ID).unwrap().iter().any(|s| s.id == id && s.connected)
+    };
+    let listed = |d: &Device, id: &str| {
+        d.st.shared_devices(VAULT_FOLDER_ID).unwrap().iter().any(|s| s.id == id)
+    };
+    wait_for("A and B to connect", || connected(&a, &b.id) && connected(&b, &a.id));
+
+    // Syncthing learns a peer's name over the connection; the list shows it rather than a
+    // wall of device ids, and an empty name would make every row look the same.
+    let named = a.st.shared_devices(VAULT_FOLDER_ID).unwrap();
+    let b_row = named.iter().find(|d| d.id == b.id).expect("B should be listed on A");
+    assert!(!b_row.name.is_empty(), "A should have learned B's name, got {:?}", b_row.name);
+
+    // --- Removed, the way the app does it: dropped, then the list applied. ---
+    a.st.unshare_folder_with(VAULT_FOLDER_ID, &b.id).unwrap();
+    let revoked = [b.id.clone()];
+    a.st.apply_revocations(VAULT_FOLDER_ID, &revoked).unwrap();
+    assert!(!listed(&a, &b.id), "B should be gone from A's list");
+    wait_for("the two to stop talking", || !connected(&a, &b.id));
+
+    // --- Connected again. The parked entry has to come back to life. ---
+    a.st.share_folder_with(VAULT_FOLDER_ID, &b.id).unwrap();
+    wait_for("A and B to connect again", || connected(&a, &b.id) && connected(&b, &a.id));
+    assert!(listed(&a, &b.id), "B should be back in A's list");
 }

@@ -300,6 +300,7 @@
   "ui.pair_devices_title": "Shared devices",
   "ui.pair_lan_connect": "Connect",
   "ui.pair_lan_hint": "① Enter the 6 digits below on your other device, or\n② type that device's 6 digits here.",
+  "ui.pair_lan_no_code": "This device cannot offer a 6-digit code — something else is using the port. Typing the other device's code below still works.",
   "ui.pair_lan_placeholder": "Their 6-digit code",
   "ui.pair_remote_hint": "On a different network? Share the QR or the code below,\nthen enter their code to register.",
   "ui.pair_remote_placeholder": "Their device-id…",

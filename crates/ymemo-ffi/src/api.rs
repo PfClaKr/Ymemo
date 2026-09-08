@@ -1232,7 +1232,11 @@ pub fn sync_approve_device(device_id: String) -> Result<()> {
     if let Some(set) = rejected_lock()?.as_mut() {
         set.remove(&device_id);
     }
-    with_sync(|st| st.share_folder_with(VAULT_FOLDER_ID, &device_id))
+    with_sync(|st| st.share_folder_with(VAULT_FOLDER_ID, &device_id))?;
+    // Allowing a device that had been removed lifts the removal, or the next merge would
+    // apply the list and park it again.
+    let _ = with_vault(|v| v.unrevoke_device(&device_id));
+    Ok(())
 }
 
 /// Turns a device away and stops asking about it for the rest of this run.

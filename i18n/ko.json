@@ -300,6 +300,7 @@
   "ui.pair_devices_title": "공유 중인 기기",
   "ui.pair_lan_connect": "연결",
   "ui.pair_lan_hint": "① 아래 6자리를 상대 기기에 입력하거나,\n② 상대 기기의 6자리를 여기에 입력하세요.",
+  "ui.pair_lan_no_code": "이 기기에서는 6자리 코드를 만들 수 없습니다 — 다른 프로그램이 포트를 쓰고 있습니다. 상대 기기의 코드를 아래에 입력하면 연결은 됩니다.",
   "ui.pair_lan_placeholder": "상대 6자리 코드",
   "ui.pair_remote_hint": "다른 네트워크라면 QR 또는 아래 코드를 상대에게 전달하고,\n상대의 코드를 입력해 등록하세요.",
   "ui.pair_remote_placeholder": "상대 device-id…",

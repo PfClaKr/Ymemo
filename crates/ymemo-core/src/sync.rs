@@ -393,12 +393,19 @@ impl Syncthing {
                 // Not registered yet, which is the usual case here.
                 Err(_) => serde_json::json!({ "deviceID": peer_device_id }),
             };
-        if device["introducer"] == serde_json::json!(true) {
+        let awake = device["introducer"] == serde_json::json!(true)
+            && device["paused"] != serde_json::json!(true);
+        if awake {
             // Already as we want it. Saying so again would restart the connection to a peer
             // that may be in the middle of a transfer, and this runs on every start.
             return Ok(());
         }
         device["introducer"] = serde_json::json!(true);
+        // Wakes a peer that was parked by a removal. A removed device is kept paused rather
+        // than deleted (see `apply_revocations`), so without this, pairing with it again put
+        // it back in the folder and then never dialled it: the reconnection silently did
+        // nothing, which is the one thing worse than refusing.
+        device["paused"] = serde_json::json!(false);
         ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&device)?;
         Ok(())
     }

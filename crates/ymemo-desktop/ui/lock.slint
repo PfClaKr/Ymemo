@@ -110,6 +110,8 @@ export component LockWindow inherits Window {
         if root.show-sync: VerticalLayout {
             vertical-stretch: 1;
             PairingPanel {
+                // No open vault here to record a removal in; see `can-unshare`.
+                can-unshare: false;
                 available: root.sync-available;
                 my-code: root.my-pairing-code;
                 qr: root.qr-image;
