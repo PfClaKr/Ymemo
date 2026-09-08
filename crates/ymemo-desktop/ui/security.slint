@@ -8,6 +8,14 @@ import { Strings } from "@i18n";
 // Both actions rewrite `vault.json` only. Nothing here re-encrypts memos, so neither is
 // slow and neither disturbs the other devices; see crates/ymemo-core/src/vault.rs.
 // ---------------------------------------------------------------------------
+// The name of a field, kept above it rather than inside it: a `LineEdit`'s placeholder is
+// gone the moment anything is typed, and three rows of dots with nothing to tell them apart
+// is not a form anyone can check before pressing the button. Same reason as `lock.slint`.
+component FieldLabel inherits Text {
+    font-size: 10px;
+    color: #a8a294;
+}
+
 component Section inherits VerticalLayout {
     in property <string> label;
     in property <string> hint;
@@ -94,18 +102,18 @@ export component SecurityWindow inherits Window {
                 Section {
                     label: Strings.ui_security_change_password;
                     hint: Strings.ui_security_password_hint;
+                    FieldLabel { text: Strings.ui_security_current_password; }
                     LineEdit {
-                        placeholder-text: Strings.ui_security_current_password;
                         input-type: InputType.password;
                         text <=> root.current-pw;
                     }
+                    FieldLabel { text: Strings.ui_security_new_password; }
                     LineEdit {
-                        placeholder-text: Strings.ui_security_new_password;
                         input-type: InputType.password;
                         text <=> root.new-pw;
                     }
+                    FieldLabel { text: Strings.ui_security_confirm_password; }
                     LineEdit {
-                        placeholder-text: Strings.ui_security_confirm_password;
                         input-type: InputType.password;
                         text <=> root.confirm-pw;
                         accepted => {

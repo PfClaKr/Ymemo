@@ -3,6 +3,16 @@ import { Strings } from "@i18n";
 import { PairingPanel, SharedDeviceRow } from "pairing.slint";
 import { IconButton, SetupChoice } from "theme.slint";
 
+// The name of a field, kept above it rather than inside it.
+//
+// A `LineEdit`'s placeholder disappears the moment anything is typed, which is fine for one
+// box and not fine for two: two rows of dots with nothing to tell them apart, on the screen
+// where a slip cannot be undone. Everywhere passwords come in pairs, they are labelled.
+component FieldLabel inherits Text {
+    font-size: 10px;
+    color: #a8a294;
+}
+
 // ---------------------------------------------------------------------------
 // Lock window: the master password prompt, hidden once unlocked.
 // ---------------------------------------------------------------------------
@@ -185,11 +195,10 @@ export component LockWindow inherits Window {
                         color: #d8d2c2;
                         wrap: word-wrap;
                     }
-                    code := LineEdit {
-                        placeholder-text: Strings.ui_lock_recovery_placeholder;
-                    }
+                    FieldLabel { text: Strings.ui_lock_recovery_placeholder; }
+                    code := LineEdit { }
+                    FieldLabel { text: Strings.ui_lock_recovery_new_password; }
                     newpw := LineEdit {
-                        placeholder-text: Strings.ui_lock_recovery_new_password;
                         input-type: InputType.password;
                         accepted => { newpw2.focus(); }
                     }
@@ -198,8 +207,8 @@ export component LockWindow inherits Window {
                     // header it rewrites is synced — so a slip here hands every device a
                     // password nobody knows. The recovery code still works afterwards, which
                     // is the only reason this is a nuisance rather than a disaster.
+                    FieldLabel { text: Strings.ui_lock_confirm_password; }
                     newpw2 := LineEdit {
-                        placeholder-text: Strings.ui_lock_confirm_password;
                         input-type: InputType.password;
                         accepted => {
                             if (newpw.text != "" && newpw.text == self.text) {
@@ -292,8 +301,8 @@ export component LockWindow inherits Window {
                     color: #b8b2a2;
                     wrap: word-wrap;
                 }
+                FieldLabel { text: Strings.ui_lock_new_password_placeholder; }
                 npw := LineEdit {
-                    placeholder-text: Strings.ui_lock_new_password_placeholder;
                     input-type: InputType.password;
                     init => { self.focus(); }
                     accepted => { npw2.focus(); }
@@ -303,10 +312,10 @@ export component LockWindow inherits Window {
                 // password nobody knows, and the recovery code that would rescue it is only
                 // shown on the *next* screen. Changing the password already asks twice; the
                 // screen where it matters most did not.
+                FieldLabel { text: Strings.ui_lock_confirm_password; }
                 HorizontalLayout {
                     spacing: 6px;
                     npw2 := LineEdit {
-                        placeholder-text: Strings.ui_lock_confirm_password;
                         input-type: InputType.password;
                         accepted => {
                             if (npw.text != "" && npw.text == self.text) {

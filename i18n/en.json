@@ -292,7 +292,7 @@
   "ui.lock_create_detail": "This is your first device with Ymemo. Choose a password and you can start writing; other devices can be connected later.",
   "ui.lock_forgot": "Forgot your password?",
   "ui.lock_new_password_detail": "Your memos are encrypted with this password. There is no copy of it anywhere, so if you forget it the recovery code on the next screen is the only way back in.",
-  "ui.lock_new_password_placeholder": "New master password…",
+  "ui.lock_new_password_placeholder": "New master password",
   "ui.lock_no_recovery": "This vault has no recovery code. Without the password the memos cannot be opened.",
   "ui.lock_open": "Open",
   "ui.lock_password_mismatch": "The two passwords do not match",
