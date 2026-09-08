@@ -136,6 +136,13 @@ export component Glyph inherits Path {
             ? "M 7.1 3.2 C 9.3 3.2 11 4.9 11 7.1 C 11 9.3 9.3 11 7.1 11 C 4.9 11 3.2 9.3 3.2 7.1 C 3.2 4.9 4.9 3.2 7.1 3.2 Z M 9.9 9.9 L 13 13"
         : root.name == "undo"
             ? "M 6.6 4.2 L 3.4 7.4 L 6.6 10.6 M 3.4 7.4 L 9.8 7.4 C 12.0 7.4 13.0 8.7 13.0 10.2 C 13.0 11.7 12.0 13.0 9.8 13.0"
+        // The two ways a photo can sit on a note, drawn as what they do rather than named:
+        // "float" is a picture lying across the lines of writing, "flow" is one sitting under
+        // them with the lines stopping above it. Each button shows the state it switches to.
+        : root.name == "photo-float"
+            ? "M 2.4 4.2 L 13.6 4.2 M 2.4 11.8 L 13.6 11.8 M 5.0 6.0 L 11.0 6.0 L 11.0 10.0 L 5.0 10.0 Z"
+        : root.name == "photo-flow"
+            ? "M 2.4 3.6 L 13.6 3.6 M 2.4 6.0 L 10.0 6.0 M 4.0 8.4 L 12.0 8.4 L 12.0 13.0 L 4.0 13.0 Z"
             : "";
 }
 

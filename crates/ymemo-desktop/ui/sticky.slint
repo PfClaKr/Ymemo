@@ -37,9 +37,15 @@ component PhotoItem inherits Rectangle {
     in property <length> canvas-w;
     in property <length> canvas-h;
     in property <string> color-key;
+    // In the flow: the photo has a band of its own under the writing and is placed by the
+    // layout, not by where it was dropped. It can still be resized — only the dragging goes,
+    // because there is nowhere to drag it to.
+    in property <bool> flow: false;
     // x and y as a fraction of the note, and the width in px.
     callback place(float, float, length);
     callback remove();
+    // Asked to change how it sits: true for the flow, false for lying on top.
+    callback set-flow(bool);
     // Raised while a pointer is down on this photo, so a merge landing mid-drag does not
     // replace the model underneath and drop the drag.
     callback busy(bool);
@@ -64,7 +70,8 @@ component PhotoItem inherits Rectangle {
     // and what the next press will do.
     private property <bool> on-grip: move-ta.mouse-x > root.width - root.grip
         && move-ta.mouse-y > root.height - root.grip;
-    private property <bool> active: root.dragging || move-ta.has-hover || close-ta.has-hover;
+    private property <bool> active: root.dragging || move-ta.has-hover || close-ta.has-hover
+        || mode-ta.has-hover;
 
     private property <length> w: Math.min(Math.max(root.photo.width-px + root.dw, root.min-w),
         Math.max(root.canvas-w, root.min-w));
@@ -74,12 +81,17 @@ component PhotoItem inherits Rectangle {
         : root.w * (root.photo.height-px / root.photo.width-px);
 
     // Never fully off the note: a photo whose corner cannot be reached cannot be brought back.
-    x: Math.min(Math.max(root.photo.x-frac * root.canvas-w + root.dx, 0px),
-        Math.max(root.canvas-w - root.w, 0px));
-    y: Math.min(Math.max(root.photo.y-frac * root.canvas-h + root.dy, 0px),
-        Math.max(root.canvas-h - root.h, 0px));
+    // In the flow there is nothing to clamp — the band around it decides where it goes.
+    x: root.flow ? 0px
+        : Math.min(Math.max(root.photo.x-frac * root.canvas-w + root.dx, 0px),
+            Math.max(root.canvas-w - root.w, 0px));
+    y: root.flow ? 0px
+        : Math.min(Math.max(root.photo.y-frac * root.canvas-h + root.dy, 0px),
+            Math.max(root.canvas-h - root.h, 0px));
     width: root.w;
     height: root.h;
+    // So the band can be exactly as tall as the picture it holds.
+    out property <length> item-height: root.h;
     // The note sizes itself from its text alone. Without this the photos would push it wider
     // and taller, and a note size that depends on the photos that depend on the note size is
     // the binding loop Slint refuses to resolve.
@@ -97,8 +109,11 @@ component PhotoItem inherits Rectangle {
         root.dragging = false;
         root.busy(false);
         // Read the clamped geometry back, so what is stored is where the photo actually is
-        // and not where the pointer went.
-        root.place(root.x / Math.max(root.canvas-w, 1px), root.y / Math.max(root.canvas-h, 1px),
+        // and not where the pointer went. A photo in the flow keeps the place it would go
+        // back to, so taking it out of the flow puts it where it was rather than in a corner.
+        root.place(
+            root.flow ? root.photo.x-frac : root.x / Math.max(root.canvas-w, 1px),
+            root.flow ? root.photo.y-frac : root.y / Math.max(root.canvas-h, 1px),
             root.w);
         root.dx = 0px;
         root.dy = 0px;
@@ -136,9 +151,10 @@ component PhotoItem inherits Rectangle {
     move-ta := TouchArea {
         width: 100%;
         height: 100%;
-        mouse-cursor: root.on-grip ? MouseCursor.nwse-resize : MouseCursor.move;
+        mouse-cursor: root.on-grip ? MouseCursor.nwse-resize
+            : root.flow ? MouseCursor.default : MouseCursor.move;
         pointer-event(ev) => {
-            if (ev.kind == PointerEventKind.down) {
+            if (ev.kind == PointerEventKind.down && (root.on-grip || !root.flow)) {
                 root.begin(self.absolute-position.x + self.mouse-x,
                            self.absolute-position.y + self.mouse-y,
                            root.on-grip);
@@ -170,6 +186,17 @@ component PhotoItem inherits Rectangle {
         clicked => { root.remove(); }
     }
 
+    // Move it between lying on the writing and having a band of its own. Beside the detach
+    // and under the same rule: only reachable once the photo is already active.
+    mode-ta := TouchArea {
+        x: close-ta.x - self.width - 3px;
+        y: 3px;
+        width: 18px;
+        height: 18px;
+        enabled: root.active;
+        clicked => { root.set-flow(!root.flow); }
+    }
+
     // ---- Furniture, painted only while the photo is under the pointer so the picture is
     // not permanently covered by its own controls. Plain shapes: the areas above do the
     // hit-testing. ----
@@ -188,6 +215,24 @@ component PhotoItem inherits Rectangle {
             name: "close";
             stroke: #ffffff;
             stroke-width: 1.6px;
+        }
+    }
+    // The button shows what pressing it does, not what the photo is now.
+    if root.active: Rectangle {
+        x: mode-ta.x;
+        y: mode-ta.y;
+        width: mode-ta.width;
+        height: mode-ta.height;
+        border-radius: self.width / 2;
+        background: mode-ta.has-hover ? Palette.ink(root.color-key) : #000000a8;
+        Glyph {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 12px;
+            height: 12px;
+            name: root.flow ? "photo-float" : "photo-flow";
+            stroke: #ffffff;
+            stroke-width: 1.3px;
         }
     }
     if root.active: Rectangle {
@@ -360,7 +405,12 @@ export component StickyWindow inherits Window {
     // property of this desktop, not of the memo.
     in property <bool> pinned: false;
     in property <bool> collapsed: false;
+    // Two models, not one filtered here: Slint's `for` cannot skip rows, and the two sit in
+    // completely different places — one lying on the writing, one in a band under it.
     in property <[PhotoRow]> photos: [];
+    in property <[PhotoRow]> flow-photos: [];
+    // A photo was asked to move between the two. True means into the flow.
+    callback set-photo-flow(string, bool);
     // True while a photo is being dragged or resized. Rust reads it before pushing a merged
     // photo list in, the way `dirty` protects text the user is still typing.
     out property <bool> photo-busy: false;
@@ -685,17 +735,66 @@ export component StickyWindow inherits Window {
                 min-height: root.collapsed ? 0px : 56px;
                 clip: true;
 
-                body := NotePad {
-                    width: 100%;
-                    height: 100%;
-                    // Must match BODY_FONT_PX in sticky.rs, which sizes the photos.
-                    font-size: 13px;
-                    ink: #2b2b22;
-                    // Room along the bottom edge for the date, so the last line of a full
-                    // note is not written underneath it.
-                    pad-bottom: root.created-at == "" ? 4px : 14px;
-                    text <=> root.memo-text;
-                    edited => { root.edited(self.text); }
+                // The writing, and under it the photos that asked not to be written over.
+                // A column rather than one surface, because that *is* the difference between
+                // the two modes: what is in this layout cannot have text behind it.
+                VerticalLayout {
+                    body-area := Rectangle {
+                        vertical-stretch: 1;
+                        body := NotePad {
+                            width: 100%;
+                            height: 100%;
+                            // Must match BODY_FONT_PX in sticky.rs, which sizes the photos.
+                            font-size: 13px;
+                            ink: #2b2b22;
+                            // Room along the bottom edge for the date, so the last line of a
+                            // full note is not written underneath it.
+                            pad-bottom: root.created-at == "" ? 4px : 14px;
+                            text <=> root.memo-text;
+                            edited => { root.edited(self.text); }
+                        }
+
+                        // ---- Created-at, along the bottom of the *writing*. Declared after
+                        // the body so it paints over it, laid out by hand so it takes no line
+                        // from the note, and faint enough to read straight past.
+                        //
+                        // Inside this area rather than at the foot of the window: a photo in
+                        // the flow owns the bottom of the sticky, and the date was being
+                        // printed across the picture. ----
+                        if root.created-at != "": Text {
+                            text: root.created-at;
+                            font-size: 8px;
+                            color: Palette.ink(root.sticky-color);
+                            // Fades out of the way while the note is being written in, and
+                            // comes back once the caret leaves. On a sticky this small it is
+                            // the corner the last line wants.
+                            opacity: body.has-focus ? 0.0 : 0.5;
+                            animate opacity { duration: 150ms; }
+                            x: parent.width - self.width - 7px;
+                            y: parent.height - self.height - 3px;
+                        }
+                    }
+
+                    if root.flow-photos.length > 0: VerticalLayout {
+                        spacing: 4px;
+                        padding: 4px;
+                        for photo in root.flow-photos: Rectangle {
+                            // The band is exactly as tall as the picture in it; the item
+                            // itself sizes from the width the core stores.
+                            height: flow-item.item-height;
+                            flow-item := PhotoItem {
+                                photo: photo;
+                                flow: true;
+                                canvas-w: note.width - 8px;
+                                canvas-h: note.height;
+                                color-key: root.sticky-color;
+                                place(fx, fy, w) => { root.place-photo(photo.id, fx, fy, w); }
+                                remove => { root.remove-photo(photo.id); }
+                                busy(b) => { root.photo-busy = b; }
+                                set-flow(f) => { root.set-photo-flow(photo.id, f); }
+                            }
+                        }
+                    }
                 }
 
                 // Declared after the text, so a photo is picked up by a click on it rather
@@ -703,11 +802,12 @@ export component StickyWindow inherits Window {
                 for photo in root.photos: PhotoItem {
                     photo: photo;
                     canvas-w: note.width;
-                    canvas-h: note.height;
+                    canvas-h: body-area.height;
                     color-key: root.sticky-color;
                     place(fx, fy, w) => { root.place-photo(photo.id, fx, fy, w); }
                     remove => { root.remove-photo(photo.id); }
                     busy(b) => { root.photo-busy = b; }
+                    set-flow(f) => { root.set-photo-flow(photo.id, f); }
                 }
             }
         }
@@ -730,19 +830,5 @@ export component StickyWindow inherits Window {
             }
         }
 
-        // ---- Created-at, along the bottom edge. Declared last so it paints over the body
-        // rather than under it, laid out by hand so it takes no line from the note, and
-        // faint enough to read straight past. ----
-        if !root.collapsed && root.created-at != "": Text {
-            text: root.created-at;
-            font-size: 8px;
-            color: Palette.ink(root.sticky-color);
-            // Fades out of the way while the note is being written in, and comes back once
-            // the caret leaves. On a sticky this small it is the corner the last line wants.
-            opacity: body.has-focus ? 0.0 : 0.5;
-            animate opacity { duration: 150ms; }
-            x: parent.width - self.width - 7px;
-            y: parent.height - self.height - 3px;
-        }
     }
 }

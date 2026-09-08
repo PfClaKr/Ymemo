@@ -415,6 +415,7 @@ impl Vault {
         )?;
         put_i64_if_changed(&mut self.doc, &obj, "x_permille", clamp_permille(a.x_permille))?;
         put_i64_if_changed(&mut self.doc, &obj, "y_permille", clamp_permille(a.y_permille))?;
+        put_str_if_changed(&mut self.doc, &obj, "mode", a.mode().as_stored())?;
         put_i64_if_changed(&mut self.doc, &obj, "created_at", a.created_at)?;
 
         self.append_local_change()?;
@@ -445,6 +446,18 @@ impl Vault {
         a.x_permille = clamp_permille(x_permille);
         a.y_permille = clamp_permille(y_permille);
         a.width_em_milli = clamp_width_em_milli(width_em_milli);
+        self.upsert_attachment(&a)
+    }
+
+    /// Sets how a photo sits against the writing: floating over it, or in the flow below it.
+    ///
+    /// A choice about the memo, not about this device, so it travels like everything else —
+    /// a photo put in the flow on the phone is out of the way on the desktop too.
+    pub fn set_attachment_mode(&mut self, id: &str, mode: crate::PhotoMode) -> Result<()> {
+        let Some(mut a) = self.store.get_attachment(id)? else {
+            bail!(t!("core.attachment_not_found", id = id));
+        };
+        a.mode = mode.as_stored().to_string();
         self.upsert_attachment(&a)
     }
 
@@ -919,6 +932,9 @@ impl Vault {
                     "y_permille",
                     crate::PLACE_ORIGIN_PERMILLE,
                 )),
+                // Missing, or a mode this version does not know, is the float every photo
+                // was before there was a choice.
+                mode: get_str_or(&self.doc, &obj, "mode", ""),
                 created_at: get_i64_or(&self.doc, &obj, "created_at", 0),
             };
             // No hash means an unusable record (old version or damage); skip it.
@@ -1576,6 +1592,45 @@ mod tests {
         assert_eq!(got.display_pos(400.0, 1000.0, 16.0), (200.0, 250.0));
 
         fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The float/flow choice travels, and a photo from before the choice existed is a float.
+    #[test]
+    fn photo_mode_syncs_and_defaults_to_floating() {
+        let dir = temp_dir();
+        let mut phone = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let memo = Memo::new("photo", "");
+        phone.upsert(&memo).unwrap();
+        let a = phone.attach(&memo.id, b"jpeg", "p.jpg", "image/jpeg", 1000, 500).unwrap();
+
+        // Every photo starts where photos have always been: lying on top of the note.
+        assert_eq!(a.mode(), crate::PhotoMode::Float);
+        assert!(a.mode.is_empty(), "a float stores nothing, so old memos need no migration");
+
+        phone.set_attachment_mode(&a.id, crate::PhotoMode::Flow).unwrap();
+
+        let mut desktop = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        assert_eq!(
+            desktop.store().get_attachment(&a.id).unwrap().unwrap().mode(),
+            crate::PhotoMode::Flow
+        );
+
+        // And back again.
+        desktop.set_attachment_mode(&a.id, crate::PhotoMode::Float).unwrap();
+        let back = desktop.store().get_attachment(&a.id).unwrap().unwrap();
+        assert_eq!(back.mode(), crate::PhotoMode::Float);
+        assert!(back.mode.is_empty());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A mode written by a version this one has never met is drawn as a float rather than
+    /// dropping the photo.
+    #[test]
+    fn an_unknown_photo_mode_reads_as_floating() {
+        assert_eq!(crate::PhotoMode::parse("wrapped-around"), crate::PhotoMode::Float);
+        assert_eq!(crate::PhotoMode::parse(""), crate::PhotoMode::Float);
+        assert_eq!(crate::PhotoMode::parse("flow"), crate::PhotoMode::Flow);
     }
 
     /// A photo dropped on a note narrower than itself is pulled back on, not left hanging

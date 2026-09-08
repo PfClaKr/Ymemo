@@ -272,20 +272,29 @@ pub(crate) fn close_sticky(stickies: &Stickies, id: &str) {
     });
 }
 
-/// Builds the Slint model of a memo's photos.
+/// The photos of one memo, split by how they sit: the ones lying on the writing first, then
+/// the ones with a band of their own under it. Two models because the two are drawn in
+/// different places, and Slint's `for` cannot skip a row — see `sticky.slint`.
 ///
 /// Photos are ciphertext inside the vault, so they are decrypted and decoded **in memory** —
 /// no plaintext ever reaches a temp file. A photo that has not synced yet, or that cannot be
 /// decoded, is marked `missing` so the UI can say so; an empty gap would read as data loss.
-pub(crate) fn photo_rows(v: &Vault, memo_id: &str) -> Vec<PhotoRow> {
+pub(crate) fn split_photo_rows(v: &Vault, memo_id: &str) -> (Vec<PhotoRow>, Vec<PhotoRow>) {
     let list = match v.store().attachments_of(memo_id) {
         Ok(l) => l,
         Err(e) => {
             diag!("could not read the attachments: {e}");
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
     };
 
+    let (flow, float): (Vec<_>, Vec<_>) = list
+        .into_iter()
+        .partition(|a| a.mode() == ymemo_core::PhotoMode::Flow);
+    (rows_of(v, float), rows_of(v, flow))
+}
+
+fn rows_of(v: &Vault, list: Vec<ymemo_core::Attachment>) -> Vec<PhotoRow> {
     list.into_iter()
         .map(|a| {
             let (w, h) = a.display_size(BODY_FONT_PX);
@@ -331,18 +340,22 @@ fn decode_image(bytes: &[u8]) -> Option<slint::Image> {
     Some(slint::Image::from_rgba8(buffer))
 }
 
-/// Refills an open sticky's photo list after an add, a resize or a remote merge.
+/// Refills an open sticky's photo lists after an add, a resize, a mode change or a merge.
 pub(crate) fn refresh_photos(ctx: &Ctx, memo_id: &str) {
     let rows = {
         let guard = ctx.vault.borrow();
         let Some(v) = guard.as_ref() else { return };
-        photo_rows(v, memo_id)
+        split_photo_rows(v, memo_id)
     };
     if let Some(entry) = ctx.stickies.borrow().get(memo_id) {
-        entry
-            .window
-            .set_photos(slint::ModelRc::new(slint::VecModel::from(rows)));
+        set_photo_models(&entry.window, rows);
     }
+}
+
+/// Hands both photo models to a sticky window; the two always change together.
+pub(crate) fn set_photo_models(window: &StickyWindow, (float, flow): (Vec<PhotoRow>, Vec<PhotoRow>)) {
+    window.set_photos(slint::ModelRc::new(slint::VecModel::from(float)));
+    window.set_flow_photos(slint::ModelRc::new(slint::VecModel::from(flow)));
 }
 
 /// A photo chosen by the worker thread. Only `Send` values, since it crosses to the event loop.
@@ -443,7 +456,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     {
         let guard = ctx.vault.borrow();
         if let Some(v) = guard.as_ref() {
-            window.set_photos(slint::ModelRc::new(slint::VecModel::from(photo_rows(v, &memo.id))));
+            set_photo_models(&window, split_photo_rows(v, &memo.id));
         }
     }
 
@@ -515,6 +528,29 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
                 let Some(v) = guard.as_mut() else { return };
                 if let Err(e) = v.detach(photo_id.as_str()) {
                     diag!("could not remove the photo: {e}");
+                }
+            }
+            refresh_photos(&ctx, &id);
+        });
+    }
+
+    // Move a photo between lying on the writing and having a band of its own under it.
+    {
+        let ctx = ctx.clone();
+        let id = memo.id.clone();
+        window.on_set_photo_flow(move |photo_id, flow| {
+            touch(&ctx);
+            {
+                let mut guard = ctx.vault.borrow_mut();
+                let Some(v) = guard.as_mut() else { return };
+                let mode = if flow {
+                    ymemo_core::PhotoMode::Flow
+                } else {
+                    ymemo_core::PhotoMode::Float
+                };
+                if let Err(e) = v.set_attachment_mode(photo_id.as_str(), mode) {
+                    diag!("could not change how the photo sits: {e}");
+                    crate::list::report_write_failure(&e);
                 }
             }
             refresh_photos(&ctx, &id);

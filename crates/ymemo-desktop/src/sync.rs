@@ -87,9 +87,10 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
                             // model rebuilds the items and the drag in progress would be
                             // dropped halfway — the same reason `dirty` protects the text.
                             if !entry.window.get_photo_busy() {
-                                entry.window.set_photos(slint::ModelRc::new(
-                                    slint::VecModel::from(crate::sticky::photo_rows(v, id)),
-                                ));
+                                crate::sticky::set_photo_models(
+                                    &entry.window,
+                                    crate::sticky::split_photo_rows(v, id),
+                                );
                             }
                             entry.window.window().request_redraw();
                         }
