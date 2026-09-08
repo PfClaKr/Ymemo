@@ -598,6 +598,10 @@ class FfiMemo {
   final String color;
   final PlatformInt64 opacity;
   final String groupId;
+
+  /// Whether the memo has a photo on it. A memo with nothing written but a picture would
+  /// otherwise be one "New memo" row beside another.
+  final bool hasPhoto;
   final PlatformInt64 createdAt;
   final PlatformInt64 updatedAt;
 
@@ -608,6 +612,7 @@ class FfiMemo {
     required this.color,
     required this.opacity,
     required this.groupId,
+    required this.hasPhoto,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -620,6 +625,7 @@ class FfiMemo {
       color.hashCode ^
       opacity.hashCode ^
       groupId.hashCode ^
+      hasPhoto.hashCode ^
       createdAt.hashCode ^
       updatedAt.hashCode;
 
@@ -634,6 +640,7 @@ class FfiMemo {
           color == other.color &&
           opacity == other.opacity &&
           groupId == other.groupId &&
+          hasPhoto == other.hasPhoto &&
           createdAt == other.createdAt &&
           updatedAt == other.updatedAt;
 }

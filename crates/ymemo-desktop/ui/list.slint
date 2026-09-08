@@ -14,6 +14,9 @@ export struct ListRow {
     is-group: bool,
     expanded: bool,
     child-count: int,
+    // Whether the memo has a photo on it, so one with nothing written is not an untitled row
+    // beside another untitled row.
+    has-photo: bool,
 }
 
 
@@ -691,6 +694,24 @@ export component ListWindow inherits Window {
                         vertical-alignment: center;
                         overflow: elide;
                         horizontal-stretch: 1;
+                    }
+
+                    // A memo with a picture on it says so. It matters most for the memo with
+                    // nothing written on it at all, which would otherwise be one "(untitled)"
+                    // beside another.
+                    if row.has-photo: Rectangle {
+                        width: 15px;
+                        Glyph {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: 13px;
+                            height: 13px;
+                            name: "photo";
+                            stroke: #8d8778;
+                            // Thinner than a button's: this sits at 13px beside 14px text and
+                            // is a mark, not a control.
+                            stroke-width: 1.1px;
+                        }
                     }
 
                     if row.is-group: Text {

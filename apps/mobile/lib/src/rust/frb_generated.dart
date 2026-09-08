@@ -2157,8 +2157,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FfiMemo dco_decode_ffi_memo(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return FfiMemo(
       id: dco_decode_String(arr[0]),
       title: dco_decode_String(arr[1]),
@@ -2166,8 +2166,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       color: dco_decode_String(arr[3]),
       opacity: dco_decode_i_64(arr[4]),
       groupId: dco_decode_String(arr[5]),
-      createdAt: dco_decode_i_64(arr[6]),
-      updatedAt: dco_decode_i_64(arr[7]),
+      hasPhoto: dco_decode_bool(arr[6]),
+      createdAt: dco_decode_i_64(arr[7]),
+      updatedAt: dco_decode_i_64(arr[8]),
     );
   }
 
@@ -2608,6 +2609,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_color = sse_decode_String(deserializer);
     var var_opacity = sse_decode_i_64(deserializer);
     var var_groupId = sse_decode_String(deserializer);
+    var var_hasPhoto = sse_decode_bool(deserializer);
     var var_createdAt = sse_decode_i_64(deserializer);
     var var_updatedAt = sse_decode_i_64(deserializer);
     return FfiMemo(
@@ -2617,6 +2619,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         color: var_color,
         opacity: var_opacity,
         groupId: var_groupId,
+        hasPhoto: var_hasPhoto,
         createdAt: var_createdAt,
         updatedAt: var_updatedAt);
   }
@@ -3247,6 +3250,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.color, serializer);
     sse_encode_i_64(self.opacity, serializer);
     sse_encode_String(self.groupId, serializer);
+    sse_encode_bool(self.hasPhoto, serializer);
     sse_encode_i_64(self.createdAt, serializer);
     sse_encode_i_64(self.updatedAt, serializer);
   }

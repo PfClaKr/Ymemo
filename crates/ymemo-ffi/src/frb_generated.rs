@@ -2709,6 +2709,7 @@ impl SseDecode for crate::api::FfiMemo {
         let mut var_color = <String>::sse_decode(deserializer);
         let mut var_opacity = <i64>::sse_decode(deserializer);
         let mut var_groupId = <String>::sse_decode(deserializer);
+        let mut var_hasPhoto = <bool>::sse_decode(deserializer);
         let mut var_createdAt = <i64>::sse_decode(deserializer);
         let mut var_updatedAt = <i64>::sse_decode(deserializer);
         return crate::api::FfiMemo {
@@ -2718,6 +2719,7 @@ impl SseDecode for crate::api::FfiMemo {
             color: var_color,
             opacity: var_opacity,
             group_id: var_groupId,
+            has_photo: var_hasPhoto,
             created_at: var_createdAt,
             updated_at: var_updatedAt,
         };
@@ -3459,6 +3461,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiMemo {
             self.color.into_into_dart().into_dart(),
             self.opacity.into_into_dart().into_dart(),
             self.group_id.into_into_dart().into_dart(),
+            self.has_photo.into_into_dart().into_dart(),
             self.created_at.into_into_dart().into_dart(),
             self.updated_at.into_into_dart().into_dart(),
         ]
@@ -3804,6 +3807,7 @@ impl SseEncode for crate::api::FfiMemo {
         <String>::sse_encode(self.color, serializer);
         <i64>::sse_encode(self.opacity, serializer);
         <String>::sse_encode(self.group_id, serializer);
+        <bool>::sse_encode(self.has_photo, serializer);
         <i64>::sse_encode(self.created_at, serializer);
         <i64>::sse_encode(self.updated_at, serializer);
     }

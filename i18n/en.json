@@ -178,7 +178,7 @@
   "mobile.title_hint": "Title",
   "mobile.undo": "Undo",
   "mobile.unlock": "Unlock",
-  "mobile.unlock_days": "Stay unlocked for",
+  "mobile.unlock_days": "Stay unlocked for (days)",
   "mobile.unlock_days_hint": "Days the vault reopens without the password. 0 asks every time. While it lasts, the key is kept in this device's keystore — anyone who can unlock the phone can read the memos.",
   "mobile.unpair": "Unpair",
   "mobile.update_available": "New version",

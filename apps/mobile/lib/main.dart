@@ -1155,7 +1155,19 @@ class _MemoListScreenState extends State<MemoListScreen> {
               context,
               memo.color,
               ListTile(
-                title: Text(rowTitle(memo, widget.strings.newMemo)),
+                title: Row(
+                  children: [
+                    Flexible(child: Text(rowTitle(memo, widget.strings.newMemo))),
+                    // A memo with a picture on it says so. It matters most for the memo with
+                    // nothing written on it at all, which would otherwise be one "New memo"
+                    // row beside another.
+                    if (memo.hasPhoto) ...[
+                      const SizedBox(width: 6),
+                      Icon(Icons.image_outlined,
+                          size: 15, color: paletteInk(memo.color).withValues(alpha: 0.55)),
+                    ],
+                  ],
+                ),
                 subtitle: rowPreview(memo).isEmpty
                     ? null
                     : Text(rowPreview(memo),

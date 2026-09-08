@@ -490,6 +490,17 @@ impl Store {
         Ok(())
     }
 
+    /// The ids of every memo that has at least one photo on it.
+    ///
+    /// One query for the whole list rather than one per row: a list is drawn on every merge,
+    /// and a memo with nothing written on it but a picture has to say so somehow — otherwise
+    /// it is a row called "(untitled)" next to another row called "(untitled)".
+    pub fn memos_with_attachments(&self) -> Result<std::collections::HashSet<String>> {
+        let mut stmt = self.conn.prepare("SELECT DISTINCT memo_id FROM attachments")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<std::collections::HashSet<_>>>()?)
+    }
+
     /// Attachments of one memo, in the order they were added.
     pub fn attachments_of(&self, memo_id: &str) -> Result<Vec<Attachment>> {
         let mut stmt = self.conn.prepare(

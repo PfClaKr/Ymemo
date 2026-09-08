@@ -55,6 +55,9 @@ pub struct FfiMemo {
     pub color: String,
     pub opacity: i64,
     pub group_id: String,
+    /// Whether the memo has a photo on it. A memo with nothing written but a picture would
+    /// otherwise be one "New memo" row beside another.
+    pub has_photo: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -68,6 +71,9 @@ impl From<Memo> for FfiMemo {
             color: m.color,
             opacity: m.opacity,
             group_id: m.group_id,
+            // Filled in by the list, which asks once for the whole list rather than once a
+            // row; on its own a memo does not know.
+            has_photo: false,
             created_at: m.created_at,
             updated_at: m.updated_at,
         }
@@ -604,7 +610,14 @@ pub fn vault_reset(vault_dir: String, cache_db_path: String) -> Result<()> {
 
 /// Memos, most recently updated first.
 pub fn memo_list() -> Result<Vec<FfiMemo>> {
-    with_vault(|v| Ok(v.store().list()?.into_iter().map(FfiMemo::from).collect()))
+    with_vault(|v| {
+        let with_photo = v.store().memos_with_attachments()?;
+        Ok(v.store()
+            .list()?
+            .into_iter()
+            .map(|m| FfiMemo { has_photo: with_photo.contains(&m.id), ..FfiMemo::from(m) })
+            .collect())
+    })
 }
 
 /// Creates (`id` = None) or updates (`id` = Some) a memo and returns its id.
@@ -923,6 +936,7 @@ pub fn memos_in_group(group_id: String) -> Result<Vec<FfiMemo>> {
     with_vault(|v| {
         let known: std::collections::HashSet<String> =
             v.store().list_groups()?.into_iter().map(|g| g.id).collect();
+        let with_photo = v.store().memos_with_attachments()?;
         let at_root = group_id.is_empty();
         Ok(v.store()
             .list()?
@@ -934,7 +948,7 @@ pub fn memos_in_group(group_id: String) -> Result<Vec<FfiMemo>> {
                     at_root // no group, or one that is gone
                 }
             })
-            .map(FfiMemo::from)
+            .map(|m| FfiMemo { has_photo: with_photo.contains(&m.id), ..FfiMemo::from(m) })
             .collect())
     })
 }

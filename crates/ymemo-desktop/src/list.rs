@@ -35,6 +35,12 @@ pub(crate) fn refresh_list(
         }
     };
 
+    // One query for the whole list: which memos have a picture on them.
+    let with_photo = vault.store().memos_with_attachments().unwrap_or_else(|e| {
+        diag!("could not read which memos have photos: {e}");
+        HashSet::new()
+    });
+
     let needle = query.trim().to_lowercase();
     if !needle.is_empty() {
         let mut rows: Vec<ListRow> = groups
@@ -49,7 +55,7 @@ pub(crate) fn refresh_list(
                     m.title.to_lowercase().contains(&needle)
                         || m.body.to_lowercase().contains(&needle)
                 })
-                .map(|m| memo_row(m, 0)),
+                .map(|m| memo_row(m, 0, with_photo.contains(&m.id))),
         );
         model.set_vec(rows);
         return;
@@ -60,10 +66,10 @@ pub(crate) fn refresh_list(
     let valid: HashSet<&str> = groups.iter().map(|g| g.id.as_str()).collect();
 
     let mut rows = Vec::new();
-    push_group_rows("", 0, &children, &memos, collapsed, &mut rows);
+    push_group_rows("", 0, &children, &memos, collapsed, &with_photo, &mut rows);
     // Memos with no group, or whose group is gone, sit at the top level.
     for m in memos.iter().filter(|m| !valid.contains(m.group_id.as_str())) {
-        rows.push(memo_row(m, 0));
+        rows.push(memo_row(m, 0, with_photo.contains(&m.id)));
     }
     model.set_vec(rows);
 }
@@ -244,6 +250,7 @@ pub(crate) fn push_group_rows(
     children: &HashMap<String, Vec<ymemo_core::Group>>,
     memos: &[Memo],
     collapsed: &HashSet<String>,
+    with_photo: &HashSet<String>,
     out: &mut Vec<ListRow>,
 ) {
     let Some(groups) = children.get(parent) else { return };
@@ -255,9 +262,9 @@ pub(crate) fn push_group_rows(
         if is_collapsed {
             continue;
         }
-        push_group_rows(&g.id, depth + 1, children, memos, collapsed, out);
+        push_group_rows(&g.id, depth + 1, children, memos, collapsed, with_photo, out);
         for m in memos.iter().filter(|m| m.group_id == g.id) {
-            out.push(memo_row(m, depth + 1));
+            out.push(memo_row(m, depth + 1, with_photo.contains(&m.id)));
         }
     }
 }
@@ -333,6 +340,7 @@ pub(crate) fn group_row(
         title: SharedString::from(crate::hangul::for_slint(&group.name)),
         color: SharedString::from(group.color.clone()),
         depth,
+        has_photo: false,
         is_group: true,
         expanded,
         child_count,
@@ -346,7 +354,7 @@ pub(crate) fn group_row(
 /// sticky has no such field and derives the title from the first line. Falling back to that
 /// same first line here is what stops a phoneful of memos from arriving as a column of
 /// "(untitled)". The stored title is left alone — this is only how the row reads.
-pub(crate) fn memo_row(memo: &Memo, depth: i32) -> ListRow {
+pub(crate) fn memo_row(memo: &Memo, depth: i32, has_photo: bool) -> ListRow {
     let title = if memo.title.is_empty() {
         crate::sticky::derive_title(&memo.body)
     } else {
@@ -360,6 +368,7 @@ pub(crate) fn memo_row(memo: &Memo, depth: i32) -> ListRow {
         is_group: false,
         expanded: false,
         child_count: 0,
+        has_photo,
     }
 }
 
@@ -534,7 +543,7 @@ mod tests {
         let children = ymemo_core::group_children(&groups);
 
         let mut rows = Vec::new();
-        push_group_rows("", 0, &children, &memos, &HashSet::new(), &mut rows);
+        push_group_rows("", 0, &children, &memos, &HashSet::new(), &HashSet::new(), &mut rows);
 
         let got: Vec<(&str, i32, bool)> = rows
             .iter()
@@ -563,7 +572,7 @@ mod tests {
         let collapsed = HashSet::from(["outer".to_string()]);
 
         let mut rows = Vec::new();
-        push_group_rows("", 0, &children, &memos, &collapsed, &mut rows);
+        push_group_rows("", 0, &children, &memos, &collapsed, &HashSet::new(), &mut rows);
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id.as_str(), "outer");
