@@ -144,6 +144,13 @@ derives the same key from the synced salt plus the master password, which the us
   request appear on that device — a nuisance, and a phishing surface if the user approves
   without comparing the verification code. Approving hands over the encrypted vault, though
   not the master password that opens it.
+- **Removing a device.** Removing one stops every other device sharing the vault with it, and
+  that decision travels in the vault so it holds rather than being handed back by a peer. It
+  is **not revocation**: the removed device keeps the data key it was given and every memo it
+  already received, and — holding the key — could write to its own log to take itself off the
+  list. Locking a device out would mean a new data key and re-wrapping every log and blob,
+  which is exactly what a password change is designed not to do. Treat it as "stop sharing
+  with this device", and if a device is lost to someone hostile, the answer is a new vault.
 - **Photo metadata.** Blobs are stored **at original size**, so the number of photos and each
   file's size are visible. Encryption is also convergent (same plaintext, same ciphertext), so
   someone holding a photo can check whether that photo is in the vault by file name alone.

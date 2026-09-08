@@ -351,6 +351,7 @@ mod tests {
             stickies: Rc::new(RefCell::new(HashMap::new())),
             collapsed: Rc::new(RefCell::new(HashSet::new())),
             query: Rc::new(RefCell::new(String::new())),
+            syncthing: Rc::new(RefCell::new(None)),
             dir: Rc::new(dir),
             settings: Rc::new(RefCell::new(crate::settings::Settings::default())),
             last_activity: Rc::new(Cell::new(Instant::now())),

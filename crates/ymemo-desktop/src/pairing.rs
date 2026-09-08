@@ -22,6 +22,7 @@ use slint::{ComponentHandle, LogicalSize, ModelRc, SharedString, TimerMode, VecM
 use ymemo_core::{lan_pair, pairing, pairing::PairingCode, sync::Syncthing};
 use ymemo_i18n::t;
 
+use crate::state::APP;
 use crate::sync::{to_shared_row, SYNC_FOLDER_ID};
 use crate::window::present;
 use crate::{ApproveWindow, ListWindow, LockWindow, SharedDeviceRow};
@@ -97,6 +98,7 @@ fn pairing_handler(
                 SharedString::new(),
             );
         }
+        lift_revocation(&peer);
         // The code is only worth showing when our own id is readable; without it there is
         // nothing to derive it from, and the request still works, so this degrades quietly.
         let verify = st
@@ -112,13 +114,31 @@ fn pairing_handler(
 }
 
 /// Registers a paired device id with the shared folder; shared by both LAN paths.
+/// Takes a device off the vault's removed list, which is what deliberately pairing with it
+/// again means. Without this the other devices would go on dropping it, and no amount of
+/// re-pairing would take.
+fn lift_revocation(peer_id: &str) {
+    APP.with(|a| {
+        let borrow = a.borrow();
+        let Some(app) = borrow.as_ref() else { return };
+        let mut guard = app.ctx.vault.borrow_mut();
+        let Some(v) = guard.as_mut() else { return };
+        if let Err(e) = v.unrevoke_device(peer_id) {
+            diag!("could not clear the removed device in the vault: {e}");
+        }
+    });
+}
+
 fn register_peer(syncthing: &Rc<RefCell<Option<Syncthing>>>, peer_id: &str) -> String {
     let guard = syncthing.borrow();
     let Some(st) = guard.as_ref() else {
         return t!("msg.sync_off_cannot_register");
     };
     match st.share_folder_with(SYNC_FOLDER_ID, peer_id) {
-        Ok(()) => t!("msg.lan_connected"),
+        Ok(()) => {
+            lift_revocation(peer_id);
+            t!("msg.lan_connected")
+        }
         Err(e) => t!("msg.register_failed", error = e),
     }
 }
@@ -366,6 +386,25 @@ pub(crate) fn wire(
         let lock_w = lock.as_weak();
         let list_w = list.as_weak();
         let unshare = move |id: SharedString| {
+            // Record the decision in the vault first, so it travels to the other devices.
+            // Dropping the peer here alone does not hold: every device is an introducer, and
+            // the ones that still have it hand it straight back.
+            //
+            // The pairing panel is reachable from the lock screen, where there is no open
+            // vault to write to. The local drop still happens; it is the one case where a
+            // removal can come back, and pressing it again once unlocked makes it stick.
+            APP.with(|a| {
+                let borrow = a.borrow();
+                let Some(app) = borrow.as_ref() else { return };
+                let mut guard = app.ctx.vault.borrow_mut();
+                let Some(v) = guard.as_mut() else { return };
+                if let Err(e) = v.revoke_device(id.as_str()) {
+                    diag!("could not record the removed device in the vault: {e}");
+                }
+                // Straight away, rather than on the next merge: the peer is dropped and its
+                // entry parked, so a re-introduction in the meantime lands on nothing live.
+                crate::sync::apply_revocations(&app.ctx, v);
+            });
             let msg = match syncthing.borrow().as_ref() {
                 Some(st) => match st.unshare_folder_with(SYNC_FOLDER_ID, id.as_str()) {
                     Ok(()) => t!("msg.unshared"),
@@ -458,6 +497,7 @@ pub(crate) fn wire(
             // pending entry itself once the device is in the config.
             match st.share_folder_with(SYNC_FOLDER_ID, &id) {
                 Ok(()) => {
+                    lift_revocation(&id);
                     *shown.borrow_mut() = None;
                     let _ = win.hide();
                     drop(guard);

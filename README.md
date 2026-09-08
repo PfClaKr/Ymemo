@@ -158,6 +158,12 @@ Pairing is between two devices, but the vault is not: from the third device on, 
 laptop end up talking to each other directly. Without that the laptop would have to be awake
 for a memo to travel between the other two.
 
+Removing a device travels the same way. It is recorded in the vault rather than on the device
+you happen to be holding, so every other device drops it too — otherwise the ones that still
+had it would introduce it straight back. Connecting it again lifts the removal. What it does
+not do is reach into the device you removed: the memos already on it stay, and it keeps the
+key it was given, so this is how you stop sharing with a device, not how you lock one out.
+
 ### Korean and English
 
 Follows the system language and can be changed in settings. The screens and the core's error

@@ -184,3 +184,70 @@ fn a_new_device_reaches_the_others_without_being_paired_with_each() {
 
 
 
+
+/// A device removed from the vault stays removed, even though every peer is an introducer.
+///
+/// This is the other half of the mesh. Introduction is what makes three devices reach each
+/// other, and it is also what used to undo a removal: the peers that still had the device
+/// handed it straight back, so it flapped for a minute and returned. What settles it is every
+/// device applying the same list, which is why the list travels in the vault — see
+/// `RevokedDevice`. Here the vault is stood in for by the list itself, since what is being
+/// tested is the daemon half: once each remaining device has applied it, nobody offers the
+/// removed device and there is nothing left to introduce.
+#[test]
+#[ignore = "spawns three syncthing daemons; needs YMEMO_SYNCTHING_BIN"]
+fn a_removed_device_is_not_introduced_back() {
+    let Some(binary) = std::env::var_os("YMEMO_SYNCTHING_BIN").map(PathBuf::from) else {
+        eprintln!("YMEMO_SYNCTHING_BIN not set; skipping");
+        return;
+    };
+
+    let a = start(&binary, "A");
+    let b = start(&binary, "B");
+    let c = start(&binary, "C (the one to remove)");
+    for peer in [&b, &c] {
+        a.st.share_folder_with(VAULT_FOLDER_ID, &peer.id).unwrap();
+        peer.st.share_folder_with(VAULT_FOLDER_ID, &a.id).unwrap();
+    }
+    let knows = |d: &Device, id: &str| {
+        d.st.shared_devices(VAULT_FOLDER_ID).unwrap().iter().any(|s| s.id == id)
+    };
+    wait_for("the mesh to close", || knows(&b, &c.id) && knows(&c, &b.id));
+
+    // The removal, as the app makes it: the device that was asked drops the peer, and every
+    // other device applies the same list on its next merge.
+    let revoked = [c.id.clone()];
+    a.st.unshare_folder_with(VAULT_FOLDER_ID, &c.id).unwrap();
+
+    // Settle first. B has not applied the list yet, so for a moment it is still offering C
+    // and A can be introduced to it again — the merge timer is what closes that window, and
+    // it is a poll, not an instant.
+    let apply = || {
+        for device in [&a, &b] {
+            device.st.apply_revocations(VAULT_FOLDER_ID, &revoked).unwrap();
+        }
+    };
+    // Waited for rather than slept through: how long it takes depends on when each daemon
+    // next reconnects, and a fixed pause is a flake on a busy machine.
+    let mut clean = 0;
+    let settle = Instant::now() + REACH_TIMEOUT;
+    while clean < 5 {
+        assert!(Instant::now() < settle, "the removal never settled");
+        apply();
+        clean = if !knows(&a, &c.id) && !knows(&b, &c.id) { clean + 1 } else { 0 };
+        std::thread::sleep(Duration::from_secs(2));
+    }
+
+    // Then it has to *stay* gone, through the reconnect interval that used to bring it back:
+    // without this it returned inside a minute, and flapped on the way.
+    let hold = Instant::now() + Duration::from_secs(90);
+    while Instant::now() < hold {
+        apply();
+        assert!(!knows(&a, &c.id), "A took C back");
+        assert!(!knows(&b, &c.id), "B took C back");
+        std::thread::sleep(Duration::from_secs(3));
+    }
+
+    // And the two that remain are still a working pair, so a removal is not a fallen mesh.
+    assert!(knows(&a, &b.id) && knows(&b, &a.id), "A and B should still share the vault");
+}

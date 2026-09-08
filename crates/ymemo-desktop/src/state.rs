@@ -56,6 +56,12 @@ pub(crate) struct Ctx {
     pub(crate) settings: Rc<RefCell<Settings>>,
     /// When the user last interacted; the idle auto-lock watches this.
     pub(crate) last_activity: Rc<Cell<Instant>>,
+    /// The sync daemon, when there is one. `None` on a build or a machine without it, where
+    /// the app runs local-only.
+    ///
+    /// Here rather than only in `main` because the merge timer needs it: a merge can bring in
+    /// a device removal made on another device, and applying that means telling the daemon.
+    pub(crate) syncthing: Rc<RefCell<Option<ymemo_core::sync::Syncthing>>>,
     /// Whether a tray icon actually registered.
     ///
     /// Not a detail: taking the stickies out of the taskbar is only defensible *because* the

@@ -269,6 +269,7 @@ fn main() -> Result<()> {
         stickies: Rc::new(RefCell::new(HashMap::new())),
         collapsed: Rc::new(RefCell::new(HashSet::new())),
         query: Rc::new(RefCell::new(String::new())),
+        syncthing: syncthing.clone(),
         dir: Rc::new(dir.clone()),
         settings: Rc::new(RefCell::new(loaded)),
         last_activity: Rc::new(Cell::new(Instant::now())),

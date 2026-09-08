@@ -666,6 +666,66 @@ impl Vault {
         }
     }
 
+    // -----------------------------------------------------------------------------------
+    // Removed devices
+    //
+    // Pairing is between two devices and the vault is not, so every peer is an introducer
+    // (see `Syncthing::upsert_peer`) and the devices sharing a vault close into a mesh. That
+    // is what makes a removal a **synced** fact rather than a local one: a device dropped
+    // only here is handed straight back by the peers that still have it — measured, and it
+    // flaps for a minute and then returns.
+    //
+    // So the decision goes in the document, next to the memos, and every device applies it
+    // on its own. See [`crate::RevokedDevice`] for what this is and is not.
+    // -----------------------------------------------------------------------------------
+
+    /// Records that a device is no longer part of this vault, on every device that shares it.
+    ///
+    /// Idempotent, and never a no-op on the timestamp alone: re-revoking an already revoked
+    /// device would otherwise write a change per call, and the callers poll.
+    pub fn revoke_device(&mut self, device_id: &str) -> Result<()> {
+        if device_id == self.device_id {
+            bail!(t!("core.cannot_unshare_self"));
+        }
+        let revoked = self.revoked_obj()?;
+        if self.doc.get(&revoked, device_id)?.is_some() {
+            return Ok(());
+        }
+        let obj = self.doc.put_object(&revoked, device_id, ObjType::Map)?;
+        self.doc.put(&obj, "at", crate::now_millis())?;
+        self.doc.put(&obj, "by", self.device_id.clone())?;
+        self.append_local_change()?;
+        self.materialize_revoked()
+    }
+
+    /// Takes a device off the removed list, which is what pairing with it again means.
+    ///
+    /// Without this a mis-click would be permanent: the peers would go on refusing a device
+    /// the user has since decided to keep, and no amount of re-pairing would stick.
+    pub fn unrevoke_device(&mut self, device_id: &str) -> Result<()> {
+        let revoked = self.revoked_obj()?;
+        if self.doc.get(&revoked, device_id)?.is_none() {
+            return Ok(());
+        }
+        self.doc.delete(&revoked, device_id)?;
+        self.append_local_change()?;
+        self.materialize_revoked()
+    }
+
+    /// Every device the vault says has been removed, oldest first.
+    pub fn revoked_devices(&self) -> Result<Vec<crate::RevokedDevice>> {
+        self.store.list_revoked()
+    }
+
+    /// Whether the vault says **this** device has been removed.
+    ///
+    /// A device that finds itself here stops syncing rather than fighting the others for the
+    /// folder. It keeps what it already has: taking a user's memos off their own machine
+    /// because another machine said so is a different act, and not one this promises.
+    pub fn is_revoked_here(&self) -> Result<bool> {
+        Ok(self.revoked_devices()?.iter().any(|d| d.device_id == self.device_id))
+    }
+
     /// Read-only access to the local cache.
     pub fn store(&self) -> &Store {
         &self.store
@@ -793,7 +853,32 @@ impl Vault {
             }
         }
         self.materialize_groups()?;
+        self.materialize_revoked()?;
         self.materialize_attachments()
+    }
+
+    /// Copies `ROOT.revoked` into the cache. Like the memos, this is rebuilt from scratch on
+    /// every merge, so a device un-revoked elsewhere disappears from here by itself.
+    fn materialize_revoked(&mut self) -> Result<()> {
+        // Cleared first, not merged into: this runs after an un-revoke too, and a row that is
+        // no longer in the document has to leave the cache with it.
+        self.store.clear_revoked()?;
+        let Some((Value::Object(ObjType::Map), revoked)) = self.doc.get(ROOT, "revoked")? else {
+            return Ok(()); // nothing has ever been removed
+        };
+        let ids: Vec<String> = self.doc.keys(&revoked).collect();
+        for device_id in ids {
+            let Some((Value::Object(ObjType::Map), obj)) = self.doc.get(&revoked, &device_id)?
+            else {
+                continue;
+            };
+            self.store.upsert_revoked(&crate::RevokedDevice {
+                device_id,
+                at: get_i64_or(&self.doc, &obj, "at", 0),
+                by: get_str_or(&self.doc, &obj, "by", ""),
+            })?;
+        }
+        Ok(())
     }
 
     fn materialize_attachments(&mut self) -> Result<()> {
@@ -881,6 +966,14 @@ impl Vault {
         Ok(match self.doc.get(ROOT, "attachments")? {
             Some((Value::Object(ObjType::Map), id)) => id,
             _ => self.doc.put_object(ROOT, "attachments", ObjType::Map)?,
+        })
+    }
+
+    /// The `ROOT.revoked` map, created on first use.
+    fn revoked_obj(&mut self) -> Result<ObjId> {
+        Ok(match self.doc.get(ROOT, "revoked")? {
+            Some((Value::Object(ObjType::Map), id)) => id,
+            _ => self.doc.put_object(ROOT, "revoked", ObjType::Map)?,
         })
     }
 
@@ -2074,6 +2167,44 @@ mod tests {
             other.id,
             "a memo moved since the deletion stays where the user put it"
         );
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db).ok();
+    }
+
+    /// A removal is a fact about the vault, so it survives a rebuild and can be taken back.
+    #[test]
+    fn a_removed_device_is_remembered_and_can_be_taken_back() {
+        let dir = temp_dir();
+        let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
+        let mut v = Vault::create(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+
+        assert!(v.revoked_devices().unwrap().is_empty());
+        v.revoke_device("GONE-DEVICE").unwrap();
+        let revoked = v.revoked_devices().unwrap();
+        assert_eq!(revoked.len(), 1);
+        assert_eq!(revoked[0].device_id, "GONE-DEVICE");
+        assert_eq!(revoked[0].by, v.device_id(), "the deciding device is recorded");
+        assert!(revoked[0].at > 0);
+
+        // Saying it twice is not a second change; the callers poll.
+        v.revoke_device("GONE-DEVICE").unwrap();
+        assert_eq!(v.revoked_devices().unwrap().len(), 1);
+
+        // It comes out of the logs, not out of the cache, so a rebuild keeps it.
+        v.rebuild().unwrap();
+        assert_eq!(v.revoked_devices().unwrap().len(), 1);
+        assert!(!v.is_revoked_here().unwrap(), "this device removed another, not itself");
+
+        // Pairing with it again lifts the removal, and that survives a rebuild too.
+        v.unrevoke_device("GONE-DEVICE").unwrap();
+        assert!(v.revoked_devices().unwrap().is_empty());
+        v.rebuild().unwrap();
+        assert!(v.revoked_devices().unwrap().is_empty());
+
+        // A device cannot remove itself; that is what wiping the vault is for.
+        let me = v.device_id().to_string();
+        assert!(v.revoke_device(&me).is_err());
 
         fs::remove_dir_all(&dir).ok();
         fs::remove_file(&db).ok();

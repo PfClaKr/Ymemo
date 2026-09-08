@@ -202,6 +202,27 @@ pub fn cascade_permille(n: usize) -> (i64, i64) {
     (clamp_permille(off), clamp_permille(off))
 }
 
+/// A device the user has removed from the vault.
+///
+/// Lives in the **synced document**, not in this device's settings, because a removal that
+/// only one device knows about does not hold: the others go on sharing the vault with the
+/// device and introduce it straight back (see `Syncthing::upsert_peer`).
+///
+/// **Not a lock.** A removed device still holds the data key and every memo it already
+/// received, and nothing stops it writing to its own log — including to take itself off this
+/// list. What this carries is the user's decision, to every device that is willing to honour
+/// it. Shutting a hostile device out would mean a new data key and re-wrapping every log and
+/// blob, which this design deliberately does not do.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RevokedDevice {
+    /// Syncthing device id.
+    pub device_id: String,
+    /// When it was removed, unix epoch millis.
+    pub at: i64,
+    /// The device that removed it, so a screen can say where the decision came from.
+    pub by: String,
+}
+
 /// A folder of memos; `parent_id` nests them.
 ///
 /// Concurrent edits can make parenthood cyclic (A -> B, B -> A), so whoever builds the
@@ -302,6 +323,15 @@ impl Store {
                 created_at     INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS attachments_memo ON attachments(memo_id);
+            -- Devices the user has removed from the vault, as the **synced document** says.
+            -- Unlike `meta` below this is not device-local: it is materialized from the logs
+            -- like memos are, which is the whole point — a removal made on one device has to
+            -- reach the others, or they introduce the device straight back.
+            CREATE TABLE IF NOT EXISTS revoked (
+                device_id TEXT PRIMARY KEY,
+                at        INTEGER NOT NULL,
+                by        TEXT NOT NULL DEFAULT ''
+            );
             -- Device-local metadata (device_id, ...). Never synced.
             CREATE TABLE IF NOT EXISTS meta (
                 key   TEXT PRIMARY KEY,
@@ -371,6 +401,7 @@ impl Store {
         self.conn.execute("DELETE FROM memos", [])?;
         self.conn.execute("DELETE FROM groups", [])?;
         self.conn.execute("DELETE FROM attachments", [])?;
+        self.conn.execute("DELETE FROM revoked", [])?;
         Ok(())
     }
 
@@ -503,6 +534,32 @@ impl Store {
             "SELECT id, name, parent_id, color, created_at, updated_at FROM groups ORDER BY name",
         )?;
         let rows = stmt.query_map([], row_to_group)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Empties the removed-device table, so materializing it is a rebuild rather than a merge.
+    pub fn clear_revoked(&self) -> Result<()> {
+        self.conn.execute("DELETE FROM revoked", [])?;
+        Ok(())
+    }
+
+    /// Records a removed device in the cache. Called only while materializing the document.
+    pub fn upsert_revoked(&self, device: &RevokedDevice) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO revoked (device_id, at, by) VALUES (?1, ?2, ?3)
+             ON CONFLICT(device_id) DO UPDATE SET at = ?2, by = ?3",
+            rusqlite::params![device.device_id, device.at, device.by],
+        )?;
+        Ok(())
+    }
+
+    /// Every device the vault says has been removed, oldest removal first.
+    pub fn list_revoked(&self) -> Result<Vec<RevokedDevice>> {
+        let mut stmt =
+            self.conn.prepare("SELECT device_id, at, by FROM revoked ORDER BY at, device_id")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(RevokedDevice { device_id: r.get(0)?, at: r.get(1)?, by: r.get(2)? })
+        })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 

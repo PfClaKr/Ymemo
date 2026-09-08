@@ -20,6 +20,7 @@ use ymemo_core::{
     vault::Vault,
     Attachment, Group, Memo, Store,
 };
+use ymemo_core::diag;
 use ymemo_i18n::t;
 
 /// The open vault; one per app process.
@@ -957,7 +958,44 @@ pub fn group_delete(id: String) -> Result<()> {
 /// Merges the other devices' logs into the local state; call it after the transport has
 /// delivered new logs.
 pub fn sync_rebuild() -> Result<()> {
-    with_vault(|v| v.rebuild())
+    with_vault(|v| v.rebuild())?;
+    apply_revocations();
+    Ok(())
+}
+
+/// Tells the daemon about the removals the vault carries; see the desktop's twin in
+/// `ymemo-desktop/src/sync.rs`.
+///
+/// Best effort and silent: it runs after every merge, the daemon may be down, and a failure
+/// here is not something the person reading their memos can act on.
+fn apply_revocations() {
+    let Ok(sync_guard) = sync_lock() else { return };
+    let Some(st) = sync_guard.as_ref() else { return };
+    let Ok(vault_guard) = VAULT.lock() else { return };
+    let Some(v) = vault_guard.as_ref() else { return };
+
+    match v.is_revoked_here() {
+        // Removed from the vault by another device: stop carrying the folder. What is already
+        // on this phone stays — a removal is not a remote wipe.
+        Ok(true) => {
+            if let Err(e) = st.remove_folder(VAULT_FOLDER_ID) {
+                diag!("could not stop syncing after being removed from the vault: {e}");
+            }
+            return;
+        }
+        Ok(false) => {}
+        Err(e) => diag!("could not tell whether this device was removed: {e}"),
+    }
+    let ids: Vec<String> = match v.revoked_devices() {
+        Ok(list) => list.into_iter().map(|d| d.device_id).collect(),
+        Err(e) => {
+            diag!("could not read the removed devices: {e}");
+            return;
+        }
+    };
+    if let Err(e) = st.apply_revocations(VAULT_FOLDER_ID, &ids) {
+        diag!("could not apply the removed devices: {e}");
+    }
 }
 
 // ===========================================================================
@@ -1101,6 +1139,9 @@ pub fn sync_pairing_code() -> Result<String> {
 pub fn sync_pair_with(code: String) -> Result<String> {
     let peer = PairingCode::decode(&code)?.syncthing_device_id;
     with_sync(|st| st.share_folder_with(VAULT_FOLDER_ID, &peer))?;
+    // Deliberately pairing with a device again lifts an earlier removal, or the other devices
+    // would go on dropping it.
+    let _ = with_vault(|v| v.unrevoke_device(&peer));
     Ok(peer)
 }
 
@@ -1115,10 +1156,19 @@ pub fn sync_devices() -> Result<Vec<FfiSharedDevice>> {
     })
 }
 
-/// Drops a peer. Only this side stops syncing; the other device keeps its own entry until it
-/// unpairs too.
+/// Removes a peer from the vault, on every device that shares it.
+///
+/// The decision goes into the vault first so it travels: every peer is an introducer, so a
+/// peer dropped here alone is handed straight back by the devices that still have it. The
+/// device being removed keeps the memos it already has — this is not a remote wipe, and not
+/// a lock either; see `RevokedDevice`.
 pub fn sync_unpair(device_id: String) -> Result<()> {
-    with_sync(|st| st.unshare_folder_with(VAULT_FOLDER_ID, &device_id))
+    with_vault(|v| v.revoke_device(&device_id))?;
+    with_sync(|st| st.unshare_folder_with(VAULT_FOLDER_ID, &device_id))?;
+    // Straight away, rather than on the next merge: the peer's entry is parked so a
+    // re-introduction in the meantime lands on nothing live.
+    apply_revocations();
+    Ok(())
 }
 
 // ===========================================================================

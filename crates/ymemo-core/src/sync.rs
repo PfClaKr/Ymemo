@@ -429,6 +429,83 @@ impl Syncthing {
         Ok(())
     }
 
+    /// Stops sharing the folder with every device the vault says has been removed.
+    ///
+    /// The other half of making a removal stick. Every peer is an introducer, so a device
+    /// dropped on one machine alone is handed back by the machines that still have it; what
+    /// stops that is every machine applying the same list, which is why the list travels in
+    /// the vault (see [`crate::RevokedDevice`]). Once they all have, nobody offers the device
+    /// and there is nothing left to introduce.
+    ///
+    /// Returns how many it had to act on, so a caller can log a removal it did not make.
+    ///
+    /// **Paused, not deleted.** Dropping the device outright does not settle: the peers apply
+    /// the list at slightly different moments, and whichever has not yet dropped it hands it
+    /// back to the one that has, which hands it back in turn. Measured against v2.1.2, that
+    /// ping-pong runs for as long as you care to watch — it never converges. A paused entry
+    /// is the tombstone that does settle: introduction may put the device back in the folder,
+    /// but a paused device is never dialled and never answers, so nothing flows either way.
+    /// [`Syncthing::shared_devices`] hides them, so the list matches what is really shared.
+    ///
+    /// Idempotent and cheap when there is nothing to do, which is the normal case: it runs
+    /// after every merge.
+    pub fn apply_revocations(&self, folder_id: &str, revoked: &[String]) -> Result<usize> {
+        if revoked.is_empty() {
+            return Ok(0);
+        }
+        let my_id = self.device_id()?;
+        let mut acted = 0;
+        for id in revoked.iter().filter(|id| **id != my_id) {
+            if self.set_device_paused(id, true)? {
+                acted += 1;
+            }
+            acted += usize::from(self.drop_from_folder(folder_id, id)?);
+        }
+        Ok(acted)
+    }
+
+    /// Pauses or resumes a peer, creating the entry if it is not there. Returns whether
+    /// anything changed, so the caller can stay quiet when it did not.
+    ///
+    /// A paused device is kept in the configuration on purpose: it is what a re-introduction
+    /// lands on instead of creating a live peer. See [`Syncthing::apply_revocations`].
+    fn set_device_paused(&self, device_id: &str, paused: bool) -> Result<bool> {
+        let url = format!("{}/rest/config/devices/{device_id}", self.base_url);
+        let mut device: serde_json::Value =
+            match ureq::get(&url).header("X-API-Key", &self.api_key).call() {
+                Ok(mut res) => res.body_mut().read_json()?,
+                Err(_) => serde_json::json!({ "deviceID": device_id }),
+            };
+        if device["paused"] == serde_json::json!(paused) {
+            return Ok(false);
+        }
+        device["paused"] = serde_json::json!(paused);
+        // A device that is not to be talked to is not one to take introductions from either.
+        if paused {
+            device["introducer"] = serde_json::json!(false);
+        }
+        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&device)?;
+        Ok(true)
+    }
+
+    /// Takes a device out of the folder's peer list, leaving its device entry alone.
+    /// Returns whether it was there.
+    fn drop_from_folder(&self, folder_id: &str, device_id: &str) -> Result<bool> {
+        let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
+        let Ok(mut res) = ureq::get(&url).header("X-API-Key", &self.api_key).call() else {
+            return Ok(false); // no folder: nothing shared with anyone
+        };
+        let mut folder: serde_json::Value = res.body_mut().read_json()?;
+        let Some(devices) = folder["devices"].as_array_mut() else { return Ok(false) };
+        let before = devices.len();
+        devices.retain(|d| d["deviceID"] != device_id);
+        if devices.len() == before {
+            return Ok(false);
+        }
+        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
+        Ok(true)
+    }
+
     /// Devices that tried to connect and are waiting to be allowed in, oldest request first.
     ///
     /// Syncthing keeps this list itself: an inbound connection from a device that is not in
@@ -506,6 +583,17 @@ impl Syncthing {
                 .unwrap_or("")
                 .to_string()
         };
+        // A removed device is kept in the configuration, paused, so that a re-introduction
+        // lands on a peer that is never dialled rather than creating a live one — see
+        // `apply_revocations`. It is not shared with anybody, so it does not belong in a list
+        // of the devices this vault is shared with.
+        let paused = |id: &str| -> bool {
+            devices
+                .as_array()
+                .and_then(|a| a.iter().find(|d| d["deviceID"] == id))
+                .and_then(|d| d["paused"].as_bool())
+                .unwrap_or(false)
+        };
 
         // Current connection state.
         let mut res = ureq::get(format!("{}/rest/system/connections", self.base_url))
@@ -515,8 +603,8 @@ impl Syncthing {
 
         let mut out = Vec::new();
         for id in ids {
-            if id == my_id {
-                continue; // never list ourselves
+            if id == my_id || paused(&id) {
+                continue; // never list ourselves, nor a device that has been removed
             }
             let connected = conns["connections"][&id]["connected"].as_bool().unwrap_or(false);
             let name = name_of(&id);
