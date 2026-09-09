@@ -477,14 +477,33 @@ export component ListWindow inherits Window {
             }
         }
 
-        if !root.show-sync && root.rows.length == 0: Text {
-            text: root.query == "" ? Strings.ui_list_empty : Strings.ui_list_search_none;
-            font-size: 12px;
-            color: #b0a99a;
-            wrap: word-wrap;
+        // An empty list still has the whole window to fill, and the line saying so belongs in
+        // the middle of that space rather than pinned to the top-left corner of it.
+        if !root.show-sync && root.rows.length == 0: VerticalLayout {
+            vertical-stretch: 1;
+            alignment: center;
+            spacing: 6px;
+            padding-left: 12px;
+            padding-right: 12px;
+            Text {
+                text: root.query == "" ? Strings.ui_list_empty : Strings.ui_list_search_none;
+                horizontal-alignment: center;
+                font-size: 13px;
+                color: #d8d2c2;
+                wrap: word-wrap;
+            }
+            // What to do about it, quieter than the line above and only when the list is
+            // empty: a search that found nothing is not the place to explain the + button.
+            if root.query == "": Text {
+                text: Strings.ui_list_empty_hint;
+                horizontal-alignment: center;
+                font-size: 11px;
+                color: #8f887a;
+                wrap: word-wrap;
+            }
         }
 
-        if !root.show-sync: ListView {
+        if !root.show-sync && root.rows.length > 0: ListView {
             vertical-stretch: 1;
             for row[idx] in root.rows: Rectangle {
                 height: root.row-h;
