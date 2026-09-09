@@ -570,6 +570,39 @@ export component StickyWindow inherits Window {
         if (self.collapsed) { self.show-palette = false; }
     }
 
+    // Window-wide keys. A `FocusScope` around everything rather than a handler on the
+    // writing: the keys have to work whether the caret is in the note or not, and Slint sends
+    // a key to the focused item first and then up through its ancestors.
+    keys := FocusScope {
+        width: 100%;
+        height: 100%;
+        // Takes the focus so the keys below arrive at all; see the note in `list.slint`.
+        // A new note then has it moved into the writing by `focus-body`, which Rust calls
+        // after the window is up.
+        init => { self.focus(); }
+        key-pressed(ev) => {
+            // Escape puts the note down: the caret leaves the writing and the read view comes
+            // back. Clicking another window was the only way to do that, which is a strange
+            // thing to have to do to stop typing.
+            if (ev.text == Key.Escape && body.has-focus) {
+                self.focus();
+                return accept;
+            }
+            // The one shortcut every window has. A note saves as it is typed, so closing one
+            // loses nothing — and reaching for the mouse to put a note away is most of what
+            // makes a deskful of them tiring.
+            if (ev.modifiers.control && ev.text == "w") {
+                root.close-requested();
+                return accept;
+            }
+            // The same key the list uses, so it means one thing everywhere.
+            if (ev.modifiers.control && ev.text == "n") {
+                root.new-memo();
+                return accept;
+            }
+            return reject;
+        }
+
     Rectangle {
         background: Palette.bg(root.sticky-color);
         // Square corners.
@@ -1009,5 +1042,6 @@ export component StickyWindow inherits Window {
             }
         }
 
+    }
     }
 }

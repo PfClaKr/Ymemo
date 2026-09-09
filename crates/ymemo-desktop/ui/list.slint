@@ -169,6 +169,31 @@ export component ListWindow inherits Window {
         }
     }
 
+    // Window-wide keys, the same shape as the sticky's: a `FocusScope` around everything,
+    // because a key has to reach these whether the caret is in the find box, in the heading,
+    // or nowhere at all.
+    keys := FocusScope {
+        width: 100%;
+        height: 100%;
+        // A `FocusScope` only receives keys while it has the focus, and a window that has
+        // just opened has given it to nobody — so it takes it here. Anything the user then
+        // clicks into (the find box, the heading) takes it away and gets its keys first;
+        // what it does not consume comes back up to here.
+        init => { self.focus(); }
+        key-pressed(ev) => {
+            // Starting a note without reaching for the mouse. The same key works on a
+            // sticky, so it means the same thing wherever the app has the focus.
+            //
+            // (No Ctrl+F for the find box: it lives inside an `if`, and a Slint id declared
+            // in a conditional cannot be reached from out here. It is one click away and
+            // already on screen, which is why this is a note and not a workaround.)
+            if (ev.modifiers.control && ev.text == "n") {
+                root.new-memo();
+                return accept;
+            }
+            return reject;
+        }
+
     VerticalLayout {
         padding: 12px;
         spacing: 8px;
@@ -825,5 +850,6 @@ export component ListWindow inherits Window {
                 }
             }
         }
+    }
     }
 }
