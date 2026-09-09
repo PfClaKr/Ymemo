@@ -159,6 +159,38 @@ export component ListWindow inherits Window {
 
     // Row height; drag distance is converted to rows with it, so it must stay fixed.
     private property <length> row-h: 34px;
+    // Which row the keyboard is on; -1 for none, which is where it starts and where Escape
+    // puts it back. Not a "current folder" or anything the rest of the app reads — only this
+    // window's idea of where the arrow keys are.
+    private property <int> selected: -1;
+
+    // Up and down, with nothing selected meaning "start at the near end".
+    function move-selection(delta: int) {
+        if (root.rows.length == 0) {
+            root.selected = -1;
+            return;
+        }
+        if (root.selected < 0) {
+            root.selected = delta > 0 ? 0 : root.rows.length - 1;
+            return;
+        }
+        root.selected = Math.max(0, Math.min(root.rows.length - 1, root.selected + delta));
+    }
+
+    // Return does to the selected row exactly what a click does to it: opens a memo, opens or
+    // shuts a folder. The row is read out of `rows` by index rather than from inside the
+    // `for`, because an id declared in a `for` cannot be reached from out here.
+    function activate-selected() {
+        if (root.selected < 0 || root.selected >= root.rows.length) {
+            return;
+        }
+        root.commit-edit();
+        if (root.rows[root.selected].is-group) {
+            root.toggle-group(root.rows[root.selected].id);
+        } else {
+            root.open-memo(root.rows[root.selected].id);
+        }
+    }
     // Whether the heading is currently standing in for a toolbar button's name.
     private property <bool> tip-showing: b-lock.hovering || b-gear.hovering || b-link.hovering
         || b-folder.hovering || b-plus.hovering;
@@ -179,8 +211,13 @@ export component ListWindow inherits Window {
         if (root.editing-id != "") {
             root.rename-group(root.editing-id, root.editing-text);
             root.editing-id = "";
-            keys.focus(); // same reason as in `finish-naming`
         }
+        // **Always**, not only when something was being renamed. A `TouchArea` does not hold
+        // the keyboard focus, so every click on a row, a toolbar button or an icon leaves it
+        // on nothing at all and the window-wide keys go dead until the window is reopened.
+        // Nearly everything clickable in this window calls through here first, which makes
+        // this the one place that has to remember.
+        keys.focus();
     }
 
     // Window-wide keys, the same shape as the sticky's: a `FocusScope` around everything,
@@ -203,6 +240,25 @@ export component ListWindow inherits Window {
             // already on screen, which is why this is a note and not a workaround.)
             if (ev.modifiers.control && ev.text == "n") {
                 root.new-memo();
+                return accept;
+            }
+            // Walking the list without the mouse. The find box gets these first while it has
+            // the caret, which is what lets someone type a search and then step through what
+            // came back.
+            if (ev.text == Key.DownArrow) {
+                root.move-selection(1);
+                return accept;
+            }
+            if (ev.text == Key.UpArrow) {
+                root.move-selection(-1);
+                return accept;
+            }
+            if (ev.text == Key.Return) {
+                root.activate-selected();
+                return accept;
+            }
+            if (ev.text == Key.Escape && root.selected >= 0) {
+                root.selected = -1;
                 return accept;
             }
             return reject;
@@ -411,6 +467,11 @@ export component ListWindow inherits Window {
                         single-line: true;
                         accessible-label: Strings.ui_list_search;
                         edited => { root.search(self.text); }
+                        // Return opens whatever the arrows landed on. The field swallows this
+                        // key on its own — the arrows pass through it and this one does not —
+                        // so typing a search, stepping down into what came back and pressing
+                        // return did nothing at all, which is the whole gesture.
+                        accepted => { root.activate-selected(); }
                         // Escape clears rather than closes: the field has no close of its own,
                         // and a search left standing is what would make the list look half
                         // empty ten minutes later.
@@ -429,7 +490,7 @@ export component ListWindow inherits Window {
                     height: 20px;
                     icon: "close";
                     label: Strings.ui_list_search;
-                    clicked => { find.text = ""; root.search(""); }
+                    clicked => { find.text = ""; root.search(""); root.commit-edit(); }
                 }
             }
         }
@@ -552,6 +613,23 @@ export component ListWindow inherits Window {
 
         if !root.show-sync && root.rows.length > 0: ListView {
             vertical-stretch: 1;
+            // A local mirror of the selection, so its `changed` can fire in here: this view
+            // is inside an `if`, and nothing outside a conditional can reach an id declared
+            // in it — which is also why the scrolling lives here rather than beside the
+            // arrow keys that cause it.
+            //
+            // Only written when the row is actually out of sight, so the wheel still works:
+            // binding `viewport-y` outright would take the scrollbar away from the user.
+            property <int> sel: root.selected;
+            changed sel => {
+                if (self.sel >= 0) {
+                    if (self.sel * root.row-h + root.row-h > -self.viewport-y + self.visible-height) {
+                        self.viewport-y = self.visible-height - (self.sel + 1) * root.row-h;
+                    } else if (self.sel * root.row-h < -self.viewport-y) {
+                        self.viewport-y = -self.sel * root.row-h;
+                    }
+                }
+            }
             for row[idx] in root.rows: Rectangle {
                 height: root.row-h;
                 border-radius: 6px;
@@ -569,6 +647,11 @@ export component ListWindow inherits Window {
                           : row.is-group ? #ffffff12
                           : row.depth > 0 ? #ffffff08
                           : transparent;
+                // Where the arrow keys are. An outline rather than a brighter fill: the fill
+                // already carries the hover and which folder a row is in, and a third shade
+                // of the same grey would be one too many to tell apart.
+                border-width: root.selected == idx ? 1px : 0px;
+                border-color: #7db8ec;
                 animate background { duration: 120ms; easing: ease-out; }
 
                 // The line the memo would land on, in the space the two rows either side have
@@ -644,6 +727,9 @@ export component ListWindow inherits Window {
                     clicked => {
                         if (!root.did-drag) {
                             root.commit-edit();
+                            // So the arrows carry on from whatever was last touched, rather
+                            // than from wherever they happened to be left.
+                            root.selected = idx;
                             if (row.is-group) {
                                 root.toggle-group(row.id);
                             } else {
@@ -757,6 +843,18 @@ export component ListWindow inherits Window {
                         init => { self.focus(); self.select-all(); }
                         edited(t) => { root.editing-text = t; }
                         accepted => { root.commit-edit(); }
+                        // Escape backs out, the way it does on the heading's own name field.
+                        // Not through `commit-edit`: this leaves without writing, so a folder
+                        // whose rename was abandoned does not get a log entry saying it was
+                        // renamed to what it was already called.
+                        key-pressed(ev) => {
+                            if (ev.text == Key.Escape) {
+                                root.editing-id = "";
+                                keys.focus();
+                                return accept;
+                            }
+                            return reject;
+                        }
                     }
                     if root.coloring-id != row.id && root.editing-id != row.id: Text {
                         text: row.is-group
