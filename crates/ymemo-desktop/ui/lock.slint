@@ -24,9 +24,8 @@ export component LockWindow inherits Window {
     // the layout, not by `preferred-width`, and the password prompt on its own is narrow
     // enough to wrap every line of the screen around it.
     min-width: 300px;
-    // Tall enough for the first-run choice screen, hint line included; the panels that need
-    // more than this say so through `recovery-shown` below.
-    min-height: 250px;
+    // A floor for a manual resize only; what the window actually opens at is `resize` above.
+    min-height: 150px;
     background: #2e2b27;
 
     in property <string> lock-message;
@@ -64,18 +63,17 @@ export component LockWindow inherits Window {
     // Reset with the code itself: a new one is a new thing to copy.
     private property <bool> code-copied: false;
     changed new-recovery-code => { self.code-copied = false; }
-    // Fires as the pairing panel opens and closes; Rust grows the window to fit it and
-    // shrinks it back.
-    callback sync-toggled(bool);
-    // Fires as a panel taller than the password prompt opens and closes; Rust grows the
-    // window for it. A window that stayed at the prompt's height cut a freshly issued
-    // recovery code off halfway through — on the one screen in the app whose whole job is
-    // to be read and copied down.
-    callback needs-room(bool);
+    // The size the panel now on screen wants; Rust sets the window to it.
+    //
+    // This window is a sequence of panels of very different sizes — a two-line prompt, a
+    // first-run choice with a paragraph on each card, a recovery code to copy down, the
+    // pairing panel — and one size for all of them is either a recovery code cut off by the
+    // bottom edge or a prompt floating in a window three times its height. So each panel
+    // says how big it is, right beside what it draws.
+    callback resize(length, length);
 
     // in-out so Rust can close it when the vault arrives.
     in-out property <bool> show-sync: false;
-    changed show-sync => { root.sync-toggled(self.show-sync); }
     // Whether a new device chose "create" and moved on to setting a password.
     private property <bool> creating: false;
     // Whether the "forgot the password" panel is open, and whether the wipe inside it has
@@ -86,12 +84,21 @@ export component LockWindow inherits Window {
         root.recovering = false;
         root.reset-armed = false;
     }
-    // The panels that do not fit the password prompt's height: the first-run choice with a
-    // paragraph on each card, a new recovery code, and the "forgot the password" panel with
-    // its code, its three fields and the wipe behind them.
-    private property <bool> tall-panel: root.new-recovery-code != "" || root.recovering
-        || (!root.vault-exists && !root.creating);
-    changed tall-panel => { root.needs-room(self.tall-panel); }
+    // Measured against what each panel draws, at the width beside it.
+    private property <length> panel-width: root.show-sync && root.sync-available ? 360px : 340px;
+    private property <length> panel-height:
+        // With no sync daemon the panel is one line saying so, not a screenful of codes.
+        root.show-sync ? (root.sync-available ? 520px : 200px)
+        : root.new-recovery-code != "" ? 245px
+        : root.recovering ? (root.has-recovery ? 425px : 260px)
+        : !root.vault-exists ? (root.creating ? 285px : 265px)
+        // The password prompt, plus a line for whatever went wrong last time.
+        : root.lock-message == "" ? 165px : 195px;
+    changed panel-height => { root.resize(root.panel-width, self.panel-height); }
+    changed panel-width => { root.resize(self.panel-width, root.panel-height); }
+    // The size of the panel a freshly opened window is already showing, which no `changed`
+    // will ever fire for.
+    public function apply-size() { root.resize(root.panel-width, root.panel-height); }
     // Contents of the password field. The LineEdit sits inside a conditional block and
     // cannot be reached by id, so it is two-way bound here and cleared by Rust on lock.
     private property <string> password-text;
@@ -166,6 +173,7 @@ export component LockWindow inherits Window {
                     }
                     Button {
                         text: Strings.ui_lock_open;
+                        primary: true;
                         clicked => { root.unlock(root.password-text); }
                     }
                 }
@@ -248,7 +256,10 @@ export component LockWindow inherits Window {
                     color: #a8a294;
                     wrap: word-wrap;
                 }
+                // Left-aligned and no wider than their words: the way out of this screen is
+                // not a bar across the bottom of it, and neither is throwing every memo away.
                 HorizontalLayout {
+                    alignment: start;
                     spacing: 6px;
                     if !root.reset-armed: Button {
                         text: Strings.ui_lock_reset;
@@ -313,20 +324,12 @@ export component LockWindow inherits Window {
                 // shown on the *next* screen. Changing the password already asks twice; the
                 // screen where it matters most did not.
                 FieldLabel { text: Strings.ui_lock_confirm_password; }
-                HorizontalLayout {
-                    spacing: 6px;
-                    npw2 := LineEdit {
-                        input-type: InputType.password;
-                        accepted => {
-                            if (npw.text != "" && npw.text == self.text) {
-                                root.create-vault(npw.text);
-                            }
+                npw2 := LineEdit {
+                    input-type: InputType.password;
+                    accepted => {
+                        if (npw.text != "" && npw.text == self.text) {
+                            root.create-vault(npw.text);
                         }
-                    }
-                    Button {
-                        text: Strings.ui_lock_create;
-                        enabled: npw.text != "" && npw.text == npw2.text;
-                        clicked => { root.create-vault(npw.text); }
                     }
                 }
                 if npw2.text != "" && npw.text != npw2.text: Text {
@@ -335,9 +338,22 @@ export component LockWindow inherits Window {
                     color: #e79a9a;
                     wrap: word-wrap;
                 }
-                Button {
-                    text: Strings.ui_lock_back;
-                    clicked => { root.creating = false; }
+                // What the screen is for comes first and is the marked one. It read the other
+                // way round: a small "create" tucked beside the field with a full-width
+                // "back" under it, which is the shape of a screen whose main move is to leave.
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: 6px;
+                    Button {
+                        text: Strings.ui_lock_create;
+                        primary: true;
+                        enabled: npw.text != "" && npw.text == npw2.text;
+                        clicked => { root.create-vault(npw.text); }
+                    }
+                    Button {
+                        text: Strings.ui_lock_back;
+                        clicked => { root.creating = false; }
+                    }
                 }
             }
             // A vault was just created: its recovery code, before anything else happens.

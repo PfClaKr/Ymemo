@@ -548,15 +548,6 @@ pub(crate) fn wire(
     // by default, so it grows while open and shrinks back afterwards.
     {
         let saved = Rc::new(Cell::new(None));
-        let weak = lock.as_weak();
-        lock.on_sync_toggled(move |open| {
-            if let Some(w) = weak.upgrade() {
-                grow_for_panel(w.window(), open, PAIRING_MIN_SIZE, &saved);
-            }
-        });
-    }
-    {
-        let saved = Rc::new(Cell::new(None));
         let weak = list.as_weak();
         list.on_sync_toggled(move |open| {
             if let Some(w) = weak.upgrade() {

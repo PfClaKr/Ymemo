@@ -64,9 +64,6 @@ use state::{touch, AppUi, Ctx, APP};
 use sticky::{close_sticky, new_memo, open_sticky, snap_tick, GEOMETRY_INTERVAL, SNAP_INTERVAL};
 use sync::{start_merge_timer, start_syncthing, SYNC_FOLDER_ID};
 
-/// Smallest window (logical px) for the lock-screen panels that outgrow the password prompt:
-/// the first-run choice, a freshly issued recovery code, and the "forgot the password" panel.
-const TALL_PANEL_SIZE: (f32, f32) = (340.0, 400.0);
 use window::present;
 
 /// How often idleness is checked; fine-grained enough against a setting in minutes.
@@ -463,13 +460,14 @@ fn main() -> Result<()> {
         });
     }
 
-    // ---- Make the window tall enough for the panels that outgrow the prompt. ----
+    // ---- Size the window to whichever panel is on it. ----
+    // Every panel here has its own size and `lock.slint` knows them all; this only applies
+    // what it asks for.
     {
-        let saved = Rc::new(Cell::new(None));
         let weak = lock.as_weak();
-        lock.on_needs_room(move |open| {
-            if let Some(w) = weak.upgrade() {
-                pairing::grow_for_panel(w.window(), open, TALL_PANEL_SIZE, &saved);
+        lock.on_resize(move |w, h| {
+            if let Some(win) = weak.upgrade() {
+                win.window().set_size(slint::LogicalSize::new(w, h));
             }
         });
     }
@@ -1073,13 +1071,10 @@ fn main() -> Result<()> {
 
     // Do not raise the lock window when the session already unlocked us.
     if !auto_unlocked {
-        // A device with no vault opens on the first-run choice, which is taller than the
-        // password prompt the window is sized for. `needs-room` only fires on a *change*, and
-        // this screen is already the tall one, so the very first thing a new user would see
-        // was the second card cut off by the bottom edge.
-        if !vault_exists {
-            lock.window().set_size(slint::LogicalSize::new(TALL_PANEL_SIZE.0, TALL_PANEL_SIZE.1));
-        }
+        // `resize` only fires on a *change*, and the panel a fresh window opens on has not
+        // changed into anything — which is how a new device met the first-run choice with its
+        // second card cut off by the bottom edge.
+        lock.invoke_apply_size();
         present(&lock);
     }
     slint::run_event_loop_until_quit()?;
