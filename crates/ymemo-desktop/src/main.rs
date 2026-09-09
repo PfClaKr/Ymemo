@@ -755,7 +755,7 @@ fn main() -> Result<()> {
             // Read back what was stored rather than what was typed: the core trims it and
             // cuts it to length, and the heading must show the name that actually synced.
             if let Some(list) = weak.upgrade() {
-                list.set_vault_name(SharedString::from(crate::hangul::for_slint(&stored)));
+                list::set_vault_name(&list, &stored);
             }
         });
     }

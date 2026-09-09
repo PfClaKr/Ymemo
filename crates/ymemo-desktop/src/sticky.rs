@@ -167,7 +167,7 @@ pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) -> bool {
     refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
     // Reflect the new title in the title bar.
     if let Some(entry) = ctx.stickies.borrow().get(id) {
-        entry.window.set_memo_title(SharedString::from(crate::hangul::for_slint(&memo.title)));
+        set_title(&entry.window, &memo.title);
         // The save went through, so whatever the last one said no longer holds.
         entry.window.set_notice(SharedString::new());
     }
@@ -392,6 +392,19 @@ pub(crate) fn refresh_photos(ctx: &Ctx, memo_id: &str) {
     }
 }
 
+/// Sets a memo's title on its sticky, in both the places it appears.
+///
+/// Two properties for one string: `memo-title` is drawn by Slint and goes through
+/// [`crate::hangul::for_slint`], `window-title` is the desktop's own title bar and must carry
+/// the name as it is really spelled. Behind one function because setting one and not the
+/// other is exactly the bug this replaces — two of the four callers were passing the title
+/// straight through, so the same memo's title bar read one way after a save and another after
+/// a merge.
+pub(crate) fn set_title(window: &StickyWindow, title: &str) {
+    window.set_memo_title(SharedString::from(crate::hangul::for_slint(title)));
+    window.set_window_title(SharedString::from(title));
+}
+
 /// Sets a sticky's body and the blocks its read view draws, which must never disagree: the
 /// read view is the same words, and showing yesterday's next to today's would be worse than
 /// showing none.
@@ -540,7 +553,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     let window = StickyWindow::new()?;
     // The globals are per instance, so fill this one with the current strings.
     apply_strings(&window.global::<Strings>());
-    window.set_memo_title(SharedString::from(crate::hangul::for_slint(&memo.title)));
+    set_title(&window, &memo.title);
     set_body_text(&window, &sticky_text(memo));
     window.set_sticky_color(SharedString::from(memo.color.clone()));
     window.set_sticky_opacity(memo.opacity as f32);

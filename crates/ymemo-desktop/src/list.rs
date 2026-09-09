@@ -76,6 +76,16 @@ pub(crate) fn refresh_list(
     model.set_vec(rows);
 }
 
+/// Sets the vault's name on the list window, in both the places it appears.
+///
+/// `vault-name` is the heading Slint draws and goes through [`crate::hangul::for_slint`];
+/// `vault-title` is the desktop's own title bar, which Slint has nothing to do with and which
+/// must carry the name as it is really spelled.
+pub(crate) fn set_vault_name(list: &crate::ListWindow, name: &str) {
+    list.set_vault_name(SharedString::from(crate::hangul::for_slint(name)));
+    list.set_vault_title(SharedString::from(name));
+}
+
 /// Puts a failed write in front of the user, as well as in the log.
 ///
 /// Every write returns a `Result`, and every caller here used to do the same thing with a
@@ -321,7 +331,7 @@ pub(crate) fn refresh_after_restore(ctx: &Ctx, entity: ymemo_core::history::Enti
             // A restored version is a different note; show it from its first line rather
             // than at whatever offset the previous one had been left at.
             entry.window.invoke_body_to_top();
-            entry.window.set_memo_title(memo.title.into());
+            crate::sticky::set_title(&entry.window, &memo.title);
             entry.window.set_sticky_color(memo.color.into());
             entry.window.set_sticky_opacity(memo.opacity as f32);
             // The restore is the current text now, so nothing is waiting to be saved.

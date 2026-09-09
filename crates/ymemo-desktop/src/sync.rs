@@ -55,9 +55,9 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
                 if let Some(w) = list_weak.upgrade() {
                     // The vault's name is in the document too, so another device renaming it
                     // arrives here like any other change.
-                    let name = crate::hangul::for_slint(&v.name());
-                    if w.get_vault_name() != name.as_str() {
-                        w.set_vault_name(name.into());
+                    let name = v.name();
+                    if w.get_vault_title() != name.as_str() {
+                        crate::list::set_vault_name(&w, &name);
                     }
                     w.window().request_redraw();
                 }
@@ -72,7 +72,7 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
                             if entry.window.get_memo_text() != text.as_str() {
                                 crate::sticky::set_body_text(&entry.window, &text);
                             }
-                            entry.window.set_memo_title(m.title.into());
+                            crate::sticky::set_title(&entry.window, &m.title);
                             entry.window.set_sticky_color(m.color.into());
                             entry.window.set_sticky_opacity(m.opacity as f32);
                             entry.window.set_created_at(

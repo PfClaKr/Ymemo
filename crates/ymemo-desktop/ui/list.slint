@@ -32,7 +32,7 @@ export struct ListRow {
 export component ListWindow inherits Window {
     // The vault's own name in the task bar too, so two vaults open side by side are told
     // apart there as well as on screen.
-    title: root.vault-name == "" ? Strings.ui_list_heading : root.vault-name;
+    title: root.vault-title == "" ? Strings.ui_list_heading : root.vault-title;
     // Five header buttons squeeze the title below this width. It is a minimum and not only
     // a preference because a Window whose root is a layout takes the layout's natural size
     // and ignores `preferred-width` — which left an empty list 141px wide, with its own
@@ -46,6 +46,9 @@ export component ListWindow inherits Window {
     // What this vault is called. Empty until it is named, and then the heading says "Ymemo".
     // It lives in the synced document, so every paired device shows the same one.
     in-out property <string> vault-name;
+    // The same name again, as it is really spelled: the line above is drawn by Slint and goes
+    // through `hangul.rs`, this one goes to the desktop's own title bar and must not.
+    in property <string> vault-title;
     callback rename-vault(string);
     // Whether the heading is being edited right now.
     private property <bool> naming: false;

@@ -459,7 +459,10 @@ component NotePad {
 }
 
 export component StickyWindow inherits Window {
-    title: root.memo-title == "" ? Strings.ui_sticky_window_title : root.memo-title;
+    // The taskbar's own title, which the desktop draws and Slint does not — so it gets the
+    // memo's real title, not the shape `hangul.rs` hands everything on this window.
+    in property <string> window-title;
+    title: root.window-title == "" ? Strings.ui_sticky_window_title : root.window-title;
     no-frame: true;
     // Per note, not per app: a reminder wants to sit over everything, a long note being
     // written next to a browser does not. Slint reapplies the window level when this

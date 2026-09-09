@@ -168,7 +168,7 @@ pub(crate) fn apply_opened_vault(
     let _ = lock.hide();
     if let Some(list) = list_weak.upgrade() {
         // The name comes out of the vault, so it is only knowable once one is open.
-        list.set_vault_name(SharedString::from(crate::hangul::for_slint(&name)));
+        crate::list::set_vault_name(&list, &name);
         let saved = ctx.settings.borrow().list_window;
         present(&list);
         match saved {
