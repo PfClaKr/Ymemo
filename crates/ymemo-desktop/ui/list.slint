@@ -30,6 +30,12 @@ export struct ListRow {
 // accent shows the sticky's color.
 // ---------------------------------------------------------------------------
 export component ListWindow inherits Window {
+    // Where the focus goes when nothing else has asked for it — which is not only at
+    // startup. A text field that takes the caret and is then torn down (the heading's rename
+    // box, a folder's, the find box) leaves the focus nowhere at all, and a `FocusScope` that
+    // only grabbed it in its own `init` never sees another key: the shortcuts worked once and
+    // then quietly stopped. Measured, by renaming a folder and finding Ctrl+N dead.
+    forward-focus: keys;
     // The vault's own name in the task bar too, so two vaults open side by side are told
     // apart there as well as on screen.
     title: root.vault-title == "" ? Strings.ui_list_heading : root.vault-title;
@@ -79,6 +85,8 @@ export component ListWindow inherits Window {
     in-out property <string> editing-text: "";
     callback open-memo(string);            // memo id
     callback new-memo();
+    // Start a note already filed in this folder.
+    callback new-memo-in(string);
     callback new-group();
     callback toggle-group(string);         // expand/collapse, device-local state
     callback rename-group(string, string); // id, new name
@@ -159,6 +167,11 @@ export component ListWindow inherits Window {
     function finish-naming(name: string) {
         root.naming = false;
         root.rename-vault(name);
+        // The field that had the caret has just been torn down by the `if` above, which
+        // leaves the focus on nothing at all — and `forward-focus` only fires when the
+        // *window* is given focus, not when an element inside it disappears. Without this the
+        // window-wide keys below went dead the moment anybody renamed something.
+        keys.focus();
     }
 
     // Commits the name being edited and leaves edit mode.
@@ -166,6 +179,7 @@ export component ListWindow inherits Window {
         if (root.editing-id != "") {
             root.rename-group(root.editing-id, root.editing-text);
             root.editing-id = "";
+            keys.focus(); // same reason as in `finish-naming`
         }
     }
 
@@ -808,9 +822,42 @@ export component ListWindow inherits Window {
                     // as it was being aimed at.
                     if root.coloring-id != row.id: HorizontalLayout {
                         spacing: 0px;
+                        // Start a note **in this folder**. Every other way of making one puts
+                        // it at the top level, so filing anything meant making it and then
+                        // dragging it in — on an app whose folders are the point.
+                        //
+                        // Folders only, but **not** behind an `if`: an id declared in a
+                        // conditional cannot be reached from its siblings, and the two icons
+                        // beside it have to see this one's hover or they blink out exactly as
+                        // the pointer arrives here. Zero-wide on a memo instead, which has
+                        // nothing to put inside it.
+                        Rectangle {
+                            width: row.is-group ? 20px : 0px;
+                            opacity: row.is-group && (ta.has-hover || hist-ta.has-hover
+                                || del-ta.has-hover || add-ta.has-hover) ? 1 : 0;
+                            Glyph {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: 14px;
+                                height: 14px;
+                                name: "plus";
+                                stroke: add-ta.has-hover ? #ece7db : #b0a99a;
+                            }
+                            add-ta := TouchArea {
+                                enabled: row.is-group;
+                                mouse-cursor: pointer;
+                                accessible-role: button;
+                                accessible-label: Strings.ui_list_tip_new_memo_here;
+                                clicked => {
+                                    root.commit-edit();
+                                    root.new-memo-in(row.id);
+                                }
+                            }
+                        }
                         Rectangle {
                             width: 20px;
-                            opacity: ta.has-hover || hist-ta.has-hover || del-ta.has-hover ? 1 : 0;
+                            opacity: ta.has-hover || hist-ta.has-hover || del-ta.has-hover
+                                || add-ta.has-hover ? 1 : 0;
                             Glyph {
                                 x: (parent.width - self.width) / 2;
                                 y: (parent.height - self.height) / 2;
@@ -841,7 +888,8 @@ export component ListWindow inherits Window {
                                 height: 15px;
                                 name: "trash";
                                 stroke: del-ta.has-hover ? #e8a0a0 : #b0a99a;
-                                opacity: !(ta.has-hover || hist-ta.has-hover || del-ta.has-hover) ? 0
+                                opacity: !(ta.has-hover || hist-ta.has-hover || del-ta.has-hover
+                                    || add-ta.has-hover) ? 0
                                     : del-ta.has-hover ? 1 : 0.4;
                             }
                             clicked => { root.commit-edit(); root.delete-row(row.id, row.is-group); }

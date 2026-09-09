@@ -474,6 +474,12 @@ component NotePad {
 }
 
 export component StickyWindow inherits Window {
+    // Where the focus goes when nothing else has asked for it — which is not only at
+    // startup. A text field that takes the caret and is then torn down (the heading's rename
+    // box, a folder's, the find box) leaves the focus nowhere at all, and a `FocusScope` that
+    // only grabbed it in its own `init` never sees another key: the shortcuts worked once and
+    // then quietly stopped. Measured, by renaming a folder and finding Ctrl+N dead.
+    forward-focus: keys;
     // The taskbar's own title, which the desktop draws and Slint does not — so it gets the
     // memo's real title, not the shape `hangul.rs` hands everything on this window.
     in property <string> window-title;

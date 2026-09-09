@@ -274,6 +274,7 @@
   "ui.list_tip_lock": "Lock now",
   "ui.list_tip_new_group": "New folder",
   "ui.list_tip_new_memo": "New memo (Ctrl+N)",
+  "ui.list_tip_new_memo_here": "New memo in this folder",
   "ui.list_tip_search": "Find",
   "ui.list_tip_settings": "Settings",
   "ui.list_tip_sync": "Connect a device",

@@ -572,6 +572,10 @@ fn main() -> Result<()> {
         let ctx = ctx.clone();
         list.on_new_memo(move || new_memo(&ctx));
     }
+    {
+        let ctx = ctx.clone();
+        list.on_new_memo_in(move |group| sticky::new_memo_in(&ctx, group.as_str()));
+    }
     // ---- Delete, and the offer to take it back. ----
     //
     // Deleting is the only thing in this app that loses writing, and a deleted memo cannot be

@@ -274,6 +274,7 @@
   "ui.list_tip_lock": "지금 잠그기",
   "ui.list_tip_new_group": "새 폴더",
   "ui.list_tip_new_memo": "새 메모 (Ctrl+N)",
+  "ui.list_tip_new_memo_here": "이 폴더에 새 메모",
   "ui.list_tip_search": "찾기",
   "ui.list_tip_settings": "설정",
   "ui.list_tip_sync": "다른 기기와 연결",

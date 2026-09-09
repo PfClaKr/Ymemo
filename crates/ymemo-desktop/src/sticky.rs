@@ -215,9 +215,18 @@ pub(crate) fn flush_dirty(ctx: &Ctx) -> Vec<String> {
 
 /// Creates a memo and opens its sticky; shared by the + button in both windows.
 pub(crate) fn new_memo(ctx: &Ctx) {
+    new_memo_in(ctx, "");
+}
+
+/// A new memo, already filed in `group_id` — empty for the top level.
+///
+/// Every other way of starting one puts it at the top level, so a note that belonged in a
+/// folder had to be made and then dragged in.
+pub(crate) fn new_memo_in(ctx: &Ctx, group_id: &str) {
     touch(ctx);
     crate::list::clear_search(ctx);
     let mut memo = Memo::new("", "");
+    memo.group_id = group_id.to_string();
     {
         // Color and opacity defaults come from the settings.
         let s = ctx.settings.borrow();
