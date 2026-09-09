@@ -1,5 +1,6 @@
 import { LineEdit, Button, ScrollView } from "std-widgets.slint";
 import { Strings } from "@i18n";
+import { Scroll } from "theme.slint";
 
 // ---------------------------------------------------------------------------
 // Security window: change the master password, and issue the recovery code that is the
@@ -95,7 +96,7 @@ export component SecurityWindow inherits Window {
             viewport-height: content.preferred-height;
 
             content := VerticalLayout {
-                width: scroll.visible-width;
+                width: scroll.visible-width - Scroll.gutter;
                 spacing: 14px;
 
                 // ---- Master password ----

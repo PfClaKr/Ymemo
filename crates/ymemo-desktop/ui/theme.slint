@@ -1,6 +1,16 @@
 // Pieces shared by several windows: the sticky palette and the tab button.
 // Palette keys ("yellow"/"pink"/"green"/"blue"/"purple") become real colors only here; the
 // core stores and syncs the key string alone.
+// Room a ScrollView's own scrollbar takes along the right edge.
+//
+// `visible-width` does not leave it: content given that width runs *under* the bar and is
+// clipped by the window edge instead — measured on the settings window, where every hint lost
+// its last word and "check now" lost its right half. Anything bound to `visible-width` takes
+// this off it.
+export global Scroll {
+    out property <length> gutter: 14px;
+}
+
 export global Palette {
     // The paper a note is written on: a near-white tint of its colour, barely translucent
     // so it still reads as a desktop widget. Pale on purpose — the writing has to stay
@@ -63,16 +73,21 @@ export component TabButton inherits Rectangle {
     background: root.active ? #ffffff26 : #ffffff08;
     border-width: 1px;
     border-color: root.active ? #ffffff59 : #ffffff1f;
-    Text {
-        width: 100%;
-        height: 100%;
-        text: root.label;
-        font-size: 11px;
-        font-weight: root.active ? 700 : 400;
-        color: root.ink;
-        opacity: root.active ? 1.0 : 0.7;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    // The label in a layout rather than filling the box, so the button has a width of its
+    // own. It had none: in a row that ends in a stretchy spacer the two update toggles
+    // collapsed onto their own letters, 켜기/끄기 pressed against the border.
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        Text {
+            text: root.label;
+            font-size: 11px;
+            font-weight: root.active ? 700 : 400;
+            color: root.ink;
+            opacity: root.active ? 1.0 : 0.7;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
     }
     TouchArea {
         clicked => { root.clicked(); }
