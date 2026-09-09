@@ -511,8 +511,16 @@ export component ListWindow inherits Window {
                 // The dragged row dims, a folder about to swallow it highlights.
                 opacity: root.drag-source == idx ? 0.45 : 1;
                 animate opacity { duration: 120ms; easing: ease-out; }
+                // A folder and what is in it read as one block. The folder's own row sits a
+                // shade above the window and the rows under it half a shade, so the group is
+                // a band rather than four lines that happen to be indented — the indent alone
+                // is 14px, which is not much to tell "inside Work" from "next to Work".
+                // Slight on purpose: both stay under the hover and the drop highlight, which
+                // still have to be the brightest things on a row.
                 background: root.drag-into == idx ? #7db8ec55
                           : ta.has-hover ? #ffffff1a
+                          : row.is-group ? #ffffff12
+                          : row.depth > 0 ? #ffffff08
                           : transparent;
                 animate background { duration: 120ms; easing: ease-out; }
 
