@@ -41,8 +41,12 @@ pub const KEEP_VERSIONS_DAYS_MAX: i32 = 365;
 /// in weeks, and it keeps the request rare enough to be unremarkable.
 const UPDATE_CHECK_INTERVAL_MS: i64 = 24 * 60 * 60 * 1000;
 
-/// Smallest remembered sticky, matching `min-width`/`min-height` in `sticky.slint`.
-const STICKY_MIN: (i32, i32) = (140, 24);
+/// Smallest remembered sticky. The width matches `min-width` in `sticky.slint`; the height
+/// is deliberately **above** the folded bar (`sticky::BAR_HEIGHT`, 24), because a folded note
+/// is a state and not a size. Remembering the bar's own height reopened the note as a 24px
+/// strip that was not marked folded, so the whole button row was drawn squeezed against the
+/// title — and this floor also drops the entries an older build already wrote that way.
+const STICKY_MIN: (i32, i32) = (140, 56);
 /// Smallest remembered list window, matching `min-width`/`min-height` in `list.slint`.
 const LIST_MIN: (i32, i32) = (320, 260);
 /// How far off the desktop a remembered window may sit before it is forgotten. Negative
@@ -112,6 +116,19 @@ pub struct Settings {
     /// purpose — which window covers which is a property of a desktop, not of a memo, and
     /// syncing it would also put one log entry per pin toggle in front of every other device.
     pub pinned_memos: Vec<String>,
+    /// Ids of the memos whose sticky is folded down to its title bar.
+    ///
+    /// Device-local, like the pins and for the same reason: how much of a note is showing is
+    /// a fact about one desk. Stored as a state rather than as a 24px window height, so
+    /// unfolding can put the note back at the size it had.
+    pub folded_memos: Vec<String>,
+    /// Ids of the memos that were on the desk, so they are still there after a restart.
+    ///
+    /// Closing all the windows does not close the app, and neither does an update replacing
+    /// the binary underneath it — but the notes went anyway, and the arrangement this file
+    /// goes to the trouble of remembering had nothing left to arrange. Only ids: what a note
+    /// says lives in the vault, and this file is not encrypted.
+    pub open_memos: Vec<String>,
     /// Where each memo's sticky sat and how big it was, by memo id: `[x, y, width, height]`
     /// in logical pixels.
     ///
@@ -144,6 +161,8 @@ impl Default for Settings {
             update_check: true,
             last_update_check: 0,
             pinned_memos: Vec::new(),
+            folded_memos: Vec::new(),
+            open_memos: Vec::new(),
             memo_windows: HashMap::new(),
             list_window: None,
         }
@@ -206,6 +225,10 @@ impl Settings {
         // A hand-edited file, or a memo pinned on two runs before the first save landed.
         self.pinned_memos.sort();
         self.pinned_memos.dedup();
+        self.folded_memos.sort();
+        self.folded_memos.dedup();
+        // The open list keeps its order: it is the order the notes are put back in.
+        self.open_memos.dedup();
         // A window remembered off the edge of a screen that is no longer attached would be a
         // note that cannot be reached; a size below the sticky's own minimum would be one
         // that cannot be read. Both are dropped rather than clamped, because the right place
@@ -267,6 +290,52 @@ impl Settings {
             self.pinned_memos.retain(|m| m != id);
         }
         true
+    }
+
+    /// Whether this memo's sticky is folded down to its title bar.
+    pub fn memo_folded(&self, id: &str) -> bool {
+        self.folded_memos.iter().any(|m| m == id)
+    }
+
+    /// Records the folded state of one memo. Returns whether anything changed.
+    pub fn set_memo_folded(&mut self, id: &str, folded: bool) -> bool {
+        if folded == self.memo_folded(id) {
+            return false;
+        }
+        if folded {
+            self.folded_memos.push(id.to_string());
+        } else {
+            self.folded_memos.retain(|m| m != id);
+        }
+        true
+    }
+
+    /// The memos that were on the desk when this device was last used.
+    pub fn open_memos(&self) -> &[String] {
+        &self.open_memos
+    }
+
+    /// Records that a memo's sticky is on the desk, or is not. Returns whether that changed.
+    pub fn set_memo_open(&mut self, id: &str, open: bool) -> bool {
+        let known = self.open_memos.iter().any(|m| m == id);
+        if open == known {
+            return false;
+        }
+        if open {
+            self.open_memos.push(id.to_string());
+        } else {
+            self.open_memos.retain(|m| m != id);
+        }
+        true
+    }
+
+    /// Forgets everything remembered about one memo's window, for a memo that is now gone.
+    pub fn forget_memo(&mut self, id: &str) -> bool {
+        let mut changed = self.forget_memo_window(id);
+        changed |= self.set_memo_open(id, false);
+        changed |= self.set_memo_folded(id, false);
+        changed |= self.set_memo_pinned(id, false);
+        changed
     }
 
     /// Whether an update check is due: enabled, and not already done today.
@@ -433,11 +502,18 @@ mod tests {
             last_update_check: i64::MAX,
             // The same memo twice, as two runs racing to save the same pin would leave.
             pinned_memos: vec!["b".into(), "a".into(), "b".into()],
+            folded_memos: vec!["y".into(), "x".into(), "y".into()],
+            // The desk keeps its order — it is the order the notes are put back in — so only
+            // a neighbouring repeat is dropped.
+            open_memos: vec!["second".into(), "first".into(), "first".into()],
             // One window too small to read and one absurdly far off any desktop; both are
             // dropped rather than clamped, since there is no honest place to put them.
             memo_windows: HashMap::from([
                 ("kept".to_string(), [10, 20, 300, 200]),
                 ("tiny".to_string(), [10, 20, 4, 4]),
+                // A folded note's own bar height, as an older build wrote it. Dropped, or the
+                // note reopens as a strip with its whole button row against the title.
+                ("folded".to_string(), [10, 20, 300, 24]),
                 ("lost".to_string(), [9_000_000, 0, 300, 200]),
                 // No position, as native Wayland leaves it: the size is still worth keeping.
                 ("sizeonly".to_string(), [POS_UNKNOWN, POS_UNKNOWN, 300, 200]),
@@ -446,6 +522,8 @@ mod tests {
         };
         s.sanitize();
         assert_eq!(s.pinned_memos, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(s.folded_memos, vec!["x".to_string(), "y".to_string()]);
+        assert_eq!(s.open_memos, vec!["second".to_string(), "first".to_string()]);
         let mut kept: Vec<&String> = s.memo_windows.keys().collect();
         kept.sort();
         assert_eq!(kept, vec!["kept", "sizeonly"]);
@@ -481,6 +559,57 @@ mod tests {
         assert!(!s.memo_pinned("m1"));
         assert!(s.pinned_memos.is_empty());
         assert!(!s.set_memo_pinned("m1", false));
+    }
+
+    /// The desk survives a restart: what was open, in the order it was opened.
+    #[test]
+    fn the_desk_is_remembered_and_put_back_in_order() {
+        let mut s = Settings::default();
+        assert!(s.open_memos().is_empty());
+
+        assert!(s.set_memo_open("m1", true));
+        assert!(s.set_memo_open("m2", true));
+        assert_eq!(s.open_memos(), ["m1".to_string(), "m2".to_string()]);
+        // Already on the desk: nothing to write, so nothing to save.
+        assert!(!s.set_memo_open("m1", true));
+
+        assert!(s.set_memo_open("m1", false));
+        assert_eq!(s.open_memos(), ["m2".to_string()]);
+        assert!(!s.set_memo_open("m1", false));
+    }
+
+    /// Folding is a state, not a 24px window height.
+    #[test]
+    fn folding_is_remembered_separately_from_the_size() {
+        let mut s = Settings::default();
+        assert!(!s.memo_folded("m1"));
+        assert!(s.set_memo_folded("m1", true));
+        assert!(s.memo_folded("m1"));
+        assert!(!s.set_memo_folded("m1", true));
+        assert!(s.set_memo_folded("m1", false));
+        assert!(s.folded_memos.is_empty());
+
+        // A window the height of the folded bar is not a size worth putting back.
+        assert!(!s.set_memo_window("m1", [10, 20, 300, 24]));
+        assert!(s.set_memo_window("m1", [10, 20, 300, 200]));
+    }
+
+    /// A deleted memo takes everything this file knew about its window with it.
+    #[test]
+    fn forgetting_a_memo_leaves_nothing_behind() {
+        let mut s = Settings::default();
+        s.set_memo_open("m1", true);
+        s.set_memo_folded("m1", true);
+        s.set_memo_pinned("m1", true);
+        s.set_memo_window("m1", [10, 20, 300, 200]);
+
+        assert!(s.forget_memo("m1"));
+        assert!(s.open_memos().is_empty());
+        assert!(s.folded_memos.is_empty());
+        assert!(s.pinned_memos.is_empty());
+        assert_eq!(s.memo_window("m1"), None);
+        // Nothing left to forget.
+        assert!(!s.forget_memo("m1"));
     }
 
     #[test]

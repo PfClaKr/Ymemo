@@ -610,8 +610,7 @@ fn main() -> Result<()> {
                 // else. Deliberately *not* undone by the undo below: a note put back belongs
                 // where the desk has room, not necessarily under whatever is there now.
                 let mut settings = ctx.settings.borrow_mut();
-                let mut changed = settings.set_memo_pinned(id.as_str(), false);
-                changed |= settings.forget_memo_window(id.as_str());
+                let changed = settings.forget_memo(id.as_str());
                 if changed {
                     settings.save(&ctx.dir);
                 }
@@ -845,28 +844,22 @@ fn main() -> Result<()> {
             };
             touch(&ctx);
 
-            let mut next = Settings {
-                lang: w.get_lang_sel().to_string(),
-                unlock_days: w.get_unlock_days(),
-                idle_lock_minutes: w.get_idle_minutes(),
-                default_color: w.get_default_color().to_string(),
-                default_opacity: w.get_default_opacity(),
-                merge_seconds: w.get_merge_seconds(),
-                watch_delay_seconds: w.get_watch_delay_seconds(),
-                rescan_seconds: w.get_rescan_seconds(),
-                keep_versions_days: w.get_keep_versions_days(),
-                update_check: w.get_update_check(),
-                // Not a user-visible field: keep whatever the last check recorded, so saving
-                // settings does not silently schedule another request.
-                last_update_check: ctx.settings.borrow().last_update_check,
-                // Likewise: the pins belong to the sticky windows, not to this dialog, and
-                // rebuilding the struct from it would unpin every note that is open.
-                pinned_memos: ctx.settings.borrow().pinned_memos.clone(),
-                // And likewise for where the windows are: this dialog knows nothing about
-                // them, so saving it must not scatter the notes on the desk.
-                memo_windows: ctx.settings.borrow().memo_windows.clone(),
-                list_window: ctx.settings.borrow().list_window,
-            };
+            // Start from what is stored and overwrite only the fields this dialog owns.
+            // Building the struct from scratch here meant every other field — the pins, where
+            // the windows are, which notes are folded, which are on the desk — had to be
+            // copied back across by hand, and one forgotten line would have quietly reset it
+            // the next time anybody pressed Save.
+            let mut next = ctx.settings.borrow().clone();
+            next.lang = w.get_lang_sel().to_string();
+            next.unlock_days = w.get_unlock_days();
+            next.idle_lock_minutes = w.get_idle_minutes();
+            next.default_color = w.get_default_color().to_string();
+            next.default_opacity = w.get_default_opacity();
+            next.merge_seconds = w.get_merge_seconds();
+            next.watch_delay_seconds = w.get_watch_delay_seconds();
+            next.rescan_seconds = w.get_rescan_seconds();
+            next.keep_versions_days = w.get_keep_versions_days();
+            next.update_check = w.get_update_check();
             next.sanitize();
             let prev_unlock_days = ctx.settings.borrow().unlock_days;
             next.save(&ctx.dir);

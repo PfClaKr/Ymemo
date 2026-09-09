@@ -152,6 +152,51 @@ pub(crate) fn reset_vault(ctx: &Ctx, syncthing: &Rc<RefCell<Option<Syncthing>>>)
     Ok(())
 }
 
+/// Puts back the notes that were on the desk when this device was last used.
+///
+/// Closing every window does not close the app, so a desk full of notes is an ordinary state
+/// to leave one in — but nothing put them back, and a restart (an update replacing the binary
+/// underneath a running app is the one people notice) cleared the desk. Which notes those are
+/// is device-local, in `settings.json` beside where each one sits.
+///
+/// A memo that is no longer in the vault is dropped rather than skipped: it was deleted on
+/// another device, and its id would otherwise sit in the file for good.
+fn reopen_desk(ctx: &Ctx) {
+    let wanted: Vec<String> = ctx.settings.borrow().open_memos().to_vec();
+    if wanted.is_empty() {
+        return;
+    }
+    let mut gone = Vec::new();
+    for id in &wanted {
+        let memo = {
+            let guard = ctx.vault.borrow();
+            let Some(v) = guard.as_ref() else { return };
+            match v.store().get(id) {
+                Ok(Some(m)) => m,
+                _ => {
+                    gone.push(id.clone());
+                    continue;
+                }
+            }
+        };
+        // Never focused: this happens while the user is looking at the unlock screen, and a
+        // note stealing the caret from whatever they turned to next is worse than no note.
+        if let Err(e) = crate::sticky::open_sticky(ctx, &memo, false) {
+            ymemo_core::diag!("could not put a note back on the desk: {e}");
+        }
+    }
+    if !gone.is_empty() {
+        let mut settings = ctx.settings.borrow_mut();
+        let mut changed = false;
+        for id in &gone {
+            changed |= settings.forget_memo(id);
+        }
+        if changed {
+            settings.save(&ctx.dir);
+        }
+    }
+}
+
 /// Shared tail of unlock and create-vault: fill the list, store the vault, hide the lock
 /// window and show the list.
 pub(crate) fn apply_opened_vault(
@@ -179,4 +224,6 @@ pub(crate) fn apply_opened_vault(
             None => list.window().set_size(slint::LogicalSize::new(340.0, 460.0)),
         }
     }
+    // After the list, so the notes land in front of it rather than behind it.
+    reopen_desk(ctx);
 }
