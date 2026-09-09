@@ -56,6 +56,11 @@ import java.io.File
  * `takeWidgetAction` at startup and is handed through `widgetAction` while it is running.
  */
 class MainActivity : FlutterFragmentActivity() {
+    private companion object {
+        /** Tells our own "save as" result apart from anything else the activity is handed. */
+        const val SAVE_AS_REQUEST = 0x5A5E
+    }
+
     private val channelName = "dev.ymemo/native"
     private var multicastLock: WifiManager.MulticastLock? = null
     private var channel: MethodChannel? = null
@@ -69,12 +74,24 @@ class MainActivity : FlutterFragmentActivity() {
      */
     private var pendingAction: Map<String, String>? = null
 
+    /**
+     * A photo waiting for the user to say where to put it, and the Dart call that is waiting
+     * to be told whether it landed.
+     *
+     * The system's own "save as" runs as a separate activity, so the bytes have to sit here
+     * across it. They are a copy of a memo's photo in memory for the length of one dialog —
+     * nothing is written until the user names a place — and are dropped either way.
+     */
+    private var pendingSave: ByteArray? = null
+    private var pendingSaveResult: MethodChannel.Result? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).also {
             it.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "syncBinaryPath" -> result.success(syncBinaryPath())
+                    "deviceName" -> result.success(deviceName())
                     "openUrl" -> result.success(openUrl(call.arguments as? String))
                     "setSecure" -> {
                         setSecure(call.arguments as? Boolean ?: false)
@@ -94,10 +111,64 @@ class MainActivity : FlutterFragmentActivity() {
                         result.success(pendingAction)
                         pendingAction = null
                     }
+                    "saveAs" -> saveAs(
+                        call.argument<String>("name") ?: "photo",
+                        call.argument<String>("mime") ?: "application/octet-stream",
+                        call.argument<ByteArray>("bytes") ?: ByteArray(0),
+                        result,
+                    )
                     else -> result.notImplemented()
                 }
             }
         }
+    }
+
+    /**
+     * Hands a photo to the system's own file picker: "save as", not "download".
+     *
+     * `ACTION_CREATE_DOCUMENT` is the whole of the permission story — the user names the
+     * place, and the app writes to the one Uri they chose. Nothing is asked for, and nothing
+     * outside that file is reachable.
+     */
+    private fun saveAs(name: String, mime: String, bytes: ByteArray, result: MethodChannel.Result) {
+        if (pendingSaveResult != null) {
+            // A second dialog would strand the first call, which Dart is still awaiting.
+            result.success(false)
+            return
+        }
+        pendingSave = bytes
+        pendingSaveResult = result
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = mime.ifEmpty { "application/octet-stream" }
+            putExtra(Intent.EXTRA_TITLE, name)
+        }
+        runCatching { startActivityForResult(intent, SAVE_AS_REQUEST) }.onFailure {
+            // No file picker on this device: answer rather than leaving Dart waiting.
+            finishSave(false)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != SAVE_AS_REQUEST) return
+        val uri = data?.data
+        val bytes = pendingSave
+        if (resultCode != RESULT_OK || uri == null || bytes == null) {
+            finishSave(false)
+            return
+        }
+        val written = runCatching {
+            contentResolver.openOutputStream(uri)?.use { it.write(bytes) } != null
+        }.getOrDefault(false)
+        finishSave(written)
+    }
+
+    /** Answers the waiting Dart call and lets go of the bytes, whichever way it went. */
+    private fun finishSave(ok: Boolean) {
+        pendingSave = null
+        pendingSaveResult?.success(ok)
+        pendingSaveResult = null
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -210,6 +281,21 @@ class MainActivity : FlutterFragmentActivity() {
         if (json == null) return
         WidgetStore.publish(applicationContext, json)
         Widgets.refreshAll(applicationContext)
+    }
+
+    /** What to call this phone on the other devices' screens.
+     *
+     * Syncthing names a device after its hostname, which on Android is `localhost` — so every
+     * phone a user pairs turned up under the same meaningless label. `Settings.Global`'s
+     * `device_name` is the one the user chose in Settings ("About phone > Device name"); the
+     * model is a reasonable second, and it is at least distinct between a phone and a tablet.
+     * Readable without any permission.
+     */
+    private fun deviceName(): String {
+        val chosen = android.provider.Settings.Global.getString(contentResolver, "device_name")
+        if (!chosen.isNullOrBlank()) return chosen
+        val model = android.os.Build.MODEL
+        return if (model.isNullOrBlank()) "Android" else model
     }
 
     private fun syncBinaryPath(): String? {

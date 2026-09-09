@@ -1,5 +1,6 @@
 import { LineEdit, Button, ScrollView } from "std-widgets.slint";
 import { Strings } from "@i18n";
+import { Scroll } from "theme.slint";
 
 // ---------------------------------------------------------------------------
 // Security window: change the master password, and issue the recovery code that is the
@@ -8,6 +9,14 @@ import { Strings } from "@i18n";
 // Both actions rewrite `vault.json` only. Nothing here re-encrypts memos, so neither is
 // slow and neither disturbs the other devices; see crates/ymemo-core/src/vault.rs.
 // ---------------------------------------------------------------------------
+// The name of a field, kept above it rather than inside it: a `LineEdit`'s placeholder is
+// gone the moment anything is typed, and three rows of dots with nothing to tell them apart
+// is not a form anyone can check before pressing the button. Same reason as `lock.slint`.
+component FieldLabel inherits Text {
+    font-size: 10px;
+    color: #a8a294;
+}
+
 component Section inherits VerticalLayout {
     in property <string> label;
     in property <string> hint;
@@ -45,6 +54,10 @@ export component SecurityWindow inherits Window {
     in property <string> recovery-code;
     in property <string> status;
     in property <bool> status-is-error: false;
+    // Which section the message belongs under. A single line at the foot of the window sat
+    // below the recovery section and a one-time code, so "Wrong password" appeared 150px
+    // under the button that produced it, next to a button it had nothing to do with.
+    in property <bool> status-on-password: true;
 
     callback change-password(string, string); // current, new
     callback issue-recovery();
@@ -83,25 +96,25 @@ export component SecurityWindow inherits Window {
             viewport-height: content.preferred-height;
 
             content := VerticalLayout {
-                width: scroll.visible-width;
+                width: scroll.visible-width - Scroll.gutter;
                 spacing: 14px;
 
                 // ---- Master password ----
                 Section {
                     label: Strings.ui_security_change_password;
                     hint: Strings.ui_security_password_hint;
+                    FieldLabel { text: Strings.ui_security_current_password; }
                     LineEdit {
-                        placeholder-text: Strings.ui_security_current_password;
                         input-type: InputType.password;
                         text <=> root.current-pw;
                     }
+                    FieldLabel { text: Strings.ui_security_new_password; }
                     LineEdit {
-                        placeholder-text: Strings.ui_security_new_password;
                         input-type: InputType.password;
                         text <=> root.new-pw;
                     }
+                    FieldLabel { text: Strings.ui_security_confirm_password; }
                     LineEdit {
-                        placeholder-text: Strings.ui_security_confirm_password;
                         input-type: InputType.password;
                         text <=> root.confirm-pw;
                         accepted => {
@@ -122,6 +135,12 @@ export component SecurityWindow inherits Window {
                             clicked => { root.change-password(root.current-pw, root.new-pw); }
                         }
             }
+            if root.status != "" && root.status-on-password: Text {
+                text: root.status;
+                font-size: 11px;
+                color: root.status-is-error ? #e79a9a : #a8d0a8;
+                wrap: word-wrap;
+            }
         }
 
         // ---- Recovery code ----
@@ -136,6 +155,7 @@ export component SecurityWindow inherits Window {
                 color: root.has-recovery ? #a8d0a8 : #e8d98a;
                 wrap: word-wrap;
             }
+
             HorizontalLayout {
                 alignment: start;
                 Button {
@@ -145,41 +165,45 @@ export component SecurityWindow inherits Window {
                     clicked => { root.issue-recovery(); }
                 }
             }
-        }
-
-        // The code itself, shown once. Selectable so it can be copied rather than retyped.
-        if root.recovery-code != "": Rectangle {
-            background: #3a362f;
-            border-radius: 6px;
-            border-width: 1px;
-            border-color: #e8d98a;
-            VerticalLayout {
-                padding: 12px;
-                spacing: 6px;
-                TextInput {
-                    text: root.recovery-code;
-                    read-only: true;
-                    font-size: 15px;
-                    font-family: "monospace";
-                    color: #f7e98c;
-                    wrap: word-wrap;
-                    single-line: false;
-                }
-                Text {
-                    text: Strings.ui_security_code_warning;
-                    font-size: 10px;
-                    color: #e8d98a;
-                    wrap: word-wrap;
-                }
+            if root.status != "" && !root.status-on-password: Text {
+                text: root.status;
+                font-size: 11px;
+                color: root.status-is-error ? #e79a9a : #a8d0a8;
+                wrap: word-wrap;
             }
         }
 
-        if root.status != "": Text {
-            text: root.status;
-            font-size: 11px;
-            color: root.status-is-error ? #e79a9a : #a8d0a8;
-            wrap: word-wrap;
-        }
+                // The code itself, shown once. The window grows to make room for it —
+                // see `show` in security.rs; a window sized for the two sections alone
+                // left it under the fold, so the screen said a code had been issued and
+                // then did not show it.
+                if root.recovery-code != "": VerticalLayout {
+                    spacing: 6px;
+                    Rectangle {
+                        background: #3a362f;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: #e8d98a;
+                        VerticalLayout {
+                            padding: 12px;
+                            TextInput {
+                                text: root.recovery-code;
+                                read-only: true;
+                                font-size: 15px;
+                                font-family: "monospace";
+                                color: #f7e98c;
+                                wrap: word-wrap;
+                                single-line: false;
+                            }
+                        }
+                    }
+                    Text {
+                        text: Strings.ui_security_code_warning;
+                        font-size: 10px;
+                        color: #e8d98a;
+                        wrap: word-wrap;
+                    }
+                }
 
             }
         }

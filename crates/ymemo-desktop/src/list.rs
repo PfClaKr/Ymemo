@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use slint::{ComponentHandle, SharedString, VecModel};
 use ymemo_core::{now_millis, vault::Vault, Memo};
+use ymemo_i18n::t;
 
 use crate::state::Ctx;
 use crate::ListRow;
@@ -34,12 +35,18 @@ pub(crate) fn refresh_list(
         }
     };
 
+    // One query for the whole list: which memos have a picture on them.
+    let with_photo = vault.store().memos_with_attachments().unwrap_or_else(|e| {
+        diag!("could not read which memos have photos: {e}");
+        HashSet::new()
+    });
+
     let needle = query.trim().to_lowercase();
     if !needle.is_empty() {
         let mut rows: Vec<ListRow> = groups
             .iter()
             .filter(|g| g.name.to_lowercase().contains(&needle))
-            .map(|g| group_row(g, 0, false, 0))
+            .map(|g| in_folder(group_row(g, 0, false, 0), &g.parent_id, &groups))
             .collect();
         rows.extend(
             memos
@@ -48,7 +55,9 @@ pub(crate) fn refresh_list(
                     m.title.to_lowercase().contains(&needle)
                         || m.body.to_lowercase().contains(&needle)
                 })
-                .map(|m| memo_row(m, 0)),
+                .map(|m| {
+                    in_folder(memo_row(m, 0, with_photo.contains(&m.id)), &m.group_id, &groups)
+                }),
         );
         model.set_vec(rows);
         return;
@@ -59,12 +68,57 @@ pub(crate) fn refresh_list(
     let valid: HashSet<&str> = groups.iter().map(|g| g.id.as_str()).collect();
 
     let mut rows = Vec::new();
-    push_group_rows("", 0, &children, &memos, collapsed, &mut rows);
+    push_group_rows("", 0, &children, &memos, collapsed, &with_photo, &mut rows);
     // Memos with no group, or whose group is gone, sit at the top level.
     for m in memos.iter().filter(|m| !valid.contains(m.group_id.as_str())) {
-        rows.push(memo_row(m, 0));
+        rows.push(memo_row(m, 0, with_photo.contains(&m.id)));
     }
     model.set_vec(rows);
+}
+
+/// Sets the vault's name on the list window, in both the places it appears.
+///
+/// `vault-name` is the heading Slint draws and goes through [`crate::hangul::for_slint`];
+/// `vault-title` is the desktop's own title bar, which Slint has nothing to do with and which
+/// must carry the name as it is really spelled.
+pub(crate) fn set_vault_name(list: &crate::ListWindow, name: &str) {
+    list.set_vault_name(SharedString::from(crate::hangul::for_slint(name)));
+    list.set_vault_title(SharedString::from(name));
+}
+
+/// Puts a failed write in front of the user, as well as in the log.
+///
+/// Every write returns a `Result`, and every caller here used to do the same thing with a
+/// failed one — write a line to `ymemo.log` and carry on — which on a full disk or a vault
+/// directory gone read-only made the app look like it had simply ignored the click, and made
+/// a note typed into a sticky vanish on close with nothing said. The log is for a bug report;
+/// this is for the person who is about to lose what they wrote.
+pub(crate) fn report_write_failure(err: &anyhow::Error) {
+    crate::state::APP.with(|a| {
+        if let Some(app) = a.borrow().as_ref() {
+            app.list
+                .set_notice(slint::SharedString::from(t!("msg.write_failed", error = err)));
+        }
+    });
+}
+
+/// Drops the find box's filter, on both sides: the query the model is rebuilt from and the
+/// text in the box.
+///
+/// Called before anything new appears in the list. A memo or a folder made while a search is
+/// on does not match it, so it is written, saved — and nowhere to be seen; the folder is
+/// worse, since the rename it opens into has no row to draw on. Wanting a new note is the end
+/// of the search that was running.
+pub(crate) fn clear_search(ctx: &Ctx) {
+    if ctx.query.borrow().is_empty() {
+        return;
+    }
+    ctx.query.borrow_mut().clear();
+    crate::state::APP.with(|a| {
+        if let Some(app) = a.borrow().as_ref() {
+            app.list.set_query(slint::SharedString::new());
+        }
+    });
 }
 
 /// Moves row `src` into the group implied by row `dst`.
@@ -125,6 +179,7 @@ pub(crate) fn move_row(ctx: &Ctx, src: i32, dst: i32) {
     };
     if let Err(e) = res {
         diag!("move failed: {e}");
+        report_write_failure(&e);
         return;
     }
     refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
@@ -207,6 +262,7 @@ pub(crate) fn push_group_rows(
     children: &HashMap<String, Vec<ymemo_core::Group>>,
     memos: &[Memo],
     collapsed: &HashSet<String>,
+    with_photo: &HashSet<String>,
     out: &mut Vec<ListRow>,
 ) {
     let Some(groups) = children.get(parent) else { return };
@@ -218,9 +274,9 @@ pub(crate) fn push_group_rows(
         if is_collapsed {
             continue;
         }
-        push_group_rows(&g.id, depth + 1, children, memos, collapsed, out);
+        push_group_rows(&g.id, depth + 1, children, memos, collapsed, with_photo, out);
         for m in memos.iter().filter(|m| m.group_id == g.id) {
-            out.push(memo_row(m, depth + 1));
+            out.push(memo_row(m, depth + 1, with_photo.contains(&m.id)));
         }
     }
 }
@@ -271,11 +327,11 @@ pub(crate) fn refresh_after_restore(ctx: &Ctx, entity: ymemo_core::history::Enti
 
     if entity == ymemo_core::history::Entity::Memo {
         if let (Ok(Some(memo)), Some(entry)) = (v.store().get(id), ctx.stickies.borrow().get(id)) {
-            entry.window.set_memo_text(crate::sticky::sticky_text(&memo).into());
+            crate::sticky::set_body_text(&entry.window, &crate::sticky::sticky_text(&memo));
             // A restored version is a different note; show it from its first line rather
             // than at whatever offset the previous one had been left at.
             entry.window.invoke_body_to_top();
-            entry.window.set_memo_title(memo.title.into());
+            crate::sticky::set_title(&entry.window, &memo.title);
             entry.window.set_sticky_color(memo.color.into());
             entry.window.set_sticky_opacity(memo.opacity as f32);
             // The restore is the current text now, so nothing is waiting to be saved.
@@ -293,24 +349,55 @@ pub(crate) fn group_row(
 ) -> ListRow {
     ListRow {
         id: SharedString::from(group.id.clone()),
-        title: SharedString::from(group.name.clone()),
+        title: SharedString::from(crate::hangul::for_slint(&group.name)),
         color: SharedString::from(group.color.clone()),
         depth,
+        has_photo: false,
         is_group: true,
         expanded,
         child_count,
+        folder: SharedString::new(),
     }
 }
 
-pub(crate) fn memo_row(memo: &Memo, depth: i32) -> ListRow {
+/// One memo's row.
+///
+/// A memo written on the phone can have an empty title and a body full of writing: the phone
+/// has a title field of its own and leaving it blank is the ordinary way to use it, while a
+/// sticky has no such field and derives the title from the first line. Falling back to that
+/// same first line here is what stops a phoneful of memos from arriving as a column of
+/// "(untitled)". The stored title is left alone — this is only how the row reads.
+pub(crate) fn memo_row(memo: &Memo, depth: i32, has_photo: bool) -> ListRow {
+    let title = if memo.title.is_empty() {
+        crate::sticky::derive_title(&memo.body)
+    } else {
+        memo.title.clone()
+    };
     ListRow {
         id: SharedString::from(memo.id.clone()),
-        title: SharedString::from(memo.title.clone()),
+        title: SharedString::from(crate::hangul::for_slint(&title)),
         color: SharedString::from(memo.color.clone()),
         depth,
         is_group: false,
         expanded: false,
         child_count: 0,
+        has_photo,
+        folder: SharedString::new(),
+    }
+}
+
+/// Says which folder a row came out of; only a search asks for this.
+///
+/// The immediate parent, not the whole path: the row is narrow and shares it with the title,
+/// and "which of my folders is this in" is answered by the one name.
+fn in_folder(row: ListRow, parent_id: &str, groups: &[ymemo_core::Group]) -> ListRow {
+    let Some(g) = groups.iter().find(|g| g.id == parent_id) else {
+        return row; // top level, or a folder that is no longer there
+    };
+    let name = if g.name.is_empty() { t!("ui.list_group_untitled") } else { g.name.clone() };
+    ListRow {
+        folder: SharedString::from(crate::hangul::for_slint(&name)),
+        ..row
     }
 }
 
@@ -351,6 +438,9 @@ mod tests {
             stickies: Rc::new(RefCell::new(HashMap::new())),
             collapsed: Rc::new(RefCell::new(HashSet::new())),
             query: Rc::new(RefCell::new(String::new())),
+            undo: Rc::new(RefCell::new(None)),
+            undo_timer: Rc::new(slint::Timer::default()),
+            syncthing: Rc::new(RefCell::new(None)),
             dir: Rc::new(dir),
             settings: Rc::new(RefCell::new(crate::settings::Settings::default())),
             last_activity: Rc::new(Cell::new(Instant::now())),
@@ -440,6 +530,43 @@ mod tests {
         }
     }
 
+    /// A search result says which folder it came out of, and a top-level one says nothing.
+    ///
+    /// The tree is set aside while searching, so the row's own indent cannot carry this: two
+    /// memos called the same thing in two folders came back as the same row twice.
+    #[test]
+    fn a_search_result_says_which_folder_it_came_from() {
+        use slint::Model;
+        let (ctx, _) = ctx_with(&["loose note"]);
+        let mut guard = ctx.vault.borrow_mut();
+        let v = guard.as_mut().unwrap();
+        let outer = group("outer", "Work", "");
+        let inner = group("inner", "Q1", "outer");
+        v.upsert_group(&outer).unwrap();
+        v.upsert_group(&inner).unwrap();
+        let mut note = Memo::new("note in Q1", "");
+        note.group_id = inner.id.clone();
+        v.upsert(&note).unwrap();
+
+        refresh_list(v, &ctx.model, &HashSet::new(), "note");
+        let folders: Vec<String> = ctx
+            .model
+            .iter()
+            .map(|r| (r.title.to_string(), r.folder.to_string()))
+            .filter(|(t, _)| t == "note in Q1" || t == "loose note")
+            .map(|(_, f)| f)
+            .collect();
+        assert_eq!(folders, vec!["Q1".to_string(), String::new()]);
+
+        // A folder that matches says where *it* lives.
+        refresh_list(v, &ctx.model, &HashSet::new(), "q1");
+        assert_eq!(ctx.model.row_data(0).unwrap().folder.to_string(), "Work");
+
+        // Nothing carries it once the search is gone.
+        refresh_list(v, &ctx.model, &HashSet::new(), "");
+        assert!(ctx.model.iter().all(|r| r.folder.is_empty()));
+    }
+
     /// Folders are dropped *on* rows, never between them; `move_row` owns that.
     #[test]
     fn a_folder_is_not_reordered_by_a_gap() {
@@ -482,7 +609,7 @@ mod tests {
         let children = ymemo_core::group_children(&groups);
 
         let mut rows = Vec::new();
-        push_group_rows("", 0, &children, &memos, &HashSet::new(), &mut rows);
+        push_group_rows("", 0, &children, &memos, &HashSet::new(), &HashSet::new(), &mut rows);
 
         let got: Vec<(&str, i32, bool)> = rows
             .iter()
@@ -511,7 +638,7 @@ mod tests {
         let collapsed = HashSet::from(["outer".to_string()]);
 
         let mut rows = Vec::new();
-        push_group_rows("", 0, &children, &memos, &collapsed, &mut rows);
+        push_group_rows("", 0, &children, &memos, &collapsed, &HashSet::new(), &mut rows);
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id.as_str(), "outer");

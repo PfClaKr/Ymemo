@@ -69,10 +69,10 @@ private class MemoListFactory(
             R.id.row_title,
             entry.title.ifEmpty { context.getString(R.string.widget_untitled) },
         )
-        views.setTextViewText(R.id.row_body, entry.preview)
+        views.setTextViewText(R.id.row_body, entry.line)
         views.setViewVisibility(
             R.id.row_body,
-            if (entry.preview.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE,
+            if (entry.line.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE,
         )
 
         views.setOnClickFillInIntent(

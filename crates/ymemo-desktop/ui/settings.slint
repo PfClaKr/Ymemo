@@ -1,6 +1,6 @@
 import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox, ScrollView } from "std-widgets.slint";
 import { Strings } from "@i18n";
-import { Palette, TabButton } from "theme.slint";
+import { Palette, Scroll, TabButton } from "theme.slint";
 
 // ---------------------------------------------------------------------------
 // Settings window. Everything here is **device-local** and never synced; it maps one to one
@@ -119,7 +119,7 @@ export component SettingsWindow inherits Window {
             viewport-height: content.preferred-height;
 
             content := VerticalLayout {
-                width: scroll.visible-width;
+                width: scroll.visible-width - Scroll.gutter;
                 spacing: 12px;
 
                 // ---- Language ----

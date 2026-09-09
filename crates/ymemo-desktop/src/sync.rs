@@ -45,6 +45,10 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
         let Some(v) = guard.as_mut() else { return };
         match v.rebuild() {
             Ok(()) => {
+                // A merge can carry a device removal made somewhere else. Applying it here is
+                // what makes the removal stick: every device drops the peer, so nobody is
+                // left to introduce it back. See `RevokedDevice`.
+                apply_revocations(&ctx, v);
                 refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
                 // Force a repaint: the Windows software renderer does not repaint on a model
                 // change alone, which makes a successful merge look like a failed sync.
@@ -52,8 +56,8 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
                     // The vault's name is in the document too, so another device renaming it
                     // arrives here like any other change.
                     let name = v.name();
-                    if w.get_vault_name() != name.as_str() {
-                        w.set_vault_name(name.into());
+                    if w.get_vault_title() != name.as_str() {
+                        crate::list::set_vault_name(&w, &name);
                     }
                     w.window().request_redraw();
                 }
@@ -66,9 +70,9 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
                         Ok(Some(m)) => {
                             let text = sticky_text(&m);
                             if entry.window.get_memo_text() != text.as_str() {
-                                entry.window.set_memo_text(text.into());
+                                crate::sticky::set_body_text(&entry.window, &text);
                             }
-                            entry.window.set_memo_title(m.title.into());
+                            crate::sticky::set_title(&entry.window, &m.title);
                             entry.window.set_sticky_color(m.color.into());
                             entry.window.set_sticky_opacity(m.opacity as f32);
                             entry.window.set_created_at(
@@ -83,9 +87,10 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
                             // model rebuilds the items and the drag in progress would be
                             // dropped halfway — the same reason `dirty` protects the text.
                             if !entry.window.get_photo_busy() {
-                                entry.window.set_photos(slint::ModelRc::new(
-                                    slint::VecModel::from(crate::sticky::photo_rows(v, id)),
-                                ));
+                                crate::sticky::set_photo_models(
+                                    &entry.window,
+                                    crate::sticky::split_photo_rows(v, id),
+                                );
                             }
                             entry.window.window().request_redraw();
                         }
@@ -102,6 +107,48 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
     });
 }
 
+/// Tells the daemon about the removals the vault carries, in both directions.
+///
+/// Two things, because a removal reaches this device as data and has to become configuration:
+/// the peers on the list are dropped, and a device that finds **itself** on the list stops
+/// syncing altogether rather than dialling machines that will not answer.
+///
+/// Best effort by design. The device being removed may never see the change — it is usually
+/// unshared before the log reaches it — so this is what the *remaining* devices do, and the
+/// removed one simply finds that nobody talks to it any more.
+pub(crate) fn apply_revocations(ctx: &Ctx, vault: &ymemo_core::vault::Vault) {
+    let guard = ctx.syncthing.borrow();
+    let Some(st) = guard.as_ref() else { return };
+    let revoked = match vault.revoked_devices() {
+        Ok(list) => list,
+        Err(e) => {
+            diag!("could not read the removed devices: {e}");
+            return;
+        }
+    };
+    if revoked.is_empty() {
+        return;
+    }
+    match vault.is_revoked_here() {
+        Ok(true) => {
+            // Removed from the vault by another device: stop carrying the folder. The memos
+            // already here stay — a removal is not a remote wipe.
+            if let Err(e) = st.remove_folder(SYNC_FOLDER_ID) {
+                diag!("could not stop syncing after being removed from the vault: {e}");
+            }
+            return;
+        }
+        Ok(false) => {}
+        Err(e) => diag!("could not tell whether this device was removed: {e}"),
+    }
+    let ids: Vec<String> = revoked.into_iter().map(|d| d.device_id).collect();
+    match st.apply_revocations(SYNC_FOLDER_ID, &ids) {
+        Ok(0) => {}
+        Ok(n) => diag!("stopped sharing the vault with {n} removed device(s)"),
+        Err(e) => diag!("could not apply the removed devices: {e}"),
+    }
+}
+
 /// Finds and starts syncthing, registering the vault directory as a shared folder. `None`
 /// without a binary, in which case the app runs local-only.
 pub(crate) fn start_syncthing(data_dir: &std::path::Path, vault_dir: &std::path::Path) -> Option<Syncthing> {
@@ -110,6 +157,11 @@ pub(crate) fn start_syncthing(data_dir: &std::path::Path, vault_dir: &std::path:
         Ok(st) => {
             if let Err(e) = st.ensure_folder(SYNC_FOLDER_ID, "Ymemo Vault", vault_dir) {
                 diag!("could not register the shared folder: {e}");
+            }
+            // For the peers paired before the app asked for introductions; a pairing made
+            // since carries the flag already. Idempotent, so it costs nothing to repeat.
+            if let Err(e) = st.ensure_introducers(SYNC_FOLDER_ID) {
+                diag!("could not mark the peers as introducers: {e}");
             }
             Some(st)
         }

@@ -14,6 +14,14 @@ export struct ListRow {
     is-group: bool,
     expanded: bool,
     child-count: int,
+    // Whether the memo has a photo on it, so one with nothing written is not an untitled row
+    // beside another untitled row.
+    has-photo: bool,
+    // The folder this row lives in, filled **only while searching**. A search sets the tree
+    // aside and lists the matches flat, which answers "where is the memo that said X" with
+    // the memo but not the where — two rows called "회의" in two folders came back looking
+    // like the same memo twice.
+    folder: string,
 }
 
 
@@ -24,7 +32,7 @@ export struct ListRow {
 export component ListWindow inherits Window {
     // The vault's own name in the task bar too, so two vaults open side by side are told
     // apart there as well as on screen.
-    title: root.vault-name == "" ? Strings.ui_list_heading : root.vault-name;
+    title: root.vault-title == "" ? Strings.ui_list_heading : root.vault-title;
     // Five header buttons squeeze the title below this width. It is a minimum and not only
     // a preference because a Window whose root is a layout takes the layout's natural size
     // and ignores `preferred-width` — which left an empty list 141px wide, with its own
@@ -38,6 +46,9 @@ export component ListWindow inherits Window {
     // What this vault is called. Empty until it is named, and then the heading says "Ymemo".
     // It lives in the synced document, so every paired device shows the same one.
     in-out property <string> vault-name;
+    // The same name again, as it is really spelled: the line above is drawn by Slint and goes
+    // through `hangul.rs`, this one goes to the desktop's own title bar and must not.
+    in property <string> vault-title;
     callback rename-vault(string);
     // Whether the heading is being edited right now.
     private property <bool> naming: false;
@@ -49,6 +60,8 @@ export component ListWindow inherits Window {
     // Set while a delete can still be taken back, and the line the bar shows.
     in property <string> undo-message: "";
     callback undo-delete();
+    // A write that did not happen. Empty unless something failed; stays until dismissed.
+    in-out property <string> notice: "";
     in property <bool> sync-available: false;
     in property <string> my-pairing-code;
     in property <image> qr-image;
@@ -382,6 +395,45 @@ export component ListWindow inherits Window {
             }
         }
 
+        // A change that could not be written — a full disk, a vault directory gone read-only,
+        // a removable drive pulled out. Nothing else in this window says so, and a memo app
+        // that silently drops what was typed is the one failure it cannot have. No timeout:
+        // this is not an offer that expires, it is a fact about the vault, and it stays until
+        // it is read and dismissed.
+        if root.notice != "": Rectangle {
+            height: 26px;
+            border-radius: 6px;
+            background: #4a2f2f;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 4px;
+                spacing: 6px;
+                Text {
+                    text: root.notice;
+                    font-size: 11px;
+                    color: #f0c9c9;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                dismiss := TouchArea {
+                    width: 20px;
+                    mouse-cursor: pointer;
+                    accessible-role: button;
+                    accessible-label: Strings.ui_list_notice_dismiss;
+                    Glyph {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        width: 11px;
+                        height: 11px;
+                        name: "close";
+                        stroke: dismiss.has-hover ? #ffffff : #f0c9c9;
+                    }
+                    clicked => { root.notice = ""; }
+                }
+            }
+        }
+
         // What a delete left behind, for as long as it can still be taken back. A bar and not
         // a dialog: the delete already happened, and a question in front of every one of them
         // is a tax on the many that were meant.
@@ -433,14 +485,33 @@ export component ListWindow inherits Window {
             }
         }
 
-        if !root.show-sync && root.rows.length == 0: Text {
-            text: root.query == "" ? Strings.ui_list_empty : Strings.ui_list_search_none;
-            font-size: 12px;
-            color: #b0a99a;
-            wrap: word-wrap;
+        // An empty list still has the whole window to fill, and the line saying so belongs in
+        // the middle of that space rather than pinned to the top-left corner of it.
+        if !root.show-sync && root.rows.length == 0: VerticalLayout {
+            vertical-stretch: 1;
+            alignment: center;
+            spacing: 6px;
+            padding-left: 12px;
+            padding-right: 12px;
+            Text {
+                text: root.query == "" ? Strings.ui_list_empty : Strings.ui_list_search_none;
+                horizontal-alignment: center;
+                font-size: 13px;
+                color: #d8d2c2;
+                wrap: word-wrap;
+            }
+            // What to do about it, quieter than the line above and only when the list is
+            // empty: a search that found nothing is not the place to explain the + button.
+            if root.query == "": Text {
+                text: Strings.ui_list_empty_hint;
+                horizontal-alignment: center;
+                font-size: 11px;
+                color: #8f887a;
+                wrap: word-wrap;
+            }
         }
 
-        if !root.show-sync: ListView {
+        if !root.show-sync && root.rows.length > 0: ListView {
             vertical-stretch: 1;
             for row[idx] in root.rows: Rectangle {
                 height: root.row-h;
@@ -448,8 +519,16 @@ export component ListWindow inherits Window {
                 // The dragged row dims, a folder about to swallow it highlights.
                 opacity: root.drag-source == idx ? 0.45 : 1;
                 animate opacity { duration: 120ms; easing: ease-out; }
+                // A folder and what is in it read as one block. The folder's own row sits a
+                // shade above the window and the rows under it half a shade, so the group is
+                // a band rather than four lines that happen to be indented — the indent alone
+                // is 14px, which is not much to tell "inside Work" from "next to Work".
+                // Slight on purpose: both stay under the hover and the drop highlight, which
+                // still have to be the brightest things on a row.
                 background: root.drag-into == idx ? #7db8ec55
                           : ta.has-hover ? #ffffff1a
+                          : row.is-group ? #ffffff12
+                          : row.depth > 0 ? #ffffff08
                           : transparent;
                 animate background { duration: 120ms; easing: ease-out; }
 
@@ -650,6 +729,38 @@ export component ListWindow inherits Window {
                         vertical-alignment: center;
                         overflow: elide;
                         horizontal-stretch: 1;
+                    }
+
+                    // Which folder the match came out of. Only a search fills this in, and
+                    // it gives up its room to the title first: the name is what was searched
+                    // for, this only says where it was found.
+                    if row.folder != "": Text {
+                        text: row.folder;
+                        font-size: 11px;
+                        color: #8d8778;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        // Out of the way of the two buttons that appear over it on hover.
+                        opacity: ta.has-hover ? 0 : 1;
+                        animate opacity { duration: 120ms; easing: ease-out; }
+                    }
+
+                    // A memo with a picture on it says so. It matters most for the memo with
+                    // nothing written on it at all, which would otherwise be one "(untitled)"
+                    // beside another.
+                    if row.has-photo: Rectangle {
+                        width: 15px;
+                        Glyph {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: 13px;
+                            height: 13px;
+                            name: "photo";
+                            stroke: #8d8778;
+                            // Thinner than a button's: this sits at 13px beside 14px text and
+                            // is a mark, not a control.
+                            stroke-width: 1.1px;
+                        }
                     }
 
                     if row.is-group: Text {

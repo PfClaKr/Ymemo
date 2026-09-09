@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `field_label`, `lan_lock`, `rejected_lock`, `remember_delete`, `sanitize`, `share_with_peer`, `sync_lock`, `with_sync`, `with_vault`
+// These functions are ignored because they are not marked as `pub`: `apply_revocations`, `field_label`, `lan_lock`, `rejected_lock`, `remember_delete`, `sanitize`, `share_with_peer`, `sync_lock`, `with_sync`, `with_vault`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `fmt`, `from`, `from`, `from`
 
 /// Sets the language of core error messages (`"ko"`, `"en"`, or a locale like `"ko-KR"`).
@@ -101,6 +101,19 @@ Future<List<FfiMemo>> memoList() => RustLib.instance.api.crateApiMemoList();
 Future<String> memoUpsert(
         {String? id, required String title, required String body}) =>
     RustLib.instance.api.crateApiMemoUpsert(id: id, title: title, body: body);
+
+/// Throws away a memo that was opened and never written on, and says whether it did.
+///
+/// The composer creates the memo before the screen appears, so backing out of it without
+/// typing used to leave a "New memo" row with nothing in it — one for every time anyone
+/// tapped the button and changed their mind. The desktop discards the same way when a blank
+/// sticky is closed; this is that rule, over the wire.
+///
+/// Deliberately **not** [`memo_delete`]: this leaves no undo behind it. A note that never
+/// existed is not something to offer back, and putting it in the undo slot would stand in
+/// front of a real delete the user might still want to take back.
+Future<bool> memoDiscardIfBlank({required String id}) =>
+    RustLib.instance.api.crateApiMemoDiscardIfBlank(id: id);
 
 /// Deletes a memo, keeping it for one [`memo_undelete`].
 Future<void> memoDelete({required String id}) =>
@@ -198,6 +211,13 @@ Future<void> attachmentSetLayout(
         yPermille: yPermille,
         widthEmMilli: widthEmMilli);
 
+/// Moves a photo between lying on the writing and having a band of its own under it.
+///
+/// A fact about the memo, not about this device: a photo put in the flow here is out of the
+/// way of the writing on the desktop sticky too.
+Future<void> attachmentSetFlow({required String id, required bool flow}) =>
+    RustLib.instance.api.crateApiAttachmentSetFlow(id: id, flow: flow);
+
 /// Detaches a photo; the blob file stays (no GC).
 Future<void> attachmentRemove({required String id}) =>
     RustLib.instance.api.crateApiAttachmentRemove(id: id);
@@ -275,6 +295,15 @@ Future<String> syncStart(
     RustLib.instance.api.crateApiSyncStart(
         binaryPath: binaryPath, homeDir: homeDir, vaultDir: vaultDir);
 
+/// Tells the daemon what to call this device, which is the name its peers show.
+///
+/// Android has no useful hostname — Syncthing falls back to `localhost` — so Dart passes the
+/// name the platform knows. Doing nothing when the daemon is down is correct; Dart calls this
+/// again once it is up. See `Syncthing::set_my_name` for why the name has to be in place
+/// before a peer first connects.
+Future<void> syncSetDeviceName({required String name}) =>
+    RustLib.instance.api.crateApiSyncSetDeviceName(name: name);
+
 /// Re-registers the vault directory with the running daemon.
 ///
 /// [`sync_start`] does this on its first run and then short-circuits, so a vault created
@@ -334,8 +363,12 @@ Future<String> syncPairWith({required String code}) =>
 Future<List<FfiSharedDevice>> syncDevices() =>
     RustLib.instance.api.crateApiSyncDevices();
 
-/// Drops a peer. Only this side stops syncing; the other device keeps its own entry until it
-/// unpairs too.
+/// Removes a peer from the vault, on every device that shares it.
+///
+/// The decision goes into the vault first so it travels: every peer is an introducer, so a
+/// peer dropped here alone is handed straight back by the devices that still have it. The
+/// device being removed keeps the memos it already has — this is not a remote wipe, and not
+/// a lock either; see `RevokedDevice`.
 Future<void> syncUnpair({required String deviceId}) =>
     RustLib.instance.api.crateApiSyncUnpair(deviceId: deviceId);
 
@@ -460,6 +493,10 @@ class FfiAttachment {
   /// Top-left corner on the note, in per-mille of the note area (0..=1000 across and down).
   final PlatformInt64 xPermille;
   final PlatformInt64 yPermille;
+
+  /// Whether the photo takes a band of its own under the writing instead of lying on top
+  /// of it. False is what every photo was before there was a choice.
+  final bool flow;
   final PlatformInt64 createdAt;
 
   const FfiAttachment({
@@ -473,6 +510,7 @@ class FfiAttachment {
     required this.widthEmMilli,
     required this.xPermille,
     required this.yPermille,
+    required this.flow,
     required this.createdAt,
   });
 
@@ -488,6 +526,7 @@ class FfiAttachment {
       widthEmMilli.hashCode ^
       xPermille.hashCode ^
       yPermille.hashCode ^
+      flow.hashCode ^
       createdAt.hashCode;
 
   @override
@@ -505,6 +544,7 @@ class FfiAttachment {
           widthEmMilli == other.widthEmMilli &&
           xPermille == other.xPermille &&
           yPermille == other.yPermille &&
+          flow == other.flow &&
           createdAt == other.createdAt;
 }
 
@@ -558,6 +598,10 @@ class FfiMemo {
   final String color;
   final PlatformInt64 opacity;
   final String groupId;
+
+  /// Whether the memo has a photo on it. A memo with nothing written but a picture would
+  /// otherwise be one "New memo" row beside another.
+  final bool hasPhoto;
   final PlatformInt64 createdAt;
   final PlatformInt64 updatedAt;
 
@@ -568,6 +612,7 @@ class FfiMemo {
     required this.color,
     required this.opacity,
     required this.groupId,
+    required this.hasPhoto,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -580,6 +625,7 @@ class FfiMemo {
       color.hashCode ^
       opacity.hashCode ^
       groupId.hashCode ^
+      hasPhoto.hashCode ^
       createdAt.hashCode ^
       updatedAt.hashCode;
 
@@ -594,6 +640,7 @@ class FfiMemo {
           color == other.color &&
           opacity == other.opacity &&
           groupId == other.groupId &&
+          hasPhoto == other.hasPhoto &&
           createdAt == other.createdAt &&
           updatedAt == other.updatedAt;
 }
@@ -952,6 +999,9 @@ class FfiStrings {
   final String emptyHint;
   final String masterPassword;
   final String myCode;
+  final String peerCode;
+  final String peerCodeHint;
+  final String addDevice;
   final String newMemo;
   final String noDevices;
   final String opening;
@@ -960,6 +1010,13 @@ class FfiStrings {
   final String photoMissing;
   final String photoRemove;
   final String photoSize;
+
+  /// The two ways a photo can sit on a note; each label says what pressing it does.
+  final String photoUnderText;
+  final String photoOverText;
+  final String photoSave;
+  final String photoSaved;
+  final String photoSaveFailed;
   final String save;
   final String scanHint;
   final String scanQr;
@@ -1101,6 +1158,9 @@ class FfiStrings {
     required this.emptyHint,
     required this.masterPassword,
     required this.myCode,
+    required this.peerCode,
+    required this.peerCodeHint,
+    required this.addDevice,
     required this.newMemo,
     required this.noDevices,
     required this.opening,
@@ -1109,6 +1169,11 @@ class FfiStrings {
     required this.photoMissing,
     required this.photoRemove,
     required this.photoSize,
+    required this.photoUnderText,
+    required this.photoOverText,
+    required this.photoSave,
+    required this.photoSaved,
+    required this.photoSaveFailed,
     required this.save,
     required this.scanHint,
     required this.scanQr,
@@ -1252,6 +1317,9 @@ class FfiStrings {
       emptyHint.hashCode ^
       masterPassword.hashCode ^
       myCode.hashCode ^
+      peerCode.hashCode ^
+      peerCodeHint.hashCode ^
+      addDevice.hashCode ^
       newMemo.hashCode ^
       noDevices.hashCode ^
       opening.hashCode ^
@@ -1260,6 +1328,11 @@ class FfiStrings {
       photoMissing.hashCode ^
       photoRemove.hashCode ^
       photoSize.hashCode ^
+      photoUnderText.hashCode ^
+      photoOverText.hashCode ^
+      photoSave.hashCode ^
+      photoSaved.hashCode ^
+      photoSaveFailed.hashCode ^
       save.hashCode ^
       scanHint.hashCode ^
       scanQr.hashCode ^
@@ -1405,6 +1478,9 @@ class FfiStrings {
           emptyHint == other.emptyHint &&
           masterPassword == other.masterPassword &&
           myCode == other.myCode &&
+          peerCode == other.peerCode &&
+          peerCodeHint == other.peerCodeHint &&
+          addDevice == other.addDevice &&
           newMemo == other.newMemo &&
           noDevices == other.noDevices &&
           opening == other.opening &&
@@ -1413,6 +1489,11 @@ class FfiStrings {
           photoMissing == other.photoMissing &&
           photoRemove == other.photoRemove &&
           photoSize == other.photoSize &&
+          photoUnderText == other.photoUnderText &&
+          photoOverText == other.photoOverText &&
+          photoSave == other.photoSave &&
+          photoSaved == other.photoSaved &&
+          photoSaveFailed == other.photoSaveFailed &&
           save == other.save &&
           scanHint == other.scanHint &&
           scanQr == other.scanQr &&

@@ -18,6 +18,7 @@ import 'dart:convert';
 import 'package:flutter/widgets.dart';
 
 import 'host.dart' as host;
+import 'memo_title.dart';
 import 'src/rust/api.dart';
 
 /// What a tapped widget, or a launcher shortcut, asked the app to do.
@@ -115,8 +116,16 @@ Future<void> publishWidgets() async {
         for (final memo in memos.take(_memoLimit))
           {
             'id': memo.id,
-            'title': memo.title,
+            // The same title fallback the list uses, so an untitled memo has a name here
+            // instead of "(untitled)".
+            'title': rowTitle(memo, ''),
+            // Two readings of the same body, because the two widgets want different things.
+            // `preview` is the whole note, which is what the sticky writes on its paper — a
+            // one-line memo would otherwise leave it blank. `line` is what the app's own
+            // list puts under the title, the body minus the part the title already shows,
+            // so a row does not say the same words twice.
             'preview': _preview(memo.body),
+            'line': _preview(rowPreview(memo)),
             'color': memo.color,
             // A memo whose folder is gone belongs to the top level, which is where the app's
             // own folder screen puts it (`memos_in_group`). Anything else reads as data loss.

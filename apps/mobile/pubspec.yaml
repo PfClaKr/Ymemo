@@ -40,6 +40,11 @@ dependencies:
 
 dev_dependencies:
   flutter_lints: ^4.0.0
+  # Ships with the SDK, so it costs no download and nothing reaches the app. Here for the
+  # pure logic that is easier to get wrong than to see wrong: `test/markdown_style_test.dart`
+  # checks that the styled runs put the memo back together character for character.
+  flutter_test:
+    sdk: flutter
 
 flutter:
   uses-material-design: true

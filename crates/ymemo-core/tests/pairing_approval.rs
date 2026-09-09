@@ -6,12 +6,17 @@
 //! `sync.rs` or `pairing.rs`:
 //!
 //! ```text
-//! YMEMO_SYNCTHING_BIN=/path/to/syncthing cargo test -p ymemo-core --test pairing_approval -- --ignored --nocapture
+//! YMEMO_SYNCTHING_BIN=/path/to/syncthing \
+//!   cargo test -p ymemo-core --test pairing_approval -- --ignored --nocapture --test-threads=1
 //! ```
 //!
-//! What it pins down is the claim the whole flow rests on: a device that is dialled by a
-//! stranger files the caller as pending rather than silently dropping it, and sharing the
-//! folder back is all it takes to complete the link.
+//! **One at a time.** Between them these tests run five daemons, and in parallel they find
+//! each other's announcements and time out on the wrong device.
+//!
+//! What they pin down are the two claims the whole flow rests on: a device that is dialled by
+//! a stranger files the caller as pending rather than silently dropping it and sharing the
+//! folder back is all it takes to complete the link, and a vault with three devices in it
+//! closes into a mesh instead of leaving the last two unable to reach each other.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -19,8 +24,13 @@ use std::time::{Duration, Instant};
 use ymemo_core::pairing;
 use ymemo_core::sync::{Syncthing, VAULT_FOLDER_ID};
 
-/// How long to wait for one side to notice the other. Discovery plus a dial attempt.
-const REACH_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long to wait for one side to notice the other: discovery, a dial attempt, and — for
+/// the mesh — a reconnect for the introduction to ride on.
+///
+/// Generous on purpose. Nothing waits the whole time when things are working, and run one
+/// after another these tests put half a dozen daemons through one machine's discovery, where
+/// a minute is not always enough.
+const REACH_TIMEOUT: Duration = Duration::from_secs(120);
 const POLL: Duration = Duration::from_millis(500);
 
 struct Device {
@@ -90,10 +100,12 @@ fn a_scanned_device_shows_up_as_pending_and_approving_it_links_both_sides() {
 
     // --- B scans A's code. This is B's half and nothing more. ---
     b.st.share_folder_with(VAULT_FOLDER_ID, &a.id).unwrap();
-    assert!(
-        a.st.pending_devices().unwrap().is_empty(),
-        "A cannot know about B before B has dialled it"
-    );
+    // There used to be an assertion here that A's pending list was still empty, standing for
+    // "A can only have heard of B by being dialled". It was a race the test cannot win — on
+    // one machine B's dial lands before the next REST call returns — and it started failing
+    // once peers became introducers, which is a timing change and not a behavioural one.
+    // The claim it was making is the `wait_for` below: A learns of B with nothing scanned
+    // back, and the only way that can happen is an inbound connection.
 
     // --- A learns of the request without anyone scanning anything back. ---
     wait_for("B to appear as a pending device on A", || {
@@ -119,4 +131,176 @@ fn a_scanned_device_shows_up_as_pending_and_approving_it_links_both_sides() {
         a.st.shared_devices(VAULT_FOLDER_ID).unwrap().iter().any(|d| d.id == b.id),
         "A should list B once the link is up"
     );
+}
+
+/// Every device that shares the vault ends up knowing every other one, even the ones it was
+/// never paired with by hand.
+///
+/// The shape this is about: a user pairs their laptop with their phone, and later pairs the
+/// laptop with a tablet. Nobody pairs the phone with the tablet, and without introduction
+/// nobody ever does — the two hold the same vault and cannot reach each other, so a memo
+/// written on the phone waits for the laptop to be switched on before the tablet sees it.
+///
+/// Syncthing's answer is the introducer flag, which `share_folder_with` sets on every peer:
+/// a device passes on the peers it shares the folder with, so the mesh closes itself.
+#[test]
+#[ignore = "spawns three syncthing daemons; needs YMEMO_SYNCTHING_BIN"]
+fn a_new_device_reaches_the_others_without_being_paired_with_each() {
+    let Some(binary) = std::env::var_os("YMEMO_SYNCTHING_BIN").map(PathBuf::from) else {
+        eprintln!("YMEMO_SYNCTHING_BIN not set; skipping");
+        return;
+    };
+
+    let a = start(&binary, "A (the first device)");
+    let b = start(&binary, "B (paired with A)");
+    let c = start(&binary, "C (paired with A, later)");
+
+    // Both pairings go through A, which is what the app's two flows produce: one device
+    // shows a code and the other scans it, and only those two exchange anything.
+    for peer in [&b, &c] {
+        a.st.share_folder_with(VAULT_FOLDER_ID, &peer.id).unwrap();
+        peer.st.share_folder_with(VAULT_FOLDER_ID, &a.id).unwrap();
+    }
+
+    let knows = |d: &Device, id: &str| {
+        d.st.shared_devices(VAULT_FOLDER_ID).unwrap().iter().any(|s| s.id == id)
+    };
+
+    // Wait until the pairings themselves are live, so a failure below is about introduction
+    // and not about two daemons that never found each other.
+    wait_for("B and C to connect to A", || {
+        let up = |d: &Device| {
+            d.st.shared_devices(VAULT_FOLDER_ID).unwrap().iter().any(|s| s.id == a.id && s.connected)
+        };
+        up(&b) && up(&c)
+    });
+
+    wait_for("B to learn about C through A", || knows(&b, &c.id));
+    wait_for("C to learn about B through A", || knows(&c, &b.id));
+
+    // And the point of knowing: they talk to each other rather than through A.
+    wait_for("B and C to connect directly", || {
+        let direct = |d: &Device, id: &str| {
+            d.st.shared_devices(VAULT_FOLDER_ID).unwrap().iter().any(|s| s.id == id && s.connected)
+        };
+        direct(&b, &c.id) && direct(&c, &b.id)
+    });
+}
+
+
+
+
+/// A device removed from the vault stays removed, even though every peer is an introducer.
+///
+/// This is the other half of the mesh. Introduction is what makes three devices reach each
+/// other, and it is also what used to undo a removal: the peers that still had the device
+/// handed it straight back, so it flapped for a minute and returned. What settles it is every
+/// device applying the same list, which is why the list travels in the vault — see
+/// `RevokedDevice`. Here the vault is stood in for by the list itself, since what is being
+/// tested is the daemon half: once each remaining device has applied it, nobody offers the
+/// removed device and there is nothing left to introduce.
+#[test]
+#[ignore = "spawns three syncthing daemons; needs YMEMO_SYNCTHING_BIN"]
+fn a_removed_device_is_not_introduced_back() {
+    let Some(binary) = std::env::var_os("YMEMO_SYNCTHING_BIN").map(PathBuf::from) else {
+        eprintln!("YMEMO_SYNCTHING_BIN not set; skipping");
+        return;
+    };
+
+    let a = start(&binary, "A");
+    let b = start(&binary, "B");
+    let c = start(&binary, "C (the one to remove)");
+    for peer in [&b, &c] {
+        a.st.share_folder_with(VAULT_FOLDER_ID, &peer.id).unwrap();
+        peer.st.share_folder_with(VAULT_FOLDER_ID, &a.id).unwrap();
+    }
+    let knows = |d: &Device, id: &str| {
+        d.st.shared_devices(VAULT_FOLDER_ID).unwrap().iter().any(|s| s.id == id)
+    };
+    wait_for("the mesh to close", || knows(&b, &c.id) && knows(&c, &b.id));
+
+    // The removal, as the app makes it: the device that was asked drops the peer, and every
+    // other device applies the same list on its next merge.
+    let revoked = [c.id.clone()];
+    a.st.unshare_folder_with(VAULT_FOLDER_ID, &c.id).unwrap();
+
+    // Settle first. B has not applied the list yet, so for a moment it is still offering C
+    // and A can be introduced to it again — the merge timer is what closes that window, and
+    // it is a poll, not an instant.
+    let apply = || {
+        for device in [&a, &b] {
+            device.st.apply_revocations(VAULT_FOLDER_ID, &revoked).unwrap();
+        }
+    };
+    // Waited for rather than slept through: how long it takes depends on when each daemon
+    // next reconnects, and a fixed pause is a flake on a busy machine.
+    let mut clean = 0;
+    let settle = Instant::now() + REACH_TIMEOUT;
+    while clean < 5 {
+        assert!(Instant::now() < settle, "the removal never settled");
+        apply();
+        clean = if !knows(&a, &c.id) && !knows(&b, &c.id) { clean + 1 } else { 0 };
+        std::thread::sleep(Duration::from_secs(2));
+    }
+
+    // Then it has to *stay* gone, through the reconnect interval that used to bring it back:
+    // without this it returned inside a minute, and flapped on the way.
+    let hold = Instant::now() + Duration::from_secs(90);
+    while Instant::now() < hold {
+        apply();
+        assert!(!knows(&a, &c.id), "A took C back");
+        assert!(!knows(&b, &c.id), "B took C back");
+        std::thread::sleep(Duration::from_secs(3));
+    }
+
+    // And the two that remain are still a working pair, so a removal is not a fallen mesh.
+    assert!(knows(&a, &b.id) && knows(&b, &a.id), "A and B should still share the vault");
+}
+
+/// A device that was removed can be connected again, and the vault reaches it.
+///
+/// The scenario a user actually hits: two devices, one is removed by mistake or on purpose,
+/// and later it is paired again. Both halves have to work — the removal has to stop the sync,
+/// and pairing again has to start it, with nothing left over from the removal getting in the
+/// way. It nearly does not: a removed peer is parked **paused** rather than deleted (see
+/// `Syncthing::apply_revocations`), so re-pairing has to wake it rather than assume a fresh
+/// device.
+#[test]
+#[ignore = "spawns two syncthing daemons; needs YMEMO_SYNCTHING_BIN"]
+fn a_removed_device_can_be_connected_again() {
+    let Some(binary) = std::env::var_os("YMEMO_SYNCTHING_BIN").map(PathBuf::from) else {
+        eprintln!("YMEMO_SYNCTHING_BIN not set; skipping");
+        return;
+    };
+    let a = start(&binary, "A");
+    let b = start(&binary, "B");
+
+    a.st.share_folder_with(VAULT_FOLDER_ID, &b.id).unwrap();
+    b.st.share_folder_with(VAULT_FOLDER_ID, &a.id).unwrap();
+
+    let connected = |d: &Device, id: &str| {
+        d.st.shared_devices(VAULT_FOLDER_ID).unwrap().iter().any(|s| s.id == id && s.connected)
+    };
+    let listed = |d: &Device, id: &str| {
+        d.st.shared_devices(VAULT_FOLDER_ID).unwrap().iter().any(|s| s.id == id)
+    };
+    wait_for("A and B to connect", || connected(&a, &b.id) && connected(&b, &a.id));
+
+    // Syncthing learns a peer's name over the connection; the list shows it rather than a
+    // wall of device ids, and an empty name would make every row look the same.
+    let named = a.st.shared_devices(VAULT_FOLDER_ID).unwrap();
+    let b_row = named.iter().find(|d| d.id == b.id).expect("B should be listed on A");
+    assert!(!b_row.name.is_empty(), "A should have learned B's name, got {:?}", b_row.name);
+
+    // --- Removed, the way the app does it: dropped, then the list applied. ---
+    a.st.unshare_folder_with(VAULT_FOLDER_ID, &b.id).unwrap();
+    let revoked = [b.id.clone()];
+    a.st.apply_revocations(VAULT_FOLDER_ID, &revoked).unwrap();
+    assert!(!listed(&a, &b.id), "B should be gone from A's list");
+    wait_for("the two to stop talking", || !connected(&a, &b.id));
+
+    // --- Connected again. The parked entry has to come back to life. ---
+    a.st.share_folder_with(VAULT_FOLDER_ID, &b.id).unwrap();
+    wait_for("A and B to connect again", || connected(&a, &b.id) && connected(&b, &a.id));
+    assert!(listed(&a, &b.id), "B should be back in A's list");
 }

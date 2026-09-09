@@ -23,6 +23,12 @@ internal data class Entry(
     val id: String,
     val title: String,
     val preview: String,
+    /**
+     * What the list widget puts under a title: the body minus the part the title is already
+     * showing. Separate from [preview], which is the whole note and is what the sticky
+     * widget writes on its paper — a one-line memo would otherwise leave it blank.
+     */
+    val line: String,
     val color: String,
     /**
      * The folder this sits in — a folder's parent, a memo's folder — and `""` for the top
@@ -163,6 +169,10 @@ internal object WidgetStore {
                     id = o.optString("id"),
                     title = o.optString("title"),
                     preview = o.optString("preview"),
+                    // Absent in a snapshot written before the two readings were
+                    // split; the preview is what such a widget drew under a title,
+                    // so that is what it keeps drawing.
+                    line = if (o.has("line")) o.optString("line") else o.optString("preview"),
                     color = o.optString("color", "yellow"),
                     // Absent in a snapshot written before folders could be picked; the top
                     // level is the reading that keeps such a widget showing what it showed.

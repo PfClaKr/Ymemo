@@ -74,7 +74,7 @@ fn generate_i18n() {
             escape_slint(default)
         ));
         rust.push_str(&format!(
-            "    g.set_{ident}(ymemo_i18n::t!(\"{key}\").into());\n"
+            "    g.set_{ident}(crate::hangul::for_slint(&ymemo_i18n::t!(\"{key}\")).into());\n"
         ));
     }
     slint.push_str("}\n");

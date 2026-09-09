@@ -30,6 +30,13 @@ export component PairingPanel inherits VerticalLayout {
     callback add-peer(string);
     callback lan-join(string);
     callback unshare(string);              // device id to unshare
+    // Whether removing a device is offered at all.
+    //
+    // False on the lock screen, where there is no open vault to record the decision in — and
+    // a removal that is not recorded does not hold: the other devices still have the peer and
+    // introduce it straight back. Better to not offer it than to offer something that quietly
+    // undoes itself. The list window, which only exists once the vault is open, offers it.
+    in property <bool> can-unshare: true;
 
     // Active tab: false is same Wi-Fi (6 digits), true is another network (QR, device id).
     private property <bool> remote: false;
@@ -71,9 +78,20 @@ export component PairingPanel inherits VerticalLayout {
                 opacity: 0.8;
                 wrap: word-wrap;
             }
+            // Why there is no code, when there is none. The listener binds one fixed UDP
+            // port — it has to, since that is what the other device broadcasts to — so
+            // anything else holding it leaves this device unable to *offer* a code. Joining
+            // with the other device's code still works, and saying so keeps the half that
+            // works usable instead of showing a dead row of dashes.
+            if root.available && root.lan-code == "": Text {
+                text: Strings.ui_pair_lan_no_code;
+                font-size: 10px;
+                color: #d9b48a;
+                wrap: word-wrap;
+            }
             // This device's code, large.
-            Text {
-                text: root.lan-code == "" ? "------" : root.lan-code;
+            if root.lan-code != "": Text {
+                text: root.lan-code;
                 font-size: 26px;
                 font-weight: 800;
                 letter-spacing: 3px;
@@ -213,7 +231,7 @@ export component PairingPanel inherits VerticalLayout {
                 horizontal-stretch: 1;
                 vertical-alignment: center;
             }
-            Button {
+            if root.can-unshare: Button {
                 text: Strings.ui_pair_unshare;
                 clicked => { root.unshare(dev.id); }
             }

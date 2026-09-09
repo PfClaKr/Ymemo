@@ -20,6 +20,7 @@ use ymemo_core::{
     vault::Vault,
     Attachment, Group, Memo, Store,
 };
+use ymemo_core::diag;
 use ymemo_i18n::t;
 
 /// The open vault; one per app process.
@@ -54,6 +55,9 @@ pub struct FfiMemo {
     pub color: String,
     pub opacity: i64,
     pub group_id: String,
+    /// Whether the memo has a photo on it. A memo with nothing written but a picture would
+    /// otherwise be one "New memo" row beside another.
+    pub has_photo: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -67,6 +71,9 @@ impl From<Memo> for FfiMemo {
             color: m.color,
             opacity: m.opacity,
             group_id: m.group_id,
+            // Filled in by the list, which asks once for the whole list rather than once a
+            // row; on its own a memo does not know.
+            has_photo: false,
             created_at: m.created_at,
             updated_at: m.updated_at,
         }
@@ -91,11 +98,15 @@ pub struct FfiAttachment {
     /// Top-left corner on the note, in per-mille of the note area (0..=1000 across and down).
     pub x_permille: i64,
     pub y_permille: i64,
+    /// Whether the photo takes a band of its own under the writing instead of lying on top
+    /// of it. False is what every photo was before there was a choice.
+    pub flow: bool,
     pub created_at: i64,
 }
 
 impl From<Attachment> for FfiAttachment {
     fn from(a: Attachment) -> Self {
+        let flow = a.mode() == ymemo_core::PhotoMode::Flow;
         Self {
             id: a.id,
             memo_id: a.memo_id,
@@ -107,6 +118,7 @@ impl From<Attachment> for FfiAttachment {
             width_em_milli: a.width_em_milli,
             x_permille: a.x_permille,
             y_permille: a.y_permille,
+            flow,
             created_at: a.created_at,
         }
     }
@@ -244,6 +256,9 @@ pub struct FfiStrings {
     pub empty_hint: String,
     pub master_password: String,
     pub my_code: String,
+    pub peer_code: String,
+    pub peer_code_hint: String,
+    pub add_device: String,
     pub new_memo: String,
     pub no_devices: String,
     pub opening: String,
@@ -252,6 +267,12 @@ pub struct FfiStrings {
     pub photo_missing: String,
     pub photo_remove: String,
     pub photo_size: String,
+    /// The two ways a photo can sit on a note; each label says what pressing it does.
+    pub photo_under_text: String,
+    pub photo_over_text: String,
+    pub photo_save: String,
+    pub photo_saved: String,
+    pub photo_save_failed: String,
     pub save: String,
     pub scan_hint: String,
     pub scan_qr: String,
@@ -401,6 +422,9 @@ pub fn mobile_strings() -> FfiStrings {
         empty_hint: t!("mobile.empty_hint"),
         master_password: t!("mobile.master_password"),
         my_code: t!("mobile.my_code"),
+        peer_code: t!("mobile.peer_code"),
+        peer_code_hint: t!("mobile.peer_code_hint"),
+        add_device: t!("mobile.add_device"),
         new_memo: t!("mobile.new_memo"),
         no_devices: t!("mobile.no_devices"),
         opening: t!("mobile.opening"),
@@ -409,6 +433,11 @@ pub fn mobile_strings() -> FfiStrings {
         photo_missing: t!("mobile.photo_missing"),
         photo_remove: t!("mobile.photo_remove"),
         photo_size: t!("mobile.photo_size"),
+        photo_under_text: t!("mobile.photo_under_text"),
+        photo_over_text: t!("mobile.photo_over_text"),
+        photo_save: t!("mobile.photo_save"),
+        photo_saved: t!("mobile.photo_saved"),
+        photo_save_failed: t!("mobile.photo_save_failed"),
         save: t!("mobile.save"),
         scan_hint: t!("mobile.scan_hint"),
         scan_qr: t!("mobile.scan_qr"),
@@ -581,7 +610,14 @@ pub fn vault_reset(vault_dir: String, cache_db_path: String) -> Result<()> {
 
 /// Memos, most recently updated first.
 pub fn memo_list() -> Result<Vec<FfiMemo>> {
-    with_vault(|v| Ok(v.store().list()?.into_iter().map(FfiMemo::from).collect()))
+    with_vault(|v| {
+        let with_photo = v.store().memos_with_attachments()?;
+        Ok(v.store()
+            .list()?
+            .into_iter()
+            .map(|m| FfiMemo { has_photo: with_photo.contains(&m.id), ..FfiMemo::from(m) })
+            .collect())
+    })
 }
 
 /// Creates (`id` = None) or updates (`id` = Some) a memo and returns its id.
@@ -602,6 +638,34 @@ pub fn memo_upsert(id: Option<String>, title: String, body: String) -> Result<St
         };
         v.upsert(&memo)?;
         Ok(memo.id)
+    })
+}
+
+/// Throws away a memo that was opened and never written on, and says whether it did.
+///
+/// The composer creates the memo before the screen appears, so backing out of it without
+/// typing used to leave a "New memo" row with nothing in it — one for every time anyone
+/// tapped the button and changed their mind. The desktop discards the same way when a blank
+/// sticky is closed; this is that rule, over the wire.
+///
+/// Deliberately **not** [`memo_delete`]: this leaves no undo behind it. A note that never
+/// existed is not something to offer back, and putting it in the undo slot would stand in
+/// front of a real delete the user might still want to take back.
+pub fn memo_discard_if_blank(id: String) -> Result<bool> {
+    with_vault(|v| {
+        let Some(memo) = v.store().get(&id)? else {
+            return Ok(false);
+        };
+        if !memo.title.is_empty() || !memo.body.is_empty() {
+            return Ok(false);
+        }
+        // A photo makes it a note, and a cache that cannot be read is not grounds for
+        // deleting anything.
+        if !v.store().attachments_of(&id)?.is_empty() {
+            return Ok(false);
+        }
+        v.delete(&id)?;
+        Ok(true)
     })
 }
 
@@ -823,6 +887,19 @@ pub fn attachment_set_layout(
     with_vault(|v| v.set_attachment_layout(&id, x_permille, y_permille, width_em_milli))
 }
 
+/// Moves a photo between lying on the writing and having a band of its own under it.
+///
+/// A fact about the memo, not about this device: a photo put in the flow here is out of the
+/// way of the writing on the desktop sticky too.
+pub fn attachment_set_flow(id: String, flow: bool) -> Result<()> {
+    let mode = if flow {
+        ymemo_core::PhotoMode::Flow
+    } else {
+        ymemo_core::PhotoMode::Float
+    };
+    with_vault(|v| v.set_attachment_mode(&id, mode))
+}
+
 /// Detaches a photo; the blob file stays (no GC).
 pub fn attachment_remove(id: String) -> Result<()> {
     with_vault(|v| v.detach(&id))
@@ -859,6 +936,7 @@ pub fn memos_in_group(group_id: String) -> Result<Vec<FfiMemo>> {
     with_vault(|v| {
         let known: std::collections::HashSet<String> =
             v.store().list_groups()?.into_iter().map(|g| g.id).collect();
+        let with_photo = v.store().memos_with_attachments()?;
         let at_root = group_id.is_empty();
         Ok(v.store()
             .list()?
@@ -870,7 +948,7 @@ pub fn memos_in_group(group_id: String) -> Result<Vec<FfiMemo>> {
                     at_root // no group, or one that is gone
                 }
             })
-            .map(FfiMemo::from)
+            .map(|m| FfiMemo { has_photo: with_photo.contains(&m.id), ..FfiMemo::from(m) })
             .collect())
     })
 }
@@ -957,7 +1035,44 @@ pub fn group_delete(id: String) -> Result<()> {
 /// Merges the other devices' logs into the local state; call it after the transport has
 /// delivered new logs.
 pub fn sync_rebuild() -> Result<()> {
-    with_vault(|v| v.rebuild())
+    with_vault(|v| v.rebuild())?;
+    apply_revocations();
+    Ok(())
+}
+
+/// Tells the daemon about the removals the vault carries; see the desktop's twin in
+/// `ymemo-desktop/src/sync.rs`.
+///
+/// Best effort and silent: it runs after every merge, the daemon may be down, and a failure
+/// here is not something the person reading their memos can act on.
+fn apply_revocations() {
+    let Ok(sync_guard) = sync_lock() else { return };
+    let Some(st) = sync_guard.as_ref() else { return };
+    let Ok(vault_guard) = VAULT.lock() else { return };
+    let Some(v) = vault_guard.as_ref() else { return };
+
+    match v.is_revoked_here() {
+        // Removed from the vault by another device: stop carrying the folder. What is already
+        // on this phone stays — a removal is not a remote wipe.
+        Ok(true) => {
+            if let Err(e) = st.remove_folder(VAULT_FOLDER_ID) {
+                diag!("could not stop syncing after being removed from the vault: {e}");
+            }
+            return;
+        }
+        Ok(false) => {}
+        Err(e) => diag!("could not tell whether this device was removed: {e}"),
+    }
+    let ids: Vec<String> = match v.revoked_devices() {
+        Ok(list) => list.into_iter().map(|d| d.device_id).collect(),
+        Err(e) => {
+            diag!("could not read the removed devices: {e}");
+            return;
+        }
+    };
+    if let Err(e) = st.apply_revocations(VAULT_FOLDER_ID, &ids) {
+        diag!("could not apply the removed devices: {e}");
+    }
 }
 
 // ===========================================================================
@@ -1021,9 +1136,23 @@ pub fn sync_start(binary_path: String, home_dir: String, vault_dir: String) -> R
     std::fs::create_dir_all(&vault_dir)?;
     let st = Syncthing::spawn(Path::new(&binary_path), Path::new(&home_dir))?;
     st.ensure_folder(VAULT_FOLDER_ID, "Ymemo Vault", Path::new(&vault_dir))?;
+    // For the peers paired before the app asked for introductions; see `ensure_introducers`.
+    st.ensure_introducers(VAULT_FOLDER_ID)?;
     let id = st.device_id()?;
     *guard = Some(st);
     Ok(PairingCode::new(&id).encode())
+}
+
+/// Tells the daemon what to call this device, which is the name its peers show.
+///
+/// Android has no useful hostname — Syncthing falls back to `localhost` — so Dart passes the
+/// name the platform knows. Doing nothing when the daemon is down is correct; Dart calls this
+/// again once it is up. See `Syncthing::set_my_name` for why the name has to be in place
+/// before a peer first connects.
+pub fn sync_set_device_name(name: String) -> Result<()> {
+    let guard = sync_lock()?;
+    let Some(st) = guard.as_ref() else { return Ok(()) };
+    st.set_my_name(&name)
 }
 
 /// Re-registers the vault directory with the running daemon.
@@ -1035,7 +1164,8 @@ pub fn sync_start(binary_path: String, home_dir: String, vault_dir: String) -> R
 pub fn sync_ensure_folder(vault_dir: String) -> Result<()> {
     let guard = sync_lock()?;
     let Some(st) = guard.as_ref() else { return Ok(()) };
-    st.ensure_folder(VAULT_FOLDER_ID, "Ymemo Vault", Path::new(&vault_dir))
+    st.ensure_folder(VAULT_FOLDER_ID, "Ymemo Vault", Path::new(&vault_dir))?;
+    st.ensure_introducers(VAULT_FOLDER_ID)
 }
 
 /// Applies the sync timings to the vault folder of the running daemon.
@@ -1098,6 +1228,9 @@ pub fn sync_pairing_code() -> Result<String> {
 pub fn sync_pair_with(code: String) -> Result<String> {
     let peer = PairingCode::decode(&code)?.syncthing_device_id;
     with_sync(|st| st.share_folder_with(VAULT_FOLDER_ID, &peer))?;
+    // Deliberately pairing with a device again lifts an earlier removal, or the other devices
+    // would go on dropping it.
+    let _ = with_vault(|v| v.unrevoke_device(&peer));
     Ok(peer)
 }
 
@@ -1112,10 +1245,19 @@ pub fn sync_devices() -> Result<Vec<FfiSharedDevice>> {
     })
 }
 
-/// Drops a peer. Only this side stops syncing; the other device keeps its own entry until it
-/// unpairs too.
+/// Removes a peer from the vault, on every device that shares it.
+///
+/// The decision goes into the vault first so it travels: every peer is an introducer, so a
+/// peer dropped here alone is handed straight back by the devices that still have it. The
+/// device being removed keeps the memos it already has — this is not a remote wipe, and not
+/// a lock either; see `RevokedDevice`.
 pub fn sync_unpair(device_id: String) -> Result<()> {
-    with_sync(|st| st.unshare_folder_with(VAULT_FOLDER_ID, &device_id))
+    with_vault(|v| v.revoke_device(&device_id))?;
+    with_sync(|st| st.unshare_folder_with(VAULT_FOLDER_ID, &device_id))?;
+    // Straight away, rather than on the next merge: the peer's entry is parked so a
+    // re-introduction in the meantime lands on nothing live.
+    apply_revocations();
+    Ok(())
 }
 
 // ===========================================================================
@@ -1179,7 +1321,11 @@ pub fn sync_approve_device(device_id: String) -> Result<()> {
     if let Some(set) = rejected_lock()?.as_mut() {
         set.remove(&device_id);
     }
-    with_sync(|st| st.share_folder_with(VAULT_FOLDER_ID, &device_id))
+    with_sync(|st| st.share_folder_with(VAULT_FOLDER_ID, &device_id))?;
+    // Allowing a device that had been removed lifts the removal, or the next merge would
+    // apply the list and park it again.
+    let _ = with_vault(|v| v.unrevoke_device(&device_id));
+    Ok(())
 }
 
 /// Turns a device away and stops asking about it for the rest of this run.

@@ -50,12 +50,25 @@ pub(crate) struct Ctx {
     /// otherwise quietly put the unfiltered list back while the user was still reading the
     /// matches.
     pub(crate) query: Rc<RefCell<String>>,
+    /// The last delete, while the bar in the list is still offering to put it back, and the
+    /// timer that withdraws the offer.
+    ///
+    /// Shared rather than private to `main` because locking has to empty it: the slot holds
+    /// the removed memo's title and body, and a locked vault must leave no memo text behind.
+    pub(crate) undo: Rc<RefCell<Option<ymemo_core::vault::Deleted>>>,
+    pub(crate) undo_timer: Rc<slint::Timer>,
     /// App data directory, holding settings.json and session.json.
     pub(crate) dir: Rc<PathBuf>,
     /// Device-local preferences (language, lock policy, new-memo defaults, ...).
     pub(crate) settings: Rc<RefCell<Settings>>,
     /// When the user last interacted; the idle auto-lock watches this.
     pub(crate) last_activity: Rc<Cell<Instant>>,
+    /// The sync daemon, when there is one. `None` on a build or a machine without it, where
+    /// the app runs local-only.
+    ///
+    /// Here rather than only in `main` because the merge timer needs it: a merge can bring in
+    /// a device removal made on another device, and applying that means telling the daemon.
+    pub(crate) syncthing: Rc<RefCell<Option<ymemo_core::sync::Syncthing>>>,
     /// Whether a tray icon actually registered.
     ///
     /// Not a detail: taking the stickies out of the taskbar is only defensible *because* the

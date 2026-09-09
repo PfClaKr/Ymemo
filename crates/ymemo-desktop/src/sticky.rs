@@ -61,15 +61,55 @@ pub(crate) fn sticky_text(memo: &Memo) -> String {
     }
 }
 
-/// First non-empty line of the body, used as the title in the list and title bar.
+/// First line of the body worth naming a memo by, used as the title in the list and title
+/// bar.
+///
+/// Fence lines are skipped: a memo that opens with ` ```rust ` is about what is inside it,
+/// and calling it "```rust" in the list says nothing at all.
+///
+/// **Keep in step with `firstLine` in the phone's `memo_title.dart`.**
 pub(crate) fn derive_title(text: &str) -> String {
-    text.lines()
-        .find(|l| !l.trim().is_empty())
-        .unwrap_or("")
-        .trim()
-        .chars()
-        .take(40)
-        .collect()
+    title_line(text).chars().take(40).collect()
+}
+
+/// The line a title is taken from, as it should read rather than as it was typed.
+///
+/// The only difference between the two is a heading's hashes, and only **inside a markdown
+/// region**: there `# 회의록` is drawn as a heading saying 회의록, so that is what the memo is
+/// called. Outside one — and inside a fence that named a language — a hash is a character
+/// like any other and stays, because that is what the read view draws.
+fn title_line(text: &str) -> &str {
+    // `Some(true)` inside a bare fence, `Some(false)` inside one that named a language.
+    // The same walk `markdown::blocks` does, and it has to stay the same walk.
+    let mut fence: Option<bool> = None;
+    for line in text.lines() {
+        if let Some(tag) = line.trim_start().strip_prefix("```") {
+            fence = if fence.is_some() { None } else { Some(tag.trim().is_empty()) };
+            continue;
+        }
+        let line = line.trim_start();
+        // Left-trimmed first and only then stripped: `# ` has to still have its space when
+        // the hashes are counted, or it is not a heading and the memo is called "#".
+        let named = if fence == Some(true) { strip_heading(line) } else { line }.trim();
+        // A line with nothing left to it — a heading with no words — names nothing, so the
+        // search goes on to the line below rather than leaving the memo blank.
+        if !named.is_empty() {
+            return named;
+        }
+    }
+    ""
+}
+
+/// `# Title` -> `Title`. Anything that is not a heading comes back whole.
+///
+/// The same rule `markdown::heading_level` reads one by, so a line drawn as a heading is
+/// exactly a line named after its words.
+fn strip_heading(line: &str) -> &str {
+    let hashes = line.bytes().take_while(|b| *b == b'#').count();
+    if hashes == 0 || hashes > 6 || line.as_bytes().get(hashes) != Some(&b' ') {
+        return line;
+    }
+    line[hashes + 1..].trim_start()
 }
 
 /// The title a memo should carry once its body becomes `text`.
@@ -92,37 +132,58 @@ pub(crate) fn title_for(memo: &Memo, text: &str) -> String {
 }
 
 /// Saves an edited body to the vault, deriving the title from its first line.
-pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) {
+///
+/// Returns whether the vault now holds `text`. **False means the writing is only in the
+/// window**, so the caller must leave the sticky marked dirty: the merge timer skips a dirty
+/// note, and that is what stops the next tick from painting the last stored version over
+/// what is still being typed.
+pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) -> bool {
     let mut guard = ctx.vault.borrow_mut();
-    let Some(v) = guard.as_mut() else { return };
+    let Some(v) = guard.as_mut() else { return false };
     let mut memo = match v.store().get(id) {
         Ok(Some(m)) => m,
-        _ => return, // drop leftover edits of a deleted memo
+        // Deleted: the edits have nowhere to go and nothing is waiting to be written.
+        _ => return true,
     };
     let title = title_for(&memo, text);
     if memo.body == text && memo.title == title {
-        return;
+        return true;
     }
     memo.title = title;
     memo.body = text.to_string();
     memo.updated_at = now_millis();
     if let Err(e) = v.upsert(&memo) {
         diag!("could not save the memo: {e}");
-        return;
+        crate::list::report_write_failure(&e);
+        // On the note as well: this is the one place where what is lost is still on screen,
+        // and the list saying so is no use behind a closed window.
+        if let Some(entry) = ctx.stickies.borrow().get(id) {
+            entry
+                .window
+                .set_notice(SharedString::from(t!("msg.write_failed", error = e)));
+        }
+        return false;
     }
     refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
     // Reflect the new title in the title bar.
     if let Some(entry) = ctx.stickies.borrow().get(id) {
-        entry.window.set_memo_title(SharedString::from(memo.title));
+        set_title(&entry.window, &memo.title);
+        // The save went through, so whatever the last one said no longer holds.
+        entry.window.set_notice(SharedString::new());
     }
+    true
 }
 
-/// Writes out every sticky's pending edit and stops its debounce timer. Returns the ids of
-/// the open stickies, in no particular order.
+/// Writes out every sticky's pending edit, stops its debounce timer and drops the notes that
+/// were never written on. Returns the ids of the open stickies, in no particular order.
 ///
 /// Called wherever the windows are about to stop existing — locking and quitting — because
 /// the autosave is debounced and the last keystrokes are otherwise still only in the widget.
 /// Two passes, since `save_memo` borrows the sticky map itself.
+///
+/// The blank ones go the same way they go when a note is closed by hand: a sticky opened and
+/// left empty is not a note, and locking used to leave "(empty memo)" in the list for good —
+/// the very row [`discard_if_blank`] exists to prevent.
 pub(crate) fn flush_dirty(ctx: &Ctx) -> Vec<String> {
     let ids: Vec<String> = ctx.stickies.borrow().keys().cloned().collect();
     for id in &ids {
@@ -144,12 +205,18 @@ pub(crate) fn flush_dirty(ctx: &Ctx) -> Vec<String> {
             save_memo(ctx, id, &text);
         }
     }
+    // After the saves, never before: a note whose only writing is still in the widget would
+    // otherwise look blank and be thrown away with it.
+    for id in &ids {
+        discard_if_blank(ctx, id);
+    }
     ids
 }
 
 /// Creates a memo and opens its sticky; shared by the + button in both windows.
 pub(crate) fn new_memo(ctx: &Ctx) {
     touch(ctx);
+    crate::list::clear_search(ctx);
     let mut memo = Memo::new("", "");
     {
         // Color and opacity defaults come from the settings.
@@ -162,6 +229,7 @@ pub(crate) fn new_memo(ctx: &Ctx) {
         let Some(v) = guard.as_mut() else { return };
         if let Err(e) = v.upsert(&memo) {
             diag!("could not create the memo: {e}");
+            crate::list::report_write_failure(&e);
             return;
         }
         refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
@@ -244,20 +312,29 @@ pub(crate) fn close_sticky(stickies: &Stickies, id: &str) {
     });
 }
 
-/// Builds the Slint model of a memo's photos.
+/// The photos of one memo, split by how they sit: the ones lying on the writing first, then
+/// the ones with a band of their own under it. Two models because the two are drawn in
+/// different places, and Slint's `for` cannot skip a row — see `sticky.slint`.
 ///
 /// Photos are ciphertext inside the vault, so they are decrypted and decoded **in memory** —
 /// no plaintext ever reaches a temp file. A photo that has not synced yet, or that cannot be
 /// decoded, is marked `missing` so the UI can say so; an empty gap would read as data loss.
-pub(crate) fn photo_rows(v: &Vault, memo_id: &str) -> Vec<PhotoRow> {
+pub(crate) fn split_photo_rows(v: &Vault, memo_id: &str) -> (Vec<PhotoRow>, Vec<PhotoRow>) {
     let list = match v.store().attachments_of(memo_id) {
         Ok(l) => l,
         Err(e) => {
             diag!("could not read the attachments: {e}");
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
     };
 
+    let (flow, float): (Vec<_>, Vec<_>) = list
+        .into_iter()
+        .partition(|a| a.mode() == ymemo_core::PhotoMode::Flow);
+    (rows_of(v, float), rows_of(v, flow))
+}
+
+fn rows_of(v: &Vault, list: Vec<ymemo_core::Attachment>) -> Vec<PhotoRow> {
     list.into_iter()
         .map(|a| {
             let (w, h) = a.display_size(BODY_FONT_PX);
@@ -303,18 +380,45 @@ fn decode_image(bytes: &[u8]) -> Option<slint::Image> {
     Some(slint::Image::from_rgba8(buffer))
 }
 
-/// Refills an open sticky's photo list after an add, a resize or a remote merge.
+/// Refills an open sticky's photo lists after an add, a resize, a mode change or a merge.
 pub(crate) fn refresh_photos(ctx: &Ctx, memo_id: &str) {
     let rows = {
         let guard = ctx.vault.borrow();
         let Some(v) = guard.as_ref() else { return };
-        photo_rows(v, memo_id)
+        split_photo_rows(v, memo_id)
     };
     if let Some(entry) = ctx.stickies.borrow().get(memo_id) {
-        entry
-            .window
-            .set_photos(slint::ModelRc::new(slint::VecModel::from(rows)));
+        set_photo_models(&entry.window, rows);
     }
+}
+
+/// Sets a memo's title on its sticky, in both the places it appears.
+///
+/// Two properties for one string: `memo-title` is drawn by Slint and goes through
+/// [`crate::hangul::for_slint`], `window-title` is the desktop's own title bar and must carry
+/// the name as it is really spelled. Behind one function because setting one and not the
+/// other is exactly the bug this replaces — two of the four callers were passing the title
+/// straight through, so the same memo's title bar read one way after a save and another after
+/// a merge.
+pub(crate) fn set_title(window: &StickyWindow, title: &str) {
+    window.set_memo_title(SharedString::from(crate::hangul::for_slint(title)));
+    window.set_window_title(SharedString::from(title));
+}
+
+/// Sets a sticky's body and the blocks its read view draws, which must never disagree: the
+/// read view is the same words, and showing yesterday's next to today's would be worse than
+/// showing none.
+pub(crate) fn set_body_text(window: &StickyWindow, text: &str) {
+    window.set_memo_text(SharedString::from(text));
+    window.set_blocks(slint::ModelRc::new(slint::VecModel::from(
+        crate::markdown::blocks(text),
+    )));
+}
+
+/// Hands both photo models to a sticky window; the two always change together.
+pub(crate) fn set_photo_models(window: &StickyWindow, (float, flow): (Vec<PhotoRow>, Vec<PhotoRow>)) {
+    window.set_photos(slint::ModelRc::new(slint::VecModel::from(float)));
+    window.set_flow_photos(slint::ModelRc::new(slint::VecModel::from(flow)));
 }
 
 /// A photo chosen by the worker thread. Only `Send` values, since it crosses to the event loop.
@@ -377,6 +481,49 @@ fn pick_photo(title: &str) -> Option<PhotoPick> {
     Some(PhotoPick { bytes, name, mime, width, height })
 }
 
+/// Writes a photo out to a file the user picks, on a worker thread.
+///
+/// The bytes are read here, on the event loop, and only they cross to the worker: the vault
+/// is an `Rc` and cannot. The dialog itself blocks, for the same reason `spawn_photo_picker`
+/// exists — see its comment.
+///
+/// What is written is the file as it was attached, not the size it happens to be drawn at.
+fn save_photo(ctx: &Ctx, photo_id: &str, title: String, saving: Arc<AtomicBool>) {
+    if saving.swap(true, Ordering::SeqCst) {
+        return; // a dialog is already open
+    }
+    let picked = {
+        let guard = ctx.vault.borrow();
+        guard.as_ref().and_then(|v| match v.store().get_attachment(photo_id) {
+            Ok(Some(a)) => match v.attachment_bytes(&a.hash) {
+                Ok(bytes) => Some((a.name, bytes)),
+                // Not on this device yet: there is nothing to write.
+                Err(e) => {
+                    diag!("could not read the photo to save it: {e}");
+                    None
+                }
+            },
+            _ => None,
+        })
+    };
+    let Some((name, bytes)) = picked else {
+        saving.store(false, Ordering::SeqCst);
+        return;
+    };
+    std::thread::spawn(move || {
+        let chosen = rfd::FileDialog::new()
+            .set_title(&title)
+            .set_file_name(if name.is_empty() { "photo.png" } else { &name })
+            .save_file();
+        if let Some(path) = chosen {
+            if let Err(e) = std::fs::write(&path, &bytes) {
+                diag!("could not save the photo: {e}");
+            }
+        }
+        let _ = slint::invoke_from_event_loop(move || saving.store(false, Ordering::SeqCst));
+    });
+}
+
 /// (Event loop) Attaches the chosen photo to the vault and redraws the sticky.
 ///
 /// The idle auto-lock may have fired while the dialog was open; without a vault the photo is
@@ -406,8 +553,8 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     let window = StickyWindow::new()?;
     // The globals are per instance, so fill this one with the current strings.
     apply_strings(&window.global::<Strings>());
-    window.set_memo_title(SharedString::from(memo.title.clone()));
-    window.set_memo_text(SharedString::from(sticky_text(memo)));
+    set_title(&window, &memo.title);
+    set_body_text(&window, &sticky_text(memo));
     window.set_sticky_color(SharedString::from(memo.color.clone()));
     window.set_sticky_opacity(memo.opacity as f32);
     window.set_pinned(ctx.settings.borrow().memo_pinned(&memo.id));
@@ -415,7 +562,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     {
         let guard = ctx.vault.borrow();
         if let Some(v) = guard.as_ref() {
-            window.set_photos(slint::ModelRc::new(slint::VecModel::from(photo_rows(v, &memo.id))));
+            set_photo_models(&window, split_photo_rows(v, &memo.id));
         }
     }
 
@@ -493,6 +640,39 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
+    // Write a photo out to a file the user picks.
+    {
+        let ctx = ctx.clone();
+        let saving = Arc::new(AtomicBool::new(false));
+        window.on_save_photo(move |photo_id| {
+            touch(&ctx);
+            save_photo(&ctx, photo_id.as_str(), t!("ui.sticky_photo_save"), saving.clone());
+        });
+    }
+
+    // Move a photo between lying on the writing and having a band of its own under it.
+    {
+        let ctx = ctx.clone();
+        let id = memo.id.clone();
+        window.on_set_photo_flow(move |photo_id, flow| {
+            touch(&ctx);
+            {
+                let mut guard = ctx.vault.borrow_mut();
+                let Some(v) = guard.as_mut() else { return };
+                let mode = if flow {
+                    ymemo_core::PhotoMode::Flow
+                } else {
+                    ymemo_core::PhotoMode::Float
+                };
+                if let Err(e) = v.set_attachment_mode(photo_id.as_str(), mode) {
+                    diag!("could not change how the photo sits: {e}");
+                    crate::list::report_write_failure(&e);
+                }
+            }
+            refresh_photos(&ctx, &id);
+        });
+    }
+
     let dirty = Rc::new(Cell::new(false));
     let expanded_height = Rc::new(Cell::new(0.0f32));
 
@@ -502,8 +682,15 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         let id = memo.id.clone();
         let dirty = dirty.clone();
         let weak = window.as_weak();
-        window.on_edited(move |_| {
+        window.on_edited(move |text| {
             touch(&ctx);
+            // The read view is rebuilt as it is typed rather than when the caret leaves: it
+            // is cheap, and doing it on the way out would show the old words for a frame.
+            if let Some(w) = weak.upgrade() {
+                w.set_blocks(slint::ModelRc::new(slint::VecModel::from(
+                    crate::markdown::blocks(text.as_str()),
+                )));
+            }
             dirty.set(true);
             let ctx2 = ctx.clone();
             let id2 = id.clone();
@@ -512,8 +699,11 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
             if let Some(entry) = ctx.stickies.borrow().get(&id) {
                 entry.save_timer.start(TimerMode::SingleShot, SAVE_DEBOUNCE, move || {
                     if let Some(w) = weak2.upgrade() {
-                        save_memo(&ctx2, &id2, w.get_memo_text().as_str());
-                        dirty2.set(false);
+                        // Stays dirty when the write failed, so the note keeps what was
+                        // typed instead of being merged back to the last stored version.
+                        if save_memo(&ctx2, &id2, w.get_memo_text().as_str()) {
+                            dirty2.set(false);
+                        }
                     }
                 });
             }
@@ -531,8 +721,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
             if let Some(w) = weak.upgrade() {
                 // Where it was when it was closed, not where the last poll saw it.
                 remember_one(&ctx, &id, w.window());
-                if dirty.get() {
-                    save_memo(&ctx, &id, w.get_memo_text().as_str());
+                if dirty.get() && save_memo(&ctx, &id, w.get_memo_text().as_str()) {
                     dirty.set(false);
                 }
             }
@@ -1063,6 +1252,36 @@ mod tests {
         // And a memo that never had one gets one.
         memo.title = String::new();
         assert_eq!(title_for(&memo, "first\nsecond"), "first");
+    }
+
+    /// A memo that opens with a fence is named by what is inside it, not by the fence.
+    #[test]
+    fn a_fence_is_not_a_title() {
+        assert_eq!(derive_title("```rust\nfn hello() {}\n```"), "fn hello() {}");
+        assert_eq!(derive_title("```\n**bold**\n```"), "**bold**");
+        // A memo that is nothing but an empty block has no name to give.
+        assert_eq!(derive_title("```\n```"), "");
+    }
+
+    /// A heading names the memo by its words, and only where a heading is a heading.
+    #[test]
+    fn a_headings_hashes_are_not_part_of_the_name() {
+        assert_eq!(derive_title("```\n# 회의록\n본문\n```"), "회의록");
+        assert_eq!(derive_title("```\n### Deep\n```"), "Deep");
+        // Outside a markdown region a hash is a character, which is how it is drawn.
+        assert_eq!(derive_title("# tag\nbody"), "# tag");
+        // Inside a fence that named a language it is code, and code is shown as written.
+        assert_eq!(derive_title("```py\n# comment\n```"), "# comment");
+        // Past a closed code block the writing is plain again.
+        assert_eq!(derive_title("```c\n```\n# still plain"), "# still plain");
+        // Not a heading: no space, and too many hashes.
+        assert_eq!(derive_title("```\n#tag\n```"), "#tag");
+        assert_eq!(derive_title("```\n####### deep\n```"), "####### deep");
+        // A heading with no words names nothing, so the line below is asked instead.
+        assert_eq!(derive_title("```\n# \n본문\n```"), "본문");
+        assert_eq!(derive_title("```\n# \n```"), "");
+        // A bare `#` is not a heading, here or in the read view.
+        assert_eq!(derive_title("```\n#\n```"), "#");
     }
 
     /// A title typed on the phone survives an edit made here.

@@ -137,7 +137,49 @@ pub struct Attachment {
     /// size is about how much of the *text* it is worth, not how much of the window.
     pub x_permille: i64,
     pub y_permille: i64,
+    /// How the photo sits against the writing. See [`PhotoMode`].
+    ///
+    /// Stored as a string rather than an enum so a value written by a future version — a
+    /// mode this build has never heard of — reads back as [`PhotoMode::Float`] instead of
+    /// failing the whole memo. The same reason the colour is a palette *key*.
+    pub mode: String,
     pub created_at: i64,
+}
+
+/// How a photo sits against the writing on the note.
+///
+/// A memo written before this existed has an empty string here, which is [`Self::Float`] —
+/// the way every photo behaved when the only choice was where to drop it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhotoMode {
+    /// Lying on top of the note at the position it was dropped, text running underneath it.
+    Float,
+    /// In the flow: the photo takes a band of its own under the writing, and no line of text
+    /// is ever hidden behind it.
+    Flow,
+}
+
+/// The value stored for [`PhotoMode::Flow`]; `Float` stores the empty string, so a memo
+/// from before this existed needs no migration to keep looking the way it did.
+pub const PHOTO_MODE_FLOW: &str = "flow";
+
+impl PhotoMode {
+    /// Reads a stored value. Anything unrecognised is [`Self::Float`].
+    pub fn parse(stored: &str) -> Self {
+        if stored == PHOTO_MODE_FLOW {
+            Self::Flow
+        } else {
+            Self::Float
+        }
+    }
+
+    /// What to store for this mode.
+    pub fn as_stored(self) -> &'static str {
+        match self {
+            Self::Float => "",
+            Self::Flow => PHOTO_MODE_FLOW,
+        }
+    }
 }
 
 impl Attachment {
@@ -154,6 +196,7 @@ impl Attachment {
             width_em_milli: DEFAULT_WIDTH_EM_MILLI,
             x_permille: PLACE_ORIGIN_PERMILLE,
             y_permille: PLACE_ORIGIN_PERMILLE,
+            mode: String::new(),
             created_at: now_millis(),
         }
     }
@@ -174,6 +217,11 @@ impl Attachment {
 
     /// Display size in logical px for this platform, where `base_font_px` is the UI's body
     /// font size. Without an aspect ratio the result is square — a placeholder.
+    /// How this photo sits against the writing.
+    pub fn mode(&self) -> PhotoMode {
+        PhotoMode::parse(&self.mode)
+    }
+
     pub fn display_size(&self, base_font_px: f64) -> (f64, f64) {
         let w = clamp_width_em_milli(self.width_em_milli) as f64 / 1000.0 * base_font_px;
         let ratio = if self.width_px > 0 && self.height_px > 0 {
@@ -200,6 +248,27 @@ pub fn cascade_permille(n: usize) -> (i64, i64) {
     let step = (n as i64) % PLACE_CASCADE_STEPS;
     let off = PLACE_ORIGIN_PERMILLE + step * PLACE_CASCADE_PERMILLE;
     (clamp_permille(off), clamp_permille(off))
+}
+
+/// A device the user has removed from the vault.
+///
+/// Lives in the **synced document**, not in this device's settings, because a removal that
+/// only one device knows about does not hold: the others go on sharing the vault with the
+/// device and introduce it straight back (see `Syncthing::upsert_peer`).
+///
+/// **Not a lock.** A removed device still holds the data key and every memo it already
+/// received, and nothing stops it writing to its own log — including to take itself off this
+/// list. What this carries is the user's decision, to every device that is willing to honour
+/// it. Shutting a hostile device out would mean a new data key and re-wrapping every log and
+/// blob, which this design deliberately does not do.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RevokedDevice {
+    /// Syncthing device id.
+    pub device_id: String,
+    /// When it was removed, unix epoch millis.
+    pub at: i64,
+    /// The device that removed it, so a screen can say where the decision came from.
+    pub by: String,
 }
 
 /// A folder of memos; `parent_id` nests them.
@@ -299,9 +368,19 @@ impl Store {
                 width_em_milli INTEGER NOT NULL DEFAULT 20000,
                 x_permille     INTEGER NOT NULL DEFAULT 40,
                 y_permille     INTEGER NOT NULL DEFAULT 40,
+                mode           TEXT NOT NULL DEFAULT '',
                 created_at     INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS attachments_memo ON attachments(memo_id);
+            -- Devices the user has removed from the vault, as the **synced document** says.
+            -- Unlike `meta` below this is not device-local: it is materialized from the logs
+            -- like memos are, which is the whole point — a removal made on one device has to
+            -- reach the others, or they introduce the device straight back.
+            CREATE TABLE IF NOT EXISTS revoked (
+                device_id TEXT PRIMARY KEY,
+                at        INTEGER NOT NULL,
+                by        TEXT NOT NULL DEFAULT ''
+            );
             -- Device-local metadata (device_id, ...). Never synced.
             CREATE TABLE IF NOT EXISTS meta (
                 key   TEXT PRIMARY KEY,
@@ -325,6 +404,11 @@ impl Store {
                 "attachments",
                 "y_permille",
                 "ALTER TABLE attachments ADD COLUMN y_permille INTEGER NOT NULL DEFAULT 40",
+            ),
+            (
+                "attachments",
+                "mode",
+                "ALTER TABLE attachments ADD COLUMN mode TEXT NOT NULL DEFAULT ''",
             ),
         ] {
             let exists = self
@@ -371,6 +455,7 @@ impl Store {
         self.conn.execute("DELETE FROM memos", [])?;
         self.conn.execute("DELETE FROM groups", [])?;
         self.conn.execute("DELETE FROM attachments", [])?;
+        self.conn.execute("DELETE FROM revoked", [])?;
         Ok(())
     }
 
@@ -379,12 +464,12 @@ impl Store {
         self.conn.execute(
             "INSERT INTO attachments
                  (id, memo_id, hash, name, mime, width_px, height_px, width_em_milli,
-                  x_permille, y_permille, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                  x_permille, y_permille, mode, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT(id) DO UPDATE SET
                  memo_id = ?2, hash = ?3, name = ?4, mime = ?5,
                  width_px = ?6, height_px = ?7, width_em_milli = ?8,
-                 x_permille = ?9, y_permille = ?10",
+                 x_permille = ?9, y_permille = ?10, mode = ?11",
             params![
                 a.id,
                 a.memo_id,
@@ -396,17 +481,31 @@ impl Store {
                 clamp_width_em_milli(a.width_em_milli),
                 clamp_permille(a.x_permille),
                 clamp_permille(a.y_permille),
+                // Normalised, so an unknown mode from a newer version is stored back as the
+                // float it is being drawn as, rather than kept alive in this device's cache.
+                a.mode().as_stored(),
                 a.created_at
             ],
         )?;
         Ok(())
     }
 
+    /// The ids of every memo that has at least one photo on it.
+    ///
+    /// One query for the whole list rather than one per row: a list is drawn on every merge,
+    /// and a memo with nothing written on it but a picture has to say so somehow — otherwise
+    /// it is a row called "(untitled)" next to another row called "(untitled)".
+    pub fn memos_with_attachments(&self) -> Result<std::collections::HashSet<String>> {
+        let mut stmt = self.conn.prepare("SELECT DISTINCT memo_id FROM attachments")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<std::collections::HashSet<_>>>()?)
+    }
+
     /// Attachments of one memo, in the order they were added.
     pub fn attachments_of(&self, memo_id: &str) -> Result<Vec<Attachment>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, memo_id, hash, name, mime, width_px, height_px, width_em_milli,
-                    x_permille, y_permille, created_at
+                    x_permille, y_permille, mode, created_at
              FROM attachments WHERE memo_id = ?1 ORDER BY created_at",
         )?;
         let rows = stmt.query_map([memo_id], row_to_attachment)?;
@@ -417,7 +516,7 @@ impl Store {
     pub fn get_attachment(&self, id: &str) -> Result<Option<Attachment>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, memo_id, hash, name, mime, width_px, height_px, width_em_milli,
-                    x_permille, y_permille, created_at
+                    x_permille, y_permille, mode, created_at
              FROM attachments WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map([id], row_to_attachment)?;
@@ -506,6 +605,32 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// Empties the removed-device table, so materializing it is a rebuild rather than a merge.
+    pub fn clear_revoked(&self) -> Result<()> {
+        self.conn.execute("DELETE FROM revoked", [])?;
+        Ok(())
+    }
+
+    /// Records a removed device in the cache. Called only while materializing the document.
+    pub fn upsert_revoked(&self, device: &RevokedDevice) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO revoked (device_id, at, by) VALUES (?1, ?2, ?3)
+             ON CONFLICT(device_id) DO UPDATE SET at = ?2, by = ?3",
+            rusqlite::params![device.device_id, device.at, device.by],
+        )?;
+        Ok(())
+    }
+
+    /// Every device the vault says has been removed, oldest removal first.
+    pub fn list_revoked(&self) -> Result<Vec<RevokedDevice>> {
+        let mut stmt =
+            self.conn.prepare("SELECT device_id, at, by FROM revoked ORDER BY at, device_id")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(RevokedDevice { device_id: r.get(0)?, at: r.get(1)?, by: r.get(2)? })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// Looks up one group by id.
     pub fn get_group(&self, id: &str) -> Result<Option<Group>> {
         let mut stmt = self.conn.prepare(
@@ -591,7 +716,8 @@ fn row_to_attachment(row: &rusqlite::Row) -> rusqlite::Result<Attachment> {
         width_em_milli: row.get(7)?,
         x_permille: row.get(8)?,
         y_permille: row.get(9)?,
-        created_at: row.get(10)?,
+        mode: row.get(10)?,
+        created_at: row.get(11)?,
     })
 }
 

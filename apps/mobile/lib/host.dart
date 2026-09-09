@@ -23,6 +23,10 @@ Future<T?> _invoke<T>(String method, [Object? argument]) async {
 /// Path of the bundled sync daemon, or null when this build ships none.
 Future<String?> syncBinaryPath() => _invoke<String>('syncBinaryPath');
 
+/// What this phone should be called on the other devices' screens; see `deviceName` in
+/// MainActivity. Null on a platform that has no answer, where the daemon's own default stands.
+Future<String?> deviceName() => _invoke<String>('deviceName');
+
 /// Wifi multicast lock, without which the stack drops the LAN pairing broadcast. Held only
 /// while the pairing screen is open.
 Future<void> acquireMulticastLock() => _invoke<bool>('acquireMulticastLock');
@@ -45,6 +49,18 @@ Future<Map<Object?, Object?>?> takeWidgetAction() =>
 /// Whether the current network is one the user is not paying by the byte for. True when
 /// there is no network at all, and on a platform with no host side to ask.
 Future<bool> isUnmetered() async => await _invoke<bool>('isUnmetered') ?? true;
+
+/// Hands `bytes` to the system's own "save as", under `name`. True when a file was written.
+///
+/// The picker is the whole of the permission story: the user names the place and the app
+/// writes the one file they chose. False covers every way it can not happen — cancelled, no
+/// picker on the device, a host that does not implement this — and the caller says so.
+Future<bool> saveAs({
+  required String name,
+  required String mime,
+  required Uint8List bytes,
+}) async =>
+    await _invoke<bool>('saveAs', {'name': name, 'mime': mime, 'bytes': bytes}) ?? false;
 
 /// Calls the host pushes at us, by method name.
 ///

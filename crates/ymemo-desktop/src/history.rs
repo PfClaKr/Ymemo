@@ -59,7 +59,13 @@ pub(crate) fn wire(ctx: &Ctx, win: &HistoryWindow, subject: &Subject) {
                 }
             }
             // The restore is now the newest revision, and the list has to show it.
+            //
+            // Nothing stays selected afterwards. `selected` is an index into a list that has
+            // just grown a row at the top, so the highlight would sit on the revision *below*
+            // the one it was pointing at — and a second press of the button would put back a
+            // version nobody chose.
             refresh(&ctx, &w, entity, &id);
+            w.set_selected(-1);
             crate::list::refresh_after_restore(&ctx, entity, &id);
         });
     }
@@ -83,11 +89,11 @@ fn refresh(ctx: &Ctx, win: &HistoryWindow, entity: Entity, id: &str) {
         Entity::Memo => v.store().get(id).ok().flatten().map(|m| m.title),
         Entity::Group => v.store().get_group(id).ok().flatten().map(|g| g.name),
     };
-    win.set_subject(SharedString::from(match name {
+    win.set_subject(SharedString::from(crate::hangul::for_slint(&match name {
         Some(n) if !n.trim().is_empty() => n,
         // Deleted, or never named: say so rather than showing an empty heading.
         _ => t!("ui.list_memo_untitled"),
-    }));
+    })));
 
     let revisions = match v.history(entity, id) {
         Ok(r) => r,
@@ -130,15 +136,15 @@ fn row(index: usize, rev: &Revision, entity: Entity, this_device: &str) -> Revis
     RevisionRow {
         index: index as i32,
         when: SharedString::from(format_created_at(rev.at)),
-        device: SharedString::from(if rev.device == this_device {
+        device: SharedString::from(crate::hangul::for_slint(&if rev.device == this_device {
             t!("ui.history_this_device")
         } else {
             t!("ui.history_other_device")
-        }),
-        kind: SharedString::from(kind),
-        changed: SharedString::from(changed.join(", ")),
-        heading: SharedString::from(heading),
-        body: SharedString::from(body),
+        })),
+        kind: SharedString::from(crate::hangul::for_slint(&kind)),
+        changed: SharedString::from(crate::hangul::for_slint(&changed.join(", "))),
+        heading: SharedString::from(crate::hangul::for_slint(&heading)),
+        body: SharedString::from(crate::hangul::for_slint(&body)),
         color: SharedString::from(rev.field("color")),
         restorable: rev.kind != RevisionKind::Deleted,
     }

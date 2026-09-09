@@ -76,6 +76,13 @@ pub(crate) fn start_unlock_session(ctx: &Ctx, vault: &Vault) {
     settings::save_session(&ctx.dir, &vault.key_bytes(), days);
 }
 
+/// Drops the pending undo and takes the offer off the list.
+pub(crate) fn forget_undo(ctx: &Ctx, list: &ListWindow) {
+    ctx.undo_timer.stop();
+    *ctx.undo.borrow_mut() = None;
+    list.set_undo_message(SharedString::new());
+}
+
 /// Locks now: flush unsaved edits, close every sticky, drop the vault from memory, clear the
 /// stay-unlocked session and show the lock window.
 ///
@@ -103,6 +110,11 @@ pub(crate) fn lock_now(ctx: &Ctx, lock: &LockWindow, list: &ListWindow, unlocked
     ctx.model.set_vec(Vec::new());
     unlocked.set(false);
     settings::clear_session(&ctx.dir);
+    // A pending undo holds the removed memo's title and body. A locked vault leaves no memo
+    // text behind it, and the offer must not outlive the session either: unlocking used to
+    // find the bar still there, ready to write a memo from before the lock back — into
+    // whatever vault happens to be open by then.
+    forget_undo(ctx, list);
 
     let _ = list.hide();
     lock.invoke_clear_password();
@@ -156,7 +168,7 @@ pub(crate) fn apply_opened_vault(
     let _ = lock.hide();
     if let Some(list) = list_weak.upgrade() {
         // The name comes out of the vault, so it is only knowable once one is open.
-        list.set_vault_name(SharedString::from(name));
+        crate::list::set_vault_name(&list, &name);
         let saved = ctx.settings.borrow().list_window;
         present(&list);
         match saved {

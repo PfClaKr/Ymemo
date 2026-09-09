@@ -8,23 +8,13 @@ end-to-end encrypted, with **no server of anyone's in between**, and no account 
 ![Ymemo on the desktop](docs/screenshots/desktop.png)
 
 - **Yours** — every device holds a complete copy, and the app works with the network off.
-- **No middleman** — devices talk to each other. There is no cloud account, and nothing to
-  cancel or be locked out of.
+- **No middleman** — devices talk to each other. There is no cloud account to cancel or be
+  locked out of.
 - **Encrypted end to end** — anything that leaves a device is ciphertext. Your master password
   never leaves it at all.
 - **Nothing is lost** — two devices edited at once merge into one note instead of one winning.
 
 ![A memo typed on one device appearing on the other](docs/screenshots/sync.gif)
-
-*Two paired devices, one vault, nothing in between. The pause is shortened here: with the
-default settings a change reaches the other device in about twenty seconds, and
-Settings > Advanced trades battery for speed.*
-
-Memos keep the order you put them in. On the desktop, drag one **between** two rows in the
-list to place it, or drop it **on** a folder to file it there; on the phone, the handle at the
-end of each row is what you drag. The arrangement is per folder and it syncs, so two
-devices rearranging at once keep both changes instead of one overwriting the other. A folder
-nobody has arranged is still newest-first, as it always was.
 
 ## Getting it
 
@@ -38,9 +28,9 @@ nobody has arranged is still newest-first, as it always was.
 All of them are on the [releases page](https://github.com/PfClaKr/Ymemo/releases/latest).
 Nothing else has to be installed — the sync daemon ships inside.
 
-Once it is running, the app checks about once a day whether a newer release exists and offers
-**the one file for the machine it is on**, by name. It never downloads or installs anything on
-its own; see [what leaves your device](#what-leaves-your-device) below.
+The app checks about once a day whether a newer release exists and points at the one file for
+the machine it is on. It never downloads or installs anything on its own, and the check can be
+switched off; see [what leaves your device](#what-leaves-your-device).
 
 ## Starting out
 
@@ -49,123 +39,60 @@ On first run the app asks one question, and the answer matters:
 <img src="docs/screenshots/setup.png" alt="The first-run screen" width="330">
 
 - **Start fresh** — your first device. Choose a master password and start writing.
-- **Connect to another device** — you already use Ymemo somewhere. This brings those memos
-  over. Choosing "start fresh" here instead would give the new device a key of its own, and
-  the two could never merge.
+- **Connect to another device** — you already use Ymemo somewhere, and this brings those memos
+  over. Choosing "start fresh" here instead would give the new device a key of its own, and the
+  two could never merge.
 
 Right after creating a vault you get a **recovery code**. It is shown once, and with the
 password it is one of only two things on earth that can open your memos — there is no reset
 link, because there is nobody to send one.
 
-Give the vault a name by clicking the heading (`Ymemo` until you do). The name travels with
-the memos, so every device you connect shows the same one.
+Click the heading to give the vault a name. It travels with the memos, so every device you
+connect shows the same one.
 
 ## What you can do with it
 
-### Notes that behave like notes
-
-The tray icon brings your open notes forward, and each memo opens as a small frameless sticky.
-Typing saves it — there is no save button, and nothing to lose by closing the window.
-Double-click the title bar to fold a note down to that bar; drag it and it snaps to the screen
-edges and to the other notes, so a wall of them stays a wall rather than a pile.
-
-Notes stay out of the taskbar, because a desk with eight notes on it is not eight
-applications — and they sit among your other windows rather than over them, because a note
-you have to move to read what is underneath is a note in the way. The **pin** on the title
-bar is what puts one above everything, for the one you are keeping in view on purpose; the
-tray brings the rest forward when they have slipped behind something. (Keeping notes out of
-the taskbar needs Windows or X11; a native Wayland session has no way to ask for it, so there
-they keep their buttons.)
-
-Each note carries its own **colour** and **opacity**, and both travel with it: a note you
-turned blue on the desktop is blue on the phone. The fade lifts while you are writing in a
-note and comes back when you leave it, so you are never reading your own sentence through
-the desktop.
-
-### Photos on the paper
-
-Drop a photo onto a note and move or resize it anywhere on it. The size is stored in
-text-height multiples rather than pixels, so a photo you shrank on a phone is the same size
-relative to the writing when you open that note on a 27-inch monitor.
-
-Photos are encrypted like everything else and stored by content, so attaching the same picture
-on two devices leaves one file rather than two.
-
-### Folders
-
-Nestable, drag and drop, with colours of their own. On the desktop they are a tree; on the
-phone you go into one at a time, which is what a small screen has room for. Deleting a folder
-keeps what was in it and lifts it up a level.
-
-### Finding one again
-
-A find box above the list, on both. It looks through every folder at once — the folder a memo
-is in is exactly what you have forgotten — and through what is written in a note, not only its
-first line.
-
-### Deleting, and changing your mind
-
-Deleting takes a memo out of the list straight away, and offers it back: a bar on the desktop,
-a snackbar on the phone. Nothing here asks "are you sure" for the many deletions that were
-meant; the one that was not is a single click for the next few seconds.
-
-### Every past version
-
-Every edit to a note or a folder is kept: when it changed, which device changed it, and what it
-said at the time. Any of them can be put back — and putting one back is itself just another
-edit, so nothing you stepped over is lost either. On the phone it is behind a long press on
-the memo.
-
-![Version history](docs/screenshots/history.png)
-
-It costs no extra storage. The encrypted logs your devices exchange *are* the history, and the
-app reads it back out of them.
-
-### On your phone
-
-The same memos, the same folders, the same photos, the same history.
+- **Notes that behave like notes.** Frameless stickies that save as you type. Double-click the
+  title bar to fold one; drag it and it snaps to the screen edges and to the other notes. They
+  stay out of the taskbar, and the tray brings them back. Each carries its own colour and
+  opacity, and the **pin** keeps one above everything.
+- **Markdown where you ask for it.** Ordinary lines stay exactly as typed — ` **stars** ` in a
+  shopping list are stars. Formatting turns on inside a bare ```` ``` ```` fence, and a fence
+  that names a language, ```` ```rust ````, gives you a coloured code block.
+- **Photos on the paper.** Drop one on a note and move or resize it, or give it a band of its
+  own under the writing so it covers nothing. Sizes travel, so a photo you shrank on a phone
+  looks the same next to the writing on a 27-inch monitor.
+- **Folders.** Nestable, drag and drop, with colours of their own. Deleting one keeps what was
+  in it and lifts it up a level.
+- **An order that sticks.** Drag a memo between two rows to place it, or onto a folder to file
+  it. The arrangement is per folder and it syncs.
+- **Finding one again.** A find box that looks through every folder at once, and through what
+  is written in a note rather than only its first line.
+- **A way back.** Deleting offers the memo straight back for a few seconds instead of asking
+  "are you sure". And every past version of every note and folder is kept — what it said, when,
+  and which device changed it — and any of them can be put back.
+- **Your phone too.** The same memos, folders, photos and history, plus three home-screen
+  widgets and two shortcuts. They go blank the moment the app locks.
+- **Locking.** A master password, an instant lock, an idle auto-lock, and optionally staying
+  unlocked for a set number of days. Android can also reopen with your fingerprint.
+- **Connecting a device.** Scan its QR code or type its pairing code; both screens show the
+  same eight characters to compare. From the third device on, each one introduces the others,
+  so they all reach each other directly. Removing a device is recorded in the vault, so every
+  device drops it — and it stays removed until you connect it again. A change reaches the
+  other device in about twenty seconds; Settings > Advanced trades battery for speed.
+- **Korean and English.** Follows the system language, and can be changed in settings.
 
 <img src="docs/screenshots/mobile.png" alt="Ymemo on Android" width="620">
 
-### On your home screen
-
-Three Android widgets, plus two shortcuts behind a long press on the app icon:
-
-- a **write bar** that opens straight into a new note — or, from its camera button, into a new
-  note with the photo picker already up;
-- a **sticky**, one memo kept on the home screen in its own colour: either a note you picked or
-  whichever you edited last;
-- a **list** of your folders and your most recent notes, tap one to open it.
-
-They go blank the moment the app locks, so a home screen never shows what a password is
-supposed to be hiding.
-
-### Locking
-
-A master password, an instant lock, an idle auto-lock, and optionally staying unlocked for a
-set number of days. On the phone the app can close itself the moment you switch away and stay
-out of the app switcher — and it can reopen with your **fingerprint** instead of the password,
-which trades a little of one for the other and says so where you turn it on.
-
-### Connecting a device
-
-Scan the other one's QR code, or type its pairing code. The other device is asked to allow it,
-and both screens show the same eight characters to compare, so you can tell you paired with
-what you meant to. On one network a 6-digit code links them outright. Devices can be revoked
-later from either end.
-
-### Korean and English
-
-Follows the system language and can be changed in settings. The screens and the core's error
-messages come from one catalog, so they are never in two different languages at once.
+![Version history](docs/screenshots/history.png)
 
 ## What leaves your device
 
 Your memos leave it only as ciphertext, only to the devices you have paired, and only over
 connections those devices make between themselves.
 
-The app makes exactly **one** request to a server of anyone's: a daily question to GitHub
-about whether a newer release exists. It carries no vault data, no device id and nothing that
+The app makes exactly **one** request to a server of anyone's: a daily question to GitHub about
+whether a newer release exists. It carries no vault data, no device id and nothing that
 identifies you — but your address does reach GitHub, so it can be switched off in settings.
 
 Syncing may pass through Syncthing's public relays when two devices cannot reach each other
@@ -177,41 +104,19 @@ What the encryption does and does not cover — including that the local cache o
 
 ---
 
-## Under the hood
+## For developers
 
-A Rust core (`ymemo-core`) holds the data model, the storage, the merging and the crypto, and
-the two UIs on top of it are thin: **Slint** on the desktop (`ymemo-desktop`, pure Rust, no
-webview) and **Flutter** on Android (`apps/mobile`, reaching the core through
-`flutter_rust_bridge`). Merging is **Automerge**, so two devices that both edited end up the
-same whatever order the edits arrive in. Encryption is **RustCrypto** — XChaCha20-Poly1305 with
-Argon2id — and the per-device **SQLite** cache is a disposable view rather than the truth.
+A Rust core (`ymemo-core`) with two thin UIs on it: Slint on the desktop and Flutter on
+Android, four crates in one Cargo workspace.
 
-**Syncthing carries the files and is never trusted with what is in them.** It is bundled, so
-nobody has to install it separately, and it is driven over its localhost REST API:
+**Requirements**
 
-```
-[ymemo-core]   memos, CRDT merging, end-to-end encryption
-      |        writes encrypted change logs into the vault directory
-[Syncthing]    carries that directory between devices (discovery, NAT traversal, relays, TLS)
-```
+- Rust **>= 1.87**
+- Linux: `libfontconfig1-dev` (Slint links fontconfig) and `fonts-noto-cjk` for Korean text
+- Android only: Flutter and the Android SDK/NDK — see
+  [apps/mobile/README.md](apps/mobile/README.md)
 
-```
-vault/
-├── vault.json              # Argon2id salts + the wrapped data key + a key-check canary
-├── logs/<device-id>.ymlog  # per-device append-only encrypted log; a record is an automerge change
-└── blobs/<sha256>.ymblob   # attached photos, encrypted; the name is the content hash
-```
-
-Two properties do most of the work. Logs and blobs are encrypted with a random **data key**
-that the master password only *wraps*, so changing the password rewrites one small field
-instead of re-encrypting every memo. And a device only ever appends to **its own** log, so no
-two devices write the same file: the transport never produces a conflict, and the CRDT merges
-the contents.
-
-### Building it
-
-Rust **>= 1.87**, and on Linux `libfontconfig1-dev` (Slint links fontconfig) plus
-`fonts-noto-cjk` for Korean text.
+**Build and run**
 
 ```bash
 cargo test --workspace
@@ -220,14 +125,13 @@ cargo run -p ymemo-desktop
 
 App data lives in the platform data directory (`~/.local/share/ymemo` on Linux,
 `%APPDATA%\ymemo\Ymemo\data` on Windows), of which only the encrypted `vault/` is synced. Set
-`YMEMO_DATA_DIR` to put it somewhere else — a portable install, or trying a build without
-opening the vault you actually use. `ymemo --purge` deletes this device's copy and nothing on
-your other devices.
+`YMEMO_DATA_DIR` to put it somewhere else — which is how you try a build without opening the
+vault you actually use. `ymemo --purge` deletes this device's copy and nothing on your other
+devices.
 
-The Android app has its own setup, build and testing notes in
-[apps/mobile/README.md](apps/mobile/README.md). Packaging — the `.deb`, the `.rpm`, the Inno
-Setup installer and the per-ABI APKs — is scripted under `packaging/` and built from a `v*` tag
-by [.github/workflows/release.yml](.github/workflows/release.yml).
+Packaging — the `.deb`, the `.rpm`, the Inno Setup installer and the per-ABI APKs — is scripted
+under `packaging/` and built from a `v*` tag by
+[.github/workflows/release.yml](.github/workflows/release.yml).
 
 ### Still to come
 

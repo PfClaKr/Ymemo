@@ -53,7 +53,9 @@ class NoteConfigureActivity : Activity() {
             mapOf(
                 "title" to (memo?.title?.ifEmpty { getString(R.string.widget_untitled) }
                     ?: getString(R.string.widget_configure_recent)),
-                "subtitle" to (memo?.preview ?: getString(R.string.widget_configure_recent_hint)),
+                // `line`, not `preview`: the title above is already the memo's first line
+                // when it has no title of its own, and the whole body under it repeated it.
+                "subtitle" to (memo?.line ?: getString(R.string.widget_configure_recent_hint)),
             )
         }
         list.adapter = SimpleAdapter(

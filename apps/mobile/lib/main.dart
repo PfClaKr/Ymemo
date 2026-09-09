@@ -20,6 +20,8 @@ import 'package:path_provider/path_provider.dart';
 
 import 'src/rust/api.dart';
 import 'home_widgets.dart' as widgets;
+import 'markdown_style.dart';
+import 'memo_title.dart';
 import 'host.dart' as host;
 import 'palette.dart';
 import 'security.dart';
@@ -312,6 +314,7 @@ class _LockScreenState extends State<LockScreen> {
   /// Recovery inputs, only built while the forgotten-password panel is open.
   final _recoveryCode = TextEditingController();
   final _recoveryPassword = TextEditingController();
+  final _recoveryConfirm = TextEditingController();
 
   String? _error;
 
@@ -416,6 +419,7 @@ class _LockScreenState extends State<LockScreen> {
     _confirm.dispose();
     _recoveryCode.dispose();
     _recoveryPassword.dispose();
+    _recoveryConfirm.dispose();
     super.dispose();
   }
 
@@ -499,7 +503,12 @@ class _LockScreenState extends State<LockScreen> {
   /// Only the header is rewritten, so a wrong code costs one Argon2id run and leaves the
   /// vault exactly as it was.
   Future<void> _recover() async {
-    if (_recoveryCode.text.isEmpty || _recoveryPassword.text.isEmpty || _busy) return;
+    if (_recoveryCode.text.isEmpty ||
+        _recoveryPassword.text.isEmpty ||
+        _recoveryPassword.text != _recoveryConfirm.text ||
+        _busy) {
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -559,6 +568,7 @@ class _LockScreenState extends State<LockScreen> {
   void _leaveRecovery() {
     _recoveryCode.clear();
     _recoveryPassword.clear();
+    _recoveryConfirm.clear();
     if (mounted) {
       setState(() {
         _recovering = false;
@@ -723,8 +733,28 @@ class _LockScreenState extends State<LockScreen> {
             controller: _recoveryPassword,
             obscureText: true,
             decoration: InputDecoration(labelText: s.newPassword),
-            onSubmitted: (_) => _recover(),
+            textInputAction: TextInputAction.next,
+            onChanged: (_) => setState(() {}),
           ),
+          const SizedBox(height: 8),
+          // Typed twice, for the same reason the first-run screen asks twice: this password
+          // is never checked against anything before it is used, and the header it rewrites
+          // is synced — so a slip hands every device a password nobody knows. The recovery
+          // code still works afterwards, which is the only reason this is a nuisance rather
+          // than a disaster.
+          TextField(
+            controller: _recoveryConfirm,
+            obscureText: true,
+            decoration: InputDecoration(labelText: s.repeatPassword),
+            onSubmitted: (_) => _recover(),
+            onChanged: (_) => setState(() {}),
+          ),
+          if (_recoveryConfirm.text.isNotEmpty &&
+              _recoveryConfirm.text != _recoveryPassword.text)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(s.repeatMismatch, style: const TextStyle(color: Colors.red)),
+            ),
           const SizedBox(height: 12),
           FilledButton(
             onPressed: _busy ? null : _recover,
@@ -989,7 +1019,15 @@ class _MemoListScreenState extends State<MemoListScreen> {
   Future<void> _newFolder() async {
     final name = await _askForName(context, widget.strings, widget.strings.newGroup, '');
     if (name == null || name.isEmpty) return;
-    await groupCreate(name: name, parentId: widget.groupId);
+    _clearSearch();
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await groupCreate(name: name, parentId: widget.groupId);
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
     await _reload();
   }
 
@@ -1117,10 +1155,23 @@ class _MemoListScreenState extends State<MemoListScreen> {
               context,
               memo.color,
               ListTile(
-                title: Text(memo.title.isEmpty ? widget.strings.newMemo : memo.title),
-                subtitle: memo.body.isEmpty
+                title: Row(
+                  children: [
+                    Flexible(child: Text(rowTitle(memo, widget.strings.newMemo))),
+                    // A memo with a picture on it says so. It matters most for the memo with
+                    // nothing written on it at all, which would otherwise be one "New memo"
+                    // row beside another.
+                    if (memo.hasPhoto) ...[
+                      const SizedBox(width: 6),
+                      Icon(Icons.image_outlined,
+                          size: 15, color: paletteInk(memo.color).withValues(alpha: 0.55)),
+                    ],
+                  ],
+                ),
+                subtitle: rowPreview(memo).isEmpty
                     ? null
-                    : Text(memo.body, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    : Text(rowPreview(memo),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
                 onTap: () => _open(memo),
                 onLongPress: () => _memoMenu(memo),
                 // A handle of its own, rather than a long press: a long press already
@@ -1298,9 +1349,31 @@ class _MemoListScreenState extends State<MemoListScreen> {
   ///
   /// [withPhoto] goes straight on to the photo picker, which is what the camera button on
   /// the quick-write widget and the launcher shortcut of the same name are for.
+  /// Drops the find box's filter, on both sides: the text in the field and the query the
+  /// list is rebuilt from.
+  ///
+  /// Called before anything new appears. A memo or a folder made while a search is on does
+  /// not match it, so it is written, saved — and nowhere to be seen. Wanting a new note is
+  /// the end of the search that was running.
+  void _clearSearch() {
+    if (_query.isEmpty) return;
+    _search.clear();
+    _query = '';
+  }
+
   Future<void> _add({bool withPhoto = false}) async {
-    final id = await memoUpsert(title: '', body: '');
-    if (!_atRoot) await memoSetGroup(id: id, groupId: widget.groupId);
+    _clearSearch();
+    final messenger = ScaffoldMessenger.of(context);
+    final String id;
+    try {
+      id = await memoUpsert(title: '', body: '');
+      if (!_atRoot) await memoSetGroup(id: id, groupId: widget.groupId);
+    } catch (e) {
+      // Without this the button simply did nothing, which reads as a broken app rather
+      // than as storage the vault cannot be written to.
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -1314,6 +1387,14 @@ class _MemoListScreenState extends State<MemoListScreen> {
         ),
       ),
     );
+    // Backing out without writing anything leaves the memo this created behind, and one
+    // "New memo" row for every time anyone tapped the button and changed their mind. The
+    // core decides — a photo counts as writing.
+    try {
+      await memoDiscardIfBlank(id: id);
+    } catch (e) {
+      debugPrint('could not discard the blank memo: $e');
+    }
     await _reload();
   }
 
@@ -1522,7 +1603,13 @@ class MemoEditScreen extends StatefulWidget {
 
 class _MemoEditScreenState extends State<MemoEditScreen> {
   late final TextEditingController _title = TextEditingController(text: widget.title);
-  late final TextEditingController _body = TextEditingController(text: widget.body);
+  /// The body draws its own markdown as it is typed; the text it holds is the plain string
+  /// with every marker still in it, which is what gets saved. See `markdown_style.dart`.
+  late final MarkdownEditingController _body = MarkdownEditingController(
+    text: widget.body,
+    marker: paletteInk(_color).withValues(alpha: 0.45),
+    codeBackground: paletteInk(_color).withValues(alpha: 0.10),
+  );
   late String _color = widget.color;
   List<FfiAttachment> _photos = [];
 
@@ -1535,7 +1622,12 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   /// Not batched into `_save` with the text: the color *is* what the screen looks like, and a
   /// swatch that did nothing until you left would read as a broken button.
   Future<void> _setColor(String color) async {
-    setState(() => _color = color);
+    setState(() {
+      _color = color;
+      // The markdown is drawn in the note's own ink, so it follows the paper.
+      _body.marker = paletteInk(color).withValues(alpha: 0.45);
+      _body.codeBackground = paletteInk(color).withValues(alpha: 0.10);
+    });
     await memoSetColor(id: widget.id, color: color);
   }
 
@@ -1650,9 +1742,21 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   }
 
   /// Skips the write when nothing changed; an empty change is pure sync traffic.
-  Future<void> _save() async {
-    if (_title.text == widget.title && _body.text == widget.body) return;
-    await memoUpsert(id: widget.id, title: _title.text, body: _body.text);
+  ///
+  /// Returns whether the memo is safely in the vault. A write can fail — a full disk, or
+  /// storage the app cannot reach — and leaving the screen on a false would throw away what
+  /// is typed in it with nothing said, so the caller stays put and shows why. The core's
+  /// message says what went wrong; it is shown as it is.
+  Future<bool> _save() async {
+    if (_title.text == widget.title && _body.text == widget.body) return true;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await memoUpsert(id: widget.id, title: _title.text, body: _body.text);
+      return true;
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      return false;
+    }
   }
 
   @override
@@ -1684,8 +1788,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
         if (didPop) return;
         // Grab the navigator up front; context cannot be used across the await.
         final navigator = Navigator.of(context);
-        await _save();
-        navigator.pop();
+        if (await _save()) navigator.pop();
       },
       child: Scaffold(
         backgroundColor: paletteBg(_color),
@@ -1693,7 +1796,9 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
           // The memo's own title, as the list shows it — the bar said "New memo" over every
           // memo ever opened, including ones written months ago. Fixed at the title it
           // arrived with rather than following the field below it, which is right there.
-          title: Text(widget.title.isEmpty ? widget.strings.newMemo : widget.title),
+          // A memo with no title of its own reads by its first line, the same fallback the
+          // list uses, or the two would name the same memo differently.
+          title: Text(headingFor(widget.title, widget.body, widget.strings.newMemo)),
           backgroundColor: paletteBar(_color),
           foregroundColor: ink,
           actions: [
@@ -1711,8 +1816,8 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
               icon: const Icon(Icons.check),
               tooltip: widget.strings.save,
               onPressed: () async {
-                await _save();
-                if (context.mounted) Navigator.of(context).pop();
+                final saved = await _save();
+                if (saved && context.mounted) Navigator.of(context).pop();
               },
             ),
           ],
@@ -1741,36 +1846,82 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, box) {
-                    final canvas = Size(box.maxWidth, box.maxHeight);
                     final baseFont = DefaultTextStyle.of(context).style.fontSize ?? 14.0;
-                    return Stack(
+                    final floating = _photos.where((p) => !p.flow).toList();
+                    final flowing = _photos.where((p) => p.flow).toList();
+                    // The writing, and under it the photos that asked not to be written
+                    // over. A column rather than one surface, because that *is* the
+                    // difference between the two modes: what is in this column cannot have
+                    // text behind it. Same arrangement as the desktop sticky.
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Positioned.fill(
-                          child: TextField(
-                            controller: _body,
-                            decoration: InputDecoration(
-                              hintText: widget.strings.bodyHint,
-                              border: InputBorder.none,
-                            ),
-                            maxLines: null,
-                            expands: true,
-                            textAlignVertical: TextAlignVertical.top,
-                            // Writing puts the photo handles away; they would otherwise sit
-                            // over the line being typed.
-                            onTap: () => setState(() => _selectedPhoto = null),
+                        Expanded(
+                          child: LayoutBuilder(
+                            builder: (context, area) {
+                              final canvas = Size(area.maxWidth, area.maxHeight);
+                              return Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: TextField(
+                                      controller: _body,
+                                      decoration: InputDecoration(
+                                        hintText: widget.strings.bodyHint,
+                                        // The hint is also the only place the app says what
+                                        // ``` does, so it has room to say it.
+                                        hintMaxLines: 3,
+                                        border: InputBorder.none,
+                                      ),
+                                      maxLines: null,
+                                      expands: true,
+                                      textAlignVertical: TextAlignVertical.top,
+                                      // Writing puts the photo handles away; they would
+                                      // otherwise sit over the line being typed.
+                                      onTap: () =>
+                                          setState(() => _selectedPhoto = null),
+                                    ),
+                                  ),
+                                  for (final photo in floating)
+                                    NotePhoto(
+                                      key: ValueKey(photo.id),
+                                      strings: widget.strings,
+                                      attachment: photo,
+                                      canvas: canvas,
+                                      baseFont: baseFont,
+                                      ink: ink,
+                                      selected: _selectedPhoto == photo.id,
+                                      onSelect: () =>
+                                          setState(() => _selectedPhoto = photo.id),
+                                      onChanged: _reloadPhotos,
+                                    ),
+                                ],
+                              );
+                            },
                           ),
                         ),
-                        for (final photo in _photos)
-                          NotePhoto(
-                            key: ValueKey(photo.id),
-                            strings: widget.strings,
-                            attachment: photo,
-                            canvas: canvas,
-                            baseFont: baseFont,
-                            ink: ink,
-                            selected: _selectedPhoto == photo.id,
-                            onSelect: () => setState(() => _selectedPhoto = photo.id),
-                            onChanged: _reloadPhotos,
+                        if (flowing.isNotEmpty)
+                          SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                for (final photo in flowing)
+                                  NotePhoto(
+                                    key: ValueKey(photo.id),
+                                    strings: widget.strings,
+                                    attachment: photo,
+                                    flow: true,
+                                    // The band is as wide as the note; the width the core
+                                    // stores is what caps the picture inside it.
+                                    canvas: Size(box.maxWidth, box.maxHeight),
+                                    baseFont: baseFont,
+                                    ink: ink,
+                                    selected: _selectedPhoto == photo.id,
+                                    onSelect: () =>
+                                        setState(() => _selectedPhoto = photo.id),
+                                    onChanged: _reloadPhotos,
+                                  ),
+                              ],
+                            ),
                           ),
                       ],
                     );
@@ -1844,6 +1995,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
     try {
       await memoRestore(id: widget.memoId, index: revision.index);
       _changed = true;
+      // Nothing stays open afterwards: `_selected` is an index into a list that has just
+      // grown a row at the top, so the expanded row would be the revision below the one it
+      // was showing.
+      if (mounted) setState(() => _selected = null);
       await _load();
       if (mounted) _say(widget.strings.historyRestored);
     } catch (e) {
@@ -2089,6 +2244,9 @@ class _SyncScreenState extends State<SyncScreen> {
   List<FfiSharedDevice> _devices = const [];
 
   final _lanInput = TextEditingController();
+  /// The other device's pairing code, typed or pasted rather than scanned.
+  final _peerInput = TextEditingController();
+  bool _adding = false;
   String? _lanCode;
   String? _lanMessage;
   bool _joining = false;
@@ -2113,6 +2271,7 @@ class _SyncScreenState extends State<SyncScreen> {
     _lanPoll?.cancel();
     _waitPoll?.cancel();
     _lanInput.dispose();
+    _peerInput.dispose();
     // Leaves pairing mode: closes the socket and drops the wifi multicast lock. Anything
     // still in flight is finished by the Rust side on its own thread.
     widget.sync.lanStop();
@@ -2208,6 +2367,29 @@ class _SyncScreenState extends State<SyncScreen> {
     );
     if (peer != null) await _startWaiting(peer);
     await _reloadDevices();
+  }
+
+  /// Registers a peer from a code that was typed or pasted.
+  ///
+  /// The same half of pairing that scanning does — the core validates the code and does the
+  /// registering — for the cases a camera cannot cover: a device with no working camera, a
+  /// desktop across the room whose QR is not in front of you, or a code sent in a message.
+  Future<void> _addTypedPeer() async {
+    final raw = _peerInput.text.trim();
+    if (raw.isEmpty || _adding) return;
+    setState(() => _adding = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final peer = await widget.sync.pairWith(raw);
+      _peerInput.clear();
+      await _startWaiting(peer);
+      await _reloadDevices();
+    } catch (e) {
+      // The core's message says what is wrong with the code; show it as it is.
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    } finally {
+      if (mounted) setState(() => _adding = false);
+    }
   }
 
   /// Enters the waiting state for a peer that has just been registered.
@@ -2584,6 +2766,30 @@ class _SyncScreenState extends State<SyncScreen> {
             ),
           ],
         ),
+        const SizedBox(height: 16),
+        Text(widget.strings.peerCodeHint, style: Theme.of(context).textTheme.bodySmall),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _peerInput,
+                autocorrect: false,
+                enableSuggestions: false,
+                decoration: InputDecoration(labelText: widget.strings.peerCode),
+                onSubmitted: (_) => _addTypedPeer(),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: FilledButton(
+                onPressed: _adding ? null : _addTypedPeer,
+                child: Text(widget.strings.addDevice),
+              ),
+            ),
+          ],
+        ),
       ],
     );
   }
@@ -2667,12 +2873,16 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 }
 
-/// One photo lying on the note: drag it anywhere, pull its corner to resize, ✕ to detach.
+/// One photo on the note: drag it anywhere, pull its corner to resize, ✕ to detach.
 ///
 /// Nothing is written until the finger lifts — a drag would otherwise leave one entry in the
 /// change log per frame. Both numbers that get written are platform-independent: the width
 /// in **em**, multiples of the body font, and the position as a **fraction of the note**. A
 /// photo half way down a phone screen is half way down the desktop sticky as well.
+///
+/// In [`flow`] the photo is placed by the column under the writing instead of by its stored
+/// corner, so there is nothing to drag — only the resize stays. The corner it *would* go back
+/// to is left untouched, so taking it out of the flow puts it where it was.
 class NotePhoto extends StatefulWidget {
   const NotePhoto({
     super.key,
@@ -2684,10 +2894,14 @@ class NotePhoto extends StatefulWidget {
     required this.selected,
     required this.onSelect,
     required this.onChanged,
+    this.flow = false,
   });
 
   final FfiStrings strings;
   final FfiAttachment attachment;
+
+  /// Whether this one sits in the band under the writing rather than on top of it.
+  final bool flow;
 
   /// Size of the note the photo lies on; positions are a fraction of it.
   final Size canvas;
@@ -2754,8 +2968,14 @@ class _NotePhotoState extends State<NotePhoto> {
   Future<void> _commit() async {
     await attachmentSetLayout(
       id: widget.attachment.id,
-      xPermille: (_x / max(widget.canvas.width, 1) * 1000).round(),
-      yPermille: (_y / max(widget.canvas.height, 1) * 1000).round(),
+      // A photo in the flow is placed by the column, so the corner it would return to is
+      // written back unchanged: only its width is the user's to set here.
+      xPermille: widget.flow
+          ? widget.attachment.xPermille
+          : (_x / max(widget.canvas.width, 1) * 1000).round(),
+      yPermille: widget.flow
+          ? widget.attachment.yPermille
+          : (_y / max(widget.canvas.height, 1) * 1000).round(),
       widthEmMilli: (_w / widget.baseFont * 1000).round(),
     );
     // Cleared without a setState of their own: reloading rebuilds this widget with the
@@ -2770,40 +2990,46 @@ class _NotePhotoState extends State<NotePhoto> {
   @override
   Widget build(BuildContext context) {
     final selected = widget.selected;
-    return Positioned(
-      left: _x,
-      top: _y,
-      width: _w,
-      height: _h,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          GestureDetector(
-            onTap: widget.onSelect,
-            onPanStart: (_) => widget.onSelect(),
-            onPanUpdate: (d) => setState(() {
-              _dx += d.delta.dx;
-              _dy += d.delta.dy;
-            }),
-            onPanEnd: (_) => _commit(),
-            child: Container(
-              width: _w,
-              height: _h,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(
-                  color: selected ? widget.ink : widget.ink.withValues(alpha: 0.35),
-                  width: selected ? 2 : 1,
-                ),
+    final frame = Stack(
+      clipBehavior: Clip.none,
+      children: [
+        GestureDetector(
+          onTap: widget.onSelect,
+          onPanStart: (_) => widget.onSelect(),
+          // Nowhere to drag one in the flow; the column decides where it goes.
+          onPanUpdate: widget.flow
+              ? null
+              : (d) => setState(() {
+                    _dx += d.delta.dx;
+                    _dy += d.delta.dy;
+                  }),
+          onPanEnd: widget.flow ? null : (_) => _commit(),
+          child: Container(
+            width: _w,
+            height: _h,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: selected ? widget.ink : widget.ink.withValues(alpha: 0.35),
+                width: selected ? 2 : 1,
               ),
-              clipBehavior: Clip.antiAlias,
-              child: _picture(),
             ),
+            clipBehavior: Clip.antiAlias,
+            child: _picture(),
           ),
-          if (selected) ..._furniture(),
-        ],
-      ),
+        ),
+        if (selected) ..._furniture(),
+      ],
     );
+    // In the flow the column places it; on top of the writing it places itself. The padding
+    // is for the controls, which hang outside the frame.
+    if (widget.flow) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(0, 12, 12, 4),
+        child: SizedBox(width: _w, height: _h, child: frame),
+      );
+    }
+    return Positioned(left: _x, top: _y, width: _w, height: _h, child: frame);
   }
 
   Widget _picture() {
@@ -2844,6 +3070,42 @@ class _NotePhotoState extends State<NotePhoto> {
             ),
           ),
         ),
+        // Keep a copy of the picture outside the vault. The system's own picker asks where;
+        // nothing is written until it is answered.
+        Positioned(
+          right: _handle * 5 / 3,
+          top: -_handle / 3,
+          child: Semantics(
+            label: widget.strings.photoSave,
+            button: true,
+            child: GestureDetector(onTap: _save, child: _chip(widget.ink, Icons.save_alt)),
+          ),
+        ),
+        // Move it between the two ways of sitting. Next to the detach, and labelled with
+        // what it will do rather than with what the photo is now.
+        Positioned(
+          right: _handle * 2 / 3,
+          top: -_handle / 3,
+          child: Semantics(
+            label: widget.flow
+                ? widget.strings.photoOverText
+                : widget.strings.photoUnderText,
+            button: true,
+            child: GestureDetector(
+              onTap: () async {
+                await attachmentSetFlow(
+                  id: widget.attachment.id,
+                  flow: !widget.flow,
+                );
+                await widget.onChanged();
+              },
+              child: _chip(
+                widget.ink,
+                widget.flow ? Icons.flip_to_front : Icons.vertical_align_bottom,
+              ),
+            ),
+          ),
+        ),
         Positioned(
           right: -_handle / 3,
           bottom: -_handle / 3,
@@ -2858,6 +3120,28 @@ class _NotePhotoState extends State<NotePhoto> {
           ),
         ),
       ];
+
+  /// Writes the photo wherever the user says, under the name it was attached with.
+  ///
+  /// The bytes are read from the vault rather than from what is on screen: what gets saved is
+  /// the original file, not the size it happens to be drawn at.
+  Future<void> _save() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final bytes = await attachmentBytes(hash: widget.attachment.hash);
+      final ok = await host.saveAs(
+        name: widget.attachment.name.isEmpty ? 'photo.jpg' : widget.attachment.name,
+        mime: widget.attachment.mime,
+        bytes: bytes,
+      );
+      messenger.showSnackBar(SnackBar(
+        content: Text(ok ? widget.strings.photoSaved : widget.strings.photoSaveFailed),
+      ));
+    } catch (e) {
+      // A photo that has not synced to this device yet has no bytes to save.
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
 
   Widget _chip(Color background, IconData icon) => Container(
         width: _handle,

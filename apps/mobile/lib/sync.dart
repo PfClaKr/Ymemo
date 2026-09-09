@@ -147,6 +147,19 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
       _error = null;
       // Syncthing's own config, so it has to be pushed after every start — the daemon is a
       // fresh process each time and only remembers what its config.xml already said.
+      //
+      // The name goes first, and before anything can pair: Syncthing keeps the name it first
+      // learned for a device, so a peer that connects before this would file this phone under
+      // the hostname Android gives it, which is `localhost`.
+      final name = await host.deviceName();
+      if (name != null && name.isNotEmpty) {
+        try {
+          await ffi.syncSetDeviceName(name: name);
+        } catch (e) {
+          // A nameless device is still a working one.
+          debugPrint('could not set the device name: $e');
+        }
+      }
       await _applyTiming();
       await applyNetworkPolicy();
       _startPendingPoll();
