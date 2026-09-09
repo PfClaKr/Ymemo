@@ -99,12 +99,27 @@ component PhotoItem inherits Rectangle {
     private property <bool> active: root.dragging || move-ta.has-hover || close-ta.has-hover
         || mode-ta.has-hover || save-ta.has-hover;
 
-    private property <length> w: Math.min(Math.max(root.photo.width-px + root.dw, root.min-w),
-        Math.max(root.canvas-w, root.min-w));
     // Keep the original proportions; the width is the only size the core syncs.
-    private property <length> h: root.photo.height-px <= 0px || root.photo.width-px <= 0px
-        ? root.w
-        : root.w * (root.photo.height-px / root.photo.width-px);
+    private property <float> ratio: root.photo.height-px <= 0px || root.photo.width-px <= 0px
+        ? 1.0
+        : root.photo.height-px / root.photo.width-px;
+    // A photo lies **on** the note, never over all of it. The width was already held to the
+    // note's, but nothing held the height, so a tall picture dropped on a default-sized
+    // sticky covered it end to end — and a floating photo takes the pointer, so there was no
+    // way back to the writing at all short of finding the photo's own chips.
+    //
+    // **Passed in, not read from `canvas-h`.** A photo in the flow sits inside the layout
+    // that decides how tall the note is, so reading the note's height to cap its own would
+    // close a binding loop — which Slint warns about and says may panic at runtime. Only the
+    // photos lying on the writing are given a cap; in the flow a photo has a band of its own
+    // and takes nothing away from the writing above it.
+    in property <length> height-cap: 100000px;
+    private property <length> max-w: Math.max(
+        Math.min(Math.max(root.canvas-w, root.min-w), root.height-cap / root.ratio),
+        root.min-w);
+    private property <length> w: Math.min(
+        Math.max(root.photo.width-px + root.dw, root.min-w), root.max-w);
+    private property <length> h: root.w * root.ratio;
 
     // Never fully off the note: a photo whose corner cannot be reached cannot be brought back.
     // In the flow there is nothing to clamp — the band around it decides where it goes.
@@ -961,6 +976,8 @@ export component StickyWindow inherits Window {
                 // Declared after the text, so a photo is picked up by a click on it rather
                 // than placing the caret underneath.
                 for photo in root.photos: PhotoItem {
+                    // A quarter of the writing is always left reachable underneath.
+                    height-cap: body-area.height * 0.75;
                     photo: photo;
                     canvas-w: note.width;
                     canvas-h: body-area.height;
