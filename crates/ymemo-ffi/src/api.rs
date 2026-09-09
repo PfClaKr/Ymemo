@@ -599,11 +599,9 @@ pub fn vault_reset(vault_dir: String, cache_db_path: String) -> Result<()> {
     }
 
     ymemo_core::vault::wipe(&vault_dir)?;
-    // The cache is a plaintext copy of everything the vault held, so it goes with it.
-    let db = Path::new(&cache_db_path);
-    if db.exists() {
-        std::fs::remove_file(db)?;
-    }
+    // The cache is a plaintext copy of everything the vault held, so it goes with it — and so
+    // do the sidecars WAL mode keeps beside it, or a reset hands the memos back.
+    Store::delete_file(&cache_db_path)?;
     *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = None;
     Ok(())
 }

@@ -730,6 +730,13 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
             // delete — and the button that does that is one row away from the memos that are
             // not blank.
             discard_if_blank(&ctx, &id);
+            // Off the desk on purpose, so the next launch does not put it back.
+            {
+                let mut settings = ctx.settings.borrow_mut();
+                if settings.set_memo_open(&id, false) {
+                    settings.save(&ctx.dir);
+                }
+            }
             close_sticky(&ctx.stickies, &id);
             APP.with(|a| {
                 let borrow = a.borrow();
@@ -937,6 +944,8 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     {
         let weak = window.as_weak();
         let expanded_height = expanded_height.clone();
+        let ctx = ctx.clone();
+        let id = memo.id.clone();
         window.on_toggle_collapse(move || {
             let w = weak.unwrap();
             let sw = w.window();
@@ -952,16 +961,40 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
                 w.set_collapsed(true);
                 sw.set_size(LogicalSize::new(logical_w, BAR_HEIGHT));
             }
+            // Written down, so a note folded on purpose is still folded when it comes back.
+            let folded = w.get_collapsed();
+            let mut settings = ctx.settings.borrow_mut();
+            if settings.set_memo_folded(&id, folded) {
+                settings.save(&ctx.dir);
+            }
         });
     }
 
     // Back where it was left, if this note has been on the desk before. Applied after the
     // window is on screen: a size set on a window that has not been shown is what the
     // backends disagree about, and the position needs a real window underneath it.
-    let saved_geometry = ctx.settings.borrow().memo_window(&memo.id);
+    let (saved_geometry, folded) = {
+        let settings = ctx.settings.borrow();
+        (settings.memo_window(&memo.id), settings.memo_folded(&memo.id))
+    };
     present_sticky(ctx, &window);
     if let Some(geometry) = saved_geometry {
         restore_geometry(&window, geometry);
+        // What it should go back to when it is unfolded; the geometry above is always the
+        // note's expanded size, folded or not.
+        expanded_height.set(geometry[3] as f32 / window.window().scale_factor());
+    }
+    // Folded is a state of its own, applied after the size above rather than instead of it.
+    if folded {
+        window.set_collapsed(true);
+        let logical_w = window.window().size().width as f32 / window.window().scale_factor();
+        window.window().set_size(LogicalSize::new(logical_w, BAR_HEIGHT));
+    }
+    {
+        let mut settings = ctx.settings.borrow_mut();
+        if settings.set_memo_open(&memo.id, true) {
+            settings.save(&ctx.dir);
+        }
     }
     // A note opens at its first line, whatever the widget's scroll offset happened to be.
     window.invoke_body_to_top();
@@ -1045,8 +1078,7 @@ pub(crate) fn discard_if_blank(ctx: &Ctx, id: &str) {
         refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
     }
     let mut settings = ctx.settings.borrow_mut();
-    let mut changed = settings.forget_memo_window(id);
-    changed |= settings.set_memo_pinned(id, false);
+    let changed = settings.forget_memo(id);
     if changed {
         settings.save(&ctx.dir);
     }
@@ -1073,12 +1105,35 @@ fn window_geometry(window: &slint::Window) -> [i32; 4] {
     }
 }
 
+/// The geometry worth remembering for one sticky.
+///
+/// A folded note is one title bar tall, and that is a *state*, not a size: remembering it put
+/// the note back as a 24px strip that nothing had marked folded, so the whole button row was
+/// drawn squeezed against the title. So while a note is folded only where it moved to is new,
+/// and the height it had before it was folded is kept.
+fn geometry_to_remember(ctx: &Ctx, id: &str, window: &slint::Window, collapsed: bool) -> [i32; 4] {
+    let mut geometry = window_geometry(window);
+    if collapsed {
+        geometry[3] = ctx
+            .settings
+            .borrow()
+            .memo_window(id)
+            .map_or(DEFAULT_SIZE.1 as i32, |old| old[3]);
+    }
+    geometry
+}
+
 /// Records this memo's window, and saves if that changed anything.
 pub(crate) fn remember_one(ctx: &Ctx, id: &str, window: &slint::Window) {
     if !window.is_visible() {
         return;
     }
-    let geometry = window_geometry(window);
+    let collapsed = ctx
+        .stickies
+        .borrow()
+        .get(id)
+        .is_some_and(|e| e.window.get_collapsed());
+    let geometry = geometry_to_remember(ctx, id, window, collapsed);
     let changed = ctx.settings.borrow_mut().set_memo_window(id, geometry);
     if changed {
         ctx.settings.borrow().save(&ctx.dir);
@@ -1091,15 +1146,21 @@ pub(crate) fn remember_one(ctx: &Ctx, id: &str, window: &slint::Window) {
 /// the snapping is a poll too.
 pub(crate) fn remember_geometry(ctx: &Ctx, list: &crate::ListWindow) {
     let mut changed = false;
-    {
+    // Read outside the `settings` borrow: `geometry_to_remember` reads the settings itself.
+    let seen: Vec<(String, [i32; 4])> = {
         let map = ctx.stickies.borrow();
+        map.iter()
+            .filter(|(_, e)| e.window.window().is_visible())
+            .map(|(id, e)| {
+                let g = geometry_to_remember(ctx, id, e.window.window(), e.window.get_collapsed());
+                (id.clone(), g)
+            })
+            .collect()
+    };
+    {
         let mut settings = ctx.settings.borrow_mut();
-        for (id, entry) in map.iter() {
-            let window = entry.window.window();
-            if !window.is_visible() {
-                continue;
-            }
-            changed |= settings.set_memo_window(id, window_geometry(window));
+        for (id, geometry) in &seen {
+            changed |= settings.set_memo_window(id, *geometry);
         }
         if list.window().is_visible() {
             changed |= settings.set_list_window(window_geometry(list.window()));
