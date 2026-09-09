@@ -99,12 +99,27 @@ component PhotoItem inherits Rectangle {
     private property <bool> active: root.dragging || move-ta.has-hover || close-ta.has-hover
         || mode-ta.has-hover || save-ta.has-hover;
 
-    private property <length> w: Math.min(Math.max(root.photo.width-px + root.dw, root.min-w),
-        Math.max(root.canvas-w, root.min-w));
     // Keep the original proportions; the width is the only size the core syncs.
-    private property <length> h: root.photo.height-px <= 0px || root.photo.width-px <= 0px
-        ? root.w
-        : root.w * (root.photo.height-px / root.photo.width-px);
+    private property <float> ratio: root.photo.height-px <= 0px || root.photo.width-px <= 0px
+        ? 1.0
+        : root.photo.height-px / root.photo.width-px;
+    // A photo lies **on** the note, never over all of it. The width was already held to the
+    // note's, but nothing held the height, so a tall picture dropped on a default-sized
+    // sticky covered it end to end — and a floating photo takes the pointer, so there was no
+    // way back to the writing at all short of finding the photo's own chips.
+    //
+    // **Passed in, not read from `canvas-h`.** A photo in the flow sits inside the layout
+    // that decides how tall the note is, so reading the note's height to cap its own would
+    // close a binding loop — which Slint warns about and says may panic at runtime. Only the
+    // photos lying on the writing are given a cap; in the flow a photo has a band of its own
+    // and takes nothing away from the writing above it.
+    in property <length> height-cap: 100000px;
+    private property <length> max-w: Math.max(
+        Math.min(Math.max(root.canvas-w, root.min-w), root.height-cap / root.ratio),
+        root.min-w);
+    private property <length> w: Math.min(
+        Math.max(root.photo.width-px + root.dw, root.min-w), root.max-w);
+    private property <length> h: root.w * root.ratio;
 
     // Never fully off the note: a photo whose corner cannot be reached cannot be brought back.
     // In the flow there is nothing to clamp — the band around it decides where it goes.
@@ -459,6 +474,12 @@ component NotePad {
 }
 
 export component StickyWindow inherits Window {
+    // Where the focus goes when nothing else has asked for it — which is not only at
+    // startup. A text field that takes the caret and is then torn down (the heading's rename
+    // box, a folder's, the find box) leaves the focus nowhere at all, and a `FocusScope` that
+    // only grabbed it in its own `init` never sees another key: the shortcuts worked once and
+    // then quietly stopped. Measured, by renaming a folder and finding Ctrl+N dead.
+    forward-focus: keys;
     // The taskbar's own title, which the desktop draws and Slint does not — so it gets the
     // memo's real title, not the shape `hangul.rs` hands everything on this window.
     in property <string> window-title;
@@ -554,6 +575,39 @@ export component StickyWindow inherits Window {
     changed collapsed => {
         if (self.collapsed) { self.show-palette = false; }
     }
+
+    // Window-wide keys. A `FocusScope` around everything rather than a handler on the
+    // writing: the keys have to work whether the caret is in the note or not, and Slint sends
+    // a key to the focused item first and then up through its ancestors.
+    keys := FocusScope {
+        width: 100%;
+        height: 100%;
+        // Takes the focus so the keys below arrive at all; see the note in `list.slint`.
+        // A new note then has it moved into the writing by `focus-body`, which Rust calls
+        // after the window is up.
+        init => { self.focus(); }
+        key-pressed(ev) => {
+            // Escape puts the note down: the caret leaves the writing and the read view comes
+            // back. Clicking another window was the only way to do that, which is a strange
+            // thing to have to do to stop typing.
+            if (ev.text == Key.Escape && body.has-focus) {
+                self.focus();
+                return accept;
+            }
+            // The one shortcut every window has. A note saves as it is typed, so closing one
+            // loses nothing — and reaching for the mouse to put a note away is most of what
+            // makes a deskful of them tiring.
+            if (ev.modifiers.control && ev.text == "w") {
+                root.close-requested();
+                return accept;
+            }
+            // The same key the list uses, so it means one thing everywhere.
+            if (ev.modifiers.control && ev.text == "n") {
+                root.new-memo();
+                return accept;
+            }
+            return reject;
+        }
 
     Rectangle {
         background: Palette.bg(root.sticky-color);
@@ -829,33 +883,27 @@ export component StickyWindow inherits Window {
                 VerticalLayout {
                     body-area := Rectangle {
                         vertical-stretch: 1;
-                        body := NotePad {
-                            width: 100%;
-                            height: 100%;
-                            // Must match BODY_FONT_PX in sticky.rs, which sizes the photos.
-                            font-size: 13px;
-                            // Transparent while the read view is over it. The field stays
-                            // where it is — it has to, or a click could not hand the caret
-                            // back to it — and simply draws nothing; painting the read view
-                            // over it instead showed the raw markers through the paper,
-                            // which is translucent on purpose.
-                            ink: body.has-focus ? #2b2b22 : #00000000;
-                            // Room along the bottom edge for the date, so the last line of a
-                            // full note is not written underneath it.
-                            pad-bottom: root.created-at == "" ? 4px : 14px;
-                            text <=> root.memo-text;
-                            edited => { root.edited(self.text); }
-                        }
-
-                        // ---- The memo as it reads: markdown drawn as markdown, over the
-                        // markdown as it is typed.
+                        // ---- The memo as it reads: markdown drawn as markdown, **under**
+                        // the field that holds the markdown as it is typed.
                         //
                         // Slint's editor has one font weight for the whole field, so there
                         // is no styling the text *while* it is being written. What there is
-                        // instead: the moment the caret leaves, this covers the field with
-                        // the same words set properly, and a click hands the caret back and
-                        // takes it away again. Writing is always the plain memo, with every
-                        // marker where the user put it. ----
+                        // instead: the moment the caret leaves, the field goes transparent
+                        // (`ink` above) and this shows through it with the same words set
+                        // properly. Writing is always the plain memo, with every marker where
+                        // the user put it.
+                        //
+                        // **Under, not over**, and that is the whole of why it works.
+                        // `StyledText` takes pointer events of its own and wins them against
+                        // anything below it whatever the declaration order says — so with
+                        // this on top, a click that landed on a *word* did nothing at all:
+                        // no caret, no selection, and a drag across the words selected
+                        // nothing, so copying it copied nothing. Only the blank space below
+                        // the last line ever answered. Underneath, the field is the thing
+                        // the pointer meets, exactly as it is when the note is being
+                        // written in. The cost is that a link in the read view is no longer
+                        // clickable, which is the right trade: this is a note being edited,
+                        // not a page being browsed. ----
                         if !body.has-focus && root.blocks.length > 0: Rectangle {
                             VerticalLayout {
                                 padding: 2px;
@@ -900,19 +948,24 @@ export component StickyWindow inherits Window {
                                     }
                                 }
                             }
+                        }
 
-                            // Declared last so it is on top of what it covers: `StyledText`
-                            // takes pointer events of its own (it can hold links), and a
-                            // touch area under it never saw the click — which left the read
-                            // view a trap with no way back into the writing.
-                            //
-                            // `focus-text`, not `focus`: NotePad is a component, and focusing
-                            // a component does nothing — the caret lives in the TextInput
-                            // inside it.
-                            read-ta := TouchArea {
-                                mouse-cursor: MouseCursor.text;
-                                clicked => { body.focus-text(); }
-                            }
+                        body := NotePad {
+                            width: 100%;
+                            height: 100%;
+                            // Must match BODY_FONT_PX in sticky.rs, which sizes the photos.
+                            font-size: 13px;
+                            // Transparent while the read view is over it. The field stays
+                            // where it is — it has to, or a click could not hand the caret
+                            // back to it — and simply draws nothing; painting the read view
+                            // over it instead showed the raw markers through the paper,
+                            // which is translucent on purpose.
+                            ink: body.has-focus ? #2b2b22 : #00000000;
+                            // Room along the bottom edge for the date, so the last line of a
+                            // full note is not written underneath it.
+                            pad-bottom: root.created-at == "" ? 4px : 14px;
+                            text <=> root.memo-text;
+                            edited => { root.edited(self.text); }
                         }
 
                         // ---- Created-at, along the bottom of the *writing*. Declared after
@@ -962,6 +1015,8 @@ export component StickyWindow inherits Window {
                 // Declared after the text, so a photo is picked up by a click on it rather
                 // than placing the caret underneath.
                 for photo in root.photos: PhotoItem {
+                    // A quarter of the writing is always left reachable underneath.
+                    height-cap: body-area.height * 0.75;
                     photo: photo;
                     canvas-w: note.width;
                     canvas-h: body-area.height;
@@ -993,5 +1048,6 @@ export component StickyWindow inherits Window {
             }
         }
 
+    }
     }
 }

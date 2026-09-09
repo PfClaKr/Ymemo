@@ -572,6 +572,10 @@ fn main() -> Result<()> {
         let ctx = ctx.clone();
         list.on_new_memo(move || new_memo(&ctx));
     }
+    {
+        let ctx = ctx.clone();
+        list.on_new_memo_in(move |group| sticky::new_memo_in(&ctx, group.as_str()));
+    }
     // ---- Delete, and the offer to take it back. ----
     //
     // Deleting is the only thing in this app that loses writing, and a deleted memo cannot be
@@ -692,8 +696,33 @@ fn main() -> Result<()> {
             // Go straight into rename mode so the user can type.
             if let Some(w) = list_weak.upgrade() {
                 w.set_editing_text(SharedString::from(group.name.clone()));
-                w.set_editing_id(SharedString::from(group.id));
+                w.set_editing_id(SharedString::from(group.id.clone()));
+                // Escape in that box un-makes it; see `fresh-group-id` in `list.slint`.
+                w.set_fresh_group_id(SharedString::from(group.id));
             }
+        });
+    }
+    // ---- A folder made and immediately backed out of. ----
+    {
+        let ctx = ctx.clone();
+        list.on_discard_group(move |id| {
+            touch(&ctx);
+            // **On the next event-loop turn**, not now. This is called from the key handler of
+            // the name box inside the row being removed, and rebuilding the model here tears
+            // that box down while it is still handling its own key — which panics inside the
+            // generated code. Same reason `close_sticky` defers dropping a window.
+            let ctx = ctx.clone();
+            slint::Timer::single_shot(Duration::ZERO, move || {
+                let mut guard = ctx.vault.borrow_mut();
+                let Some(v) = guard.as_mut() else { return };
+                // A failure is worth a line but not a notice: nothing the user wrote is at
+                // stake and the folder is empty.
+                if let Err(e) = v.delete_group(id.as_str()) {
+                    diag!("could not discard the new folder: {e}");
+                    return;
+                }
+                refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
+            });
         });
     }
     {

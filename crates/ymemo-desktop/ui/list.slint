@@ -30,6 +30,12 @@ export struct ListRow {
 // accent shows the sticky's color.
 // ---------------------------------------------------------------------------
 export component ListWindow inherits Window {
+    // Where the focus goes when nothing else has asked for it — which is not only at
+    // startup. A text field that takes the caret and is then torn down (the heading's rename
+    // box, a folder's, the find box) leaves the focus nowhere at all, and a `FocusScope` that
+    // only grabbed it in its own `init` never sees another key: the shortcuts worked once and
+    // then quietly stopped. Measured, by renaming a folder and finding Ctrl+N dead.
+    forward-focus: keys;
     // The vault's own name in the task bar too, so two vaults open side by side are told
     // apart there as well as on screen.
     title: root.vault-title == "" ? Strings.ui_list_heading : root.vault-title;
@@ -79,7 +85,16 @@ export component ListWindow inherits Window {
     in-out property <string> editing-text: "";
     callback open-memo(string);            // memo id
     callback new-memo();
+    // Start a note already filed in this folder.
+    callback new-memo-in(string);
     callback new-group();
+    // Throw away a folder that was made and then backed out of, without the undo offer a real
+    // delete gets: nothing was lost, the folder simply never happened.
+    callback discard-group(string);
+    // The folder the "new folder" button has just made, while its name box is still open and
+    // untouched. Escape in that box un-makes it; once the name is committed this is cleared
+    // and Escape only backs out of a rename, like anywhere else.
+    in-out property <string> fresh-group-id;
     callback toggle-group(string);         // expand/collapse, device-local state
     callback rename-group(string, string); // id, new name
     // id, is-group, palette key. Folders and memos both carry a colour and both sync it.
@@ -151,6 +166,53 @@ export component ListWindow inherits Window {
 
     // Row height; drag distance is converted to rows with it, so it must stay fixed.
     private property <length> row-h: 34px;
+    // Which row the keyboard is on; -1 for none, which is where it starts and where Escape
+    // puts it back. Not a "current folder" or anything the rest of the app reads — only this
+    // window's idea of where the arrow keys are.
+    private property <int> selected: -1;
+
+    // Up and down, with nothing selected meaning "start at the near end".
+    function move-selection(delta: int) {
+        if (root.rows.length == 0) {
+            root.selected = -1;
+            return;
+        }
+        if (root.selected < 0) {
+            root.selected = delta > 0 ? 0 : root.rows.length - 1;
+            return;
+        }
+        root.selected = Math.max(0, Math.min(root.rows.length - 1, root.selected + delta));
+    }
+
+    // F2 renames the selected folder, which is the key every file manager uses for it. Memos
+    // have no name of their own here — a sticky's title *is* its first line — so on one this
+    // does nothing rather than opening a box that would not stick.
+    function rename-selected() {
+        if (root.selected < 0 || root.selected >= root.rows.length) {
+            return;
+        }
+        if (!root.rows[root.selected].is-group) {
+            return;
+        }
+        root.commit-edit();
+        root.editing-text = root.rows[root.selected].title;
+        root.editing-id = root.rows[root.selected].id;
+    }
+
+    // Return does to the selected row exactly what a click does to it: opens a memo, opens or
+    // shuts a folder. The row is read out of `rows` by index rather than from inside the
+    // `for`, because an id declared in a `for` cannot be reached from out here.
+    function activate-selected() {
+        if (root.selected < 0 || root.selected >= root.rows.length) {
+            return;
+        }
+        root.commit-edit();
+        if (root.rows[root.selected].is-group) {
+            root.toggle-group(root.rows[root.selected].id);
+        } else {
+            root.open-memo(root.rows[root.selected].id);
+        }
+    }
     // Whether the heading is currently standing in for a toolbar button's name.
     private property <bool> tip-showing: b-lock.hovering || b-gear.hovering || b-link.hovering
         || b-folder.hovering || b-plus.hovering;
@@ -159,6 +221,11 @@ export component ListWindow inherits Window {
     function finish-naming(name: string) {
         root.naming = false;
         root.rename-vault(name);
+        // The field that had the caret has just been torn down by the `if` above, which
+        // leaves the focus on nothing at all — and `forward-focus` only fires when the
+        // *window* is given focus, not when an element inside it disappears. Without this the
+        // window-wide keys below went dead the moment anybody renamed something.
+        keys.focus();
     }
 
     // Commits the name being edited and leaves edit mode.
@@ -167,7 +234,88 @@ export component ListWindow inherits Window {
             root.rename-group(root.editing-id, root.editing-text);
             root.editing-id = "";
         }
+        // Named, so it is a folder like any other now — a later Escape must not un-make it.
+        root.fresh-group-id = "";
+        // **Always**, not only when something was being renamed. A `TouchArea` does not hold
+        // the keyboard focus, so every click on a row, a toolbar button or an icon leaves it
+        // on nothing at all and the window-wide keys go dead until the window is reopened.
+        // Nearly everything clickable in this window calls through here first, which makes
+        // this the one place that has to remember.
+        keys.focus();
     }
+
+    // Window-wide keys, the same shape as the sticky's: a `FocusScope` around everything,
+    // because a key has to reach these whether the caret is in the find box, in the heading,
+    // or nowhere at all.
+    keys := FocusScope {
+        width: 100%;
+        height: 100%;
+        // A `FocusScope` only receives keys while it has the focus, and a window that has
+        // just opened has given it to nobody — so it takes it here. Anything the user then
+        // clicks into (the find box, the heading) takes it away and gets its keys first;
+        // what it does not consume comes back up to here.
+        init => { self.focus(); }
+        key-pressed(ev) => {
+            // Starting a note without reaching for the mouse. The same key works on a
+            // sticky, so it means the same thing wherever the app has the focus.
+            //
+            // (No Ctrl+F for the find box: it lives inside an `if`, and a Slint id declared
+            // in a conditional cannot be reached from out here. It is one click away and
+            // already on screen, which is why this is a note and not a workaround.)
+            if (ev.modifiers.control && ev.text == "n") {
+                root.new-memo();
+                return accept;
+            }
+            // Walking the list without the mouse. The find box gets these first while it has
+            // the caret, which is what lets someone type a search and then step through what
+            // came back.
+            if (ev.text == Key.DownArrow) {
+                root.move-selection(1);
+                return accept;
+            }
+            if (ev.text == Key.UpArrow) {
+                root.move-selection(-1);
+                return accept;
+            }
+            if (ev.text == Key.Return) {
+                root.activate-selected();
+                return accept;
+            }
+            if (ev.text == Key.F2) {
+                root.rename-selected();
+                return accept;
+            }
+            // Delete asks nothing, like the trash icon on the row does not: what softens both
+            // is the undo bar above, which is a click away for the next few seconds.
+            if (ev.text == Key.Delete && root.selected >= 0
+                && root.selected < root.rows.length) {
+                root.commit-edit();
+                root.delete-row(root.rows[root.selected].id,
+                                root.rows[root.selected].is-group);
+                return accept;
+            }
+            // Take the delete back. Only while the bar is up — this is that bar's button, not
+            // an undo history, and a Ctrl+Z that silently did nothing would suggest there was
+            // one.
+            if (ev.modifiers.control && ev.text == "z" && root.undo-message != "") {
+                root.undo-delete();
+                return accept;
+            }
+            // The ends of the list, for the same reason every list has them.
+            if (ev.text == Key.Home && root.rows.length > 0) {
+                root.selected = 0;
+                return accept;
+            }
+            if (ev.text == Key.End && root.rows.length > 0) {
+                root.selected = root.rows.length - 1;
+                return accept;
+            }
+            if (ev.text == Key.Escape && root.selected >= 0) {
+                root.selected = -1;
+                return accept;
+            }
+            return reject;
+        }
 
     VerticalLayout {
         padding: 12px;
@@ -372,6 +520,11 @@ export component ListWindow inherits Window {
                         single-line: true;
                         accessible-label: Strings.ui_list_search;
                         edited => { root.search(self.text); }
+                        // Return opens whatever the arrows landed on. The field swallows this
+                        // key on its own — the arrows pass through it and this one does not —
+                        // so typing a search, stepping down into what came back and pressing
+                        // return did nothing at all, which is the whole gesture.
+                        accepted => { root.activate-selected(); }
                         // Escape clears rather than closes: the field has no close of its own,
                         // and a search left standing is what would make the list look half
                         // empty ten minutes later.
@@ -390,7 +543,7 @@ export component ListWindow inherits Window {
                     height: 20px;
                     icon: "close";
                     label: Strings.ui_list_search;
-                    clicked => { find.text = ""; root.search(""); }
+                    clicked => { find.text = ""; root.search(""); root.commit-edit(); }
                 }
             }
         }
@@ -513,6 +666,23 @@ export component ListWindow inherits Window {
 
         if !root.show-sync && root.rows.length > 0: ListView {
             vertical-stretch: 1;
+            // A local mirror of the selection, so its `changed` can fire in here: this view
+            // is inside an `if`, and nothing outside a conditional can reach an id declared
+            // in it — which is also why the scrolling lives here rather than beside the
+            // arrow keys that cause it.
+            //
+            // Only written when the row is actually out of sight, so the wheel still works:
+            // binding `viewport-y` outright would take the scrollbar away from the user.
+            property <int> sel: root.selected;
+            changed sel => {
+                if (self.sel >= 0) {
+                    if (self.sel * root.row-h + root.row-h > -self.viewport-y + self.visible-height) {
+                        self.viewport-y = self.visible-height - (self.sel + 1) * root.row-h;
+                    } else if (self.sel * root.row-h < -self.viewport-y) {
+                        self.viewport-y = -self.sel * root.row-h;
+                    }
+                }
+            }
             for row[idx] in root.rows: Rectangle {
                 height: root.row-h;
                 border-radius: 6px;
@@ -530,6 +700,11 @@ export component ListWindow inherits Window {
                           : row.is-group ? #ffffff12
                           : row.depth > 0 ? #ffffff08
                           : transparent;
+                // Where the arrow keys are. An outline rather than a brighter fill: the fill
+                // already carries the hover and which folder a row is in, and a third shade
+                // of the same grey would be one too many to tell apart.
+                border-width: root.selected == idx ? 1px : 0px;
+                border-color: #7db8ec;
                 animate background { duration: 120ms; easing: ease-out; }
 
                 // The line the memo would land on, in the space the two rows either side have
@@ -605,6 +780,9 @@ export component ListWindow inherits Window {
                     clicked => {
                         if (!root.did-drag) {
                             root.commit-edit();
+                            // So the arrows carry on from whatever was last touched, rather
+                            // than from wherever they happened to be left.
+                            root.selected = idx;
                             if (row.is-group) {
                                 root.toggle-group(row.id);
                             } else {
@@ -718,6 +896,26 @@ export component ListWindow inherits Window {
                         init => { self.focus(); self.select-all(); }
                         edited(t) => { root.editing-text = t; }
                         accepted => { root.commit-edit(); }
+                        // Escape backs out, the way it does on the heading's own name field.
+                        // Not through `commit-edit`: this leaves without writing, so a folder
+                        // whose rename was abandoned does not get a log entry saying it was
+                        // renamed to what it was already called.
+                        key-pressed(ev) => {
+                            if (ev.text == Key.Escape) {
+                                // A folder that was just made and never named goes with the
+                                // box: pressing the button and changing your mind should
+                                // leave the list as it was, not leave a "New folder" behind.
+                                if (root.fresh-group-id != ""
+                                    && root.editing-id == root.fresh-group-id) {
+                                    root.discard-group(root.editing-id);
+                                }
+                                root.editing-id = "";
+                                root.fresh-group-id = "";
+                                keys.focus();
+                                return accept;
+                            }
+                            return reject;
+                        }
                     }
                     if root.coloring-id != row.id && root.editing-id != row.id: Text {
                         text: row.is-group
@@ -783,9 +981,42 @@ export component ListWindow inherits Window {
                     // as it was being aimed at.
                     if root.coloring-id != row.id: HorizontalLayout {
                         spacing: 0px;
+                        // Start a note **in this folder**. Every other way of making one puts
+                        // it at the top level, so filing anything meant making it and then
+                        // dragging it in — on an app whose folders are the point.
+                        //
+                        // Folders only, but **not** behind an `if`: an id declared in a
+                        // conditional cannot be reached from its siblings, and the two icons
+                        // beside it have to see this one's hover or they blink out exactly as
+                        // the pointer arrives here. Zero-wide on a memo instead, which has
+                        // nothing to put inside it.
+                        Rectangle {
+                            width: row.is-group ? 20px : 0px;
+                            opacity: row.is-group && (ta.has-hover || hist-ta.has-hover
+                                || del-ta.has-hover || add-ta.has-hover) ? 1 : 0;
+                            Glyph {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: 14px;
+                                height: 14px;
+                                name: "plus";
+                                stroke: add-ta.has-hover ? #ece7db : #b0a99a;
+                            }
+                            add-ta := TouchArea {
+                                enabled: row.is-group;
+                                mouse-cursor: pointer;
+                                accessible-role: button;
+                                accessible-label: Strings.ui_list_tip_new_memo_here;
+                                clicked => {
+                                    root.commit-edit();
+                                    root.new-memo-in(row.id);
+                                }
+                            }
+                        }
                         Rectangle {
                             width: 20px;
-                            opacity: ta.has-hover || hist-ta.has-hover || del-ta.has-hover ? 1 : 0;
+                            opacity: ta.has-hover || hist-ta.has-hover || del-ta.has-hover
+                                || add-ta.has-hover ? 1 : 0;
                             Glyph {
                                 x: (parent.width - self.width) / 2;
                                 y: (parent.height - self.height) / 2;
@@ -816,7 +1047,8 @@ export component ListWindow inherits Window {
                                 height: 15px;
                                 name: "trash";
                                 stroke: del-ta.has-hover ? #e8a0a0 : #b0a99a;
-                                opacity: !(ta.has-hover || hist-ta.has-hover || del-ta.has-hover) ? 0
+                                opacity: !(ta.has-hover || hist-ta.has-hover || del-ta.has-hover
+                                    || add-ta.has-hover) ? 0
                                     : del-ta.has-hover ? 1 : 0.4;
                             }
                             clicked => { root.commit-edit(); root.delete-row(row.id, row.is-group); }
@@ -825,5 +1057,6 @@ export component ListWindow inherits Window {
                 }
             }
         }
+    }
     }
 }
