@@ -82,8 +82,10 @@ pub(crate) fn show(ctx: &Ctx, win: &HistoryWindow, subject: &Subject, entity: En
 
 /// Reloads the revisions and the heading.
 fn refresh(ctx: &Ctx, win: &HistoryWindow, entity: Entity, id: &str) {
-    let guard = ctx.vault.borrow();
-    let Some(v) = guard.as_ref() else { return };
+    // Mutable because reading a memo's past reads the document, and `AutoCommit` settles any
+    // pending edit before it hands over its changes.
+    let mut guard = ctx.vault.borrow_mut();
+    let Some(v) = guard.as_mut() else { return };
 
     let name = match entity {
         Entity::Memo => v.store().get(id).ok().flatten().map(|m| m.title),

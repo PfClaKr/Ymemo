@@ -108,7 +108,19 @@ pub struct Vault {
     doc: AutoCommit,
     /// Photo bytes (`<vault_dir>/blobs`).
     blobs: BlobStore,
+    /// What the logs looked like when [`Vault::rebuild`] last read them; see [`LogState`].
+    built_from: Option<LogState>,
 }
+
+/// A fingerprint of the log directory: every log's name, length and modified time.
+///
+/// The logs are **append-only, one per device**, so anything new — typed here or arrived over
+/// sync — moves one of these. When none of them moved, re-reading every log, decrypting every
+/// record and replaying it into a fresh document produces exactly the document already in
+/// memory. That is what the merge timer was doing every fifteen seconds, on the UI thread:
+/// 43 ms on a vault with a few hundred memos in it and 365 ms on one with a year, growing
+/// forever, almost always for nothing. Measured.
+type LogState = Vec<(std::ffi::OsString, u64, Option<std::time::SystemTime>)>;
 
 impl Vault {
     /// Creates a vault: new salt plus header. Errors if one already exists.
@@ -188,6 +200,8 @@ impl Vault {
             device_id,
             own_log,
             blobs,
+            // Nothing has been read yet, so the rebuild below is never the one that is skipped.
+            built_from: None,
         };
         vault.rebuild()?;
         Ok(vault)
@@ -613,12 +627,60 @@ impl Vault {
     /// Merges every log in `logs/` into a fresh document and rebuilds the SQLite cache from
     /// scratch. One call picks up whatever Syncthing has delivered.
     pub fn rebuild(&mut self) -> Result<()> {
+        // Read *before* the logs are, not after: reading them is not one atomic act, and a
+        // record that lands halfway through must leave the vault looking out of date rather
+        // than be recorded as already merged. The cost of being wrong this way is one more
+        // rebuild; the cost of being wrong the other way is a change that never arrives.
+        let state = self.log_state();
+        if self.built_from.as_ref() == Some(&state) {
+            return Ok(()); // nothing new to merge, and the cache already says so
+        }
         let mut doc = AutoCommit::new();
         doc.apply_changes(self.read_all_changes()?)?;
         // actor = device_id, so later local changes continue our own actor sequence.
         doc.set_actor(ActorId::from(self.device_id.as_bytes()));
         self.doc = doc;
-        self.materialize()
+        self.materialize()?;
+        self.built_from = Some(state);
+        Ok(())
+    }
+
+    /// Records our own log at its current length as already merged, leaving every other
+    /// device's entry alone. See the call in [`Vault::append_local_change`].
+    fn mark_own_log_merged(&mut self) {
+        let Some(state) = self.built_from.as_mut() else {
+            return; // nothing has been read yet; the first rebuild must still do the work
+        };
+        let name = std::ffi::OsString::from(format!("{}.{LOG_EXT}", self.device_id));
+        let Ok(meta) = fs::metadata(self.dir.join(LOGS_DIR).join(&name)) else {
+            return;
+        };
+        let fresh = (name.clone(), meta.len(), meta.modified().ok());
+        match state.iter_mut().find(|(n, _, _)| *n == name) {
+            Some(slot) => *slot = fresh,
+            None => {
+                state.push(fresh);
+                state.sort();
+            }
+        }
+    }
+
+    /// The fingerprint [`LogState`] describes, sorted so two readings compare.
+    fn log_state(&self) -> LogState {
+        let mut out = Vec::new();
+        let Ok(entries) = fs::read_dir(self.dir.join(LOGS_DIR)) else {
+            return out; // no logs yet, which is a state like any other
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some(LOG_EXT) {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            out.push((entry.file_name(), meta.len(), meta.modified().ok()));
+        }
+        out.sort();
+        out
     }
 
     /// Every past version of one memo or folder, oldest first.
@@ -626,12 +688,12 @@ impl Vault {
     /// Read from the logs rather than the live document, so it neither disturbs nor is
     /// disturbed by the merge timer. See [`crate::history`] for what a revision is and why
     /// this is not built on Syncthing's file versioning.
-    pub fn history(&self, entity: Entity, id: &str) -> Result<Vec<Revision>> {
-        // A throwaway document is the cheapest way to get the changes in causal order:
-        // the logs are only ordered within a file, and merging is what interleaves them.
-        let mut ordered = AutoCommit::new();
-        ordered.apply_changes(self.read_all_changes()?)?;
-        crate::history::replay(ordered.get_changes(&[]), entity, id)
+    pub fn history(&mut self, entity: Entity, id: &str) -> Result<Vec<Revision>> {
+        // The document already holds every change in causal order, which is what the logs
+        // were being re-read and re-decrypted to reconstruct — a second full copy of the
+        // vault built to answer a question about one memo. On a vault with a year in it that
+        // was seconds of the UI thread on a single click. Measured.
+        crate::history::replay(self.doc.get_changes(&[]).to_vec(), entity, id)
     }
 
     /// Writes the values from `revision` back, as a new edit.
@@ -824,6 +886,14 @@ impl Vault {
                 .get_last_local_change()
                 .context(t!("core.no_local_change"))?;
             self.own_log.append(change.raw_bytes())?;
+            // This change is already in the document and in the cache — that is what a local
+            // write *is* — so our own log growing by it is not news. Without this every
+            // keystroke that reached the vault bought a full re-read on the next merge tick.
+            //
+            // **Only our own log.** Taking the whole directory's state here would mark another
+            // device's changes as merged the moment we typed anything, and that change would
+            // then never be read — which is exactly what the two merge tests caught.
+            self.mark_own_log_merged();
         }
         Ok(())
     }
@@ -2080,7 +2150,7 @@ mod tests {
             v.upsert(&memo).unwrap();
         }
 
-        let v = Vault::open(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+        let mut v = Vault::open(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
         let hist = v.history(Entity::Memo, &memo.id).unwrap();
         assert_eq!(hist.len(), 3, "creation plus two edits");
         assert_eq!(hist[0].kind, RevisionKind::Created);
@@ -2404,6 +2474,44 @@ mod tests {
 
         // One log file per device.
         assert_eq!(fs::read_dir(dir.join(LOGS_DIR)).unwrap().count(), 2);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A rebuild with nothing new is skipped, and one with something new is never skipped.
+    ///
+    /// The skip is what keeps the merge timer off the UI thread when no change has arrived,
+    /// and getting it wrong is silent: the vault simply stops seeing the other device. The
+    /// case that matters is a **local write while another device's change is waiting** —
+    /// marking the whole log directory merged there would call that change read.
+    #[test]
+    fn a_rebuild_skips_nothing_it_has_not_already_read() {
+        let dir = std::env::temp_dir().join(format!("ymemo-skip-{}", uuid::Uuid::new_v4()));
+        let mut a = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let base = Memo::new("from A", "body");
+        a.upsert(&base).unwrap();
+
+        let mut b = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+
+        // Nothing has happened since B read the logs, so this rebuild has nothing to do —
+        // and must leave the document it already has alone.
+        b.rebuild().unwrap();
+        assert_eq!(b.store().list().unwrap().len(), 1);
+
+        // A writes. B has not read it yet.
+        let mut edit = base.clone();
+        edit.title = "A wrote again".into();
+        a.upsert(&edit).unwrap();
+
+        // B writes something of its own *first*. Its own log growing is not news; A's is.
+        let mut own = Memo::new("from B", "body");
+        own.id = "b-memo".into();
+        b.upsert(&own).unwrap();
+
+        b.rebuild().unwrap();
+        let merged = b.store().get(&base.id).unwrap().unwrap();
+        assert_eq!(merged.title, "A wrote again", "A's change must survive B's own write");
+        assert!(b.store().get("b-memo").unwrap().is_some());
 
         fs::remove_dir_all(&dir).ok();
     }
