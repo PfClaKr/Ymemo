@@ -22,39 +22,75 @@
 //! while typing.
 
 use crate::NoteBlock;
-use ymemo_core::diag;
 
-/// A block of prose, with its markdown already parsed.
+/// A block of prose, or `None` when Slint's markdown will not read it.
 ///
 /// Parsing here rather than in the `.slint`: `@markdown()` reads the literal it is written
 /// with, so a memo — which only exists at runtime — has to arrive as styled text. `text`
 /// keeps the markdown it came from: nothing draws it, and it is what the tests read back.
-fn prose_block(markdown: &str, font_size: f32) -> NoteBlock {
+fn parsed(markdown: &str, font_size: f32) -> Option<NoteBlock> {
     let markdown = &crate::hangul::for_slint(markdown);
-    let styled = slint::StyledText::from_markdown(markdown).unwrap_or_else(|e| {
-        // Markdown that will not parse is still writing, and dropping it would look like the
-        // memo had lost a paragraph. Shown as it was typed instead.
-        diag!("could not read the memo's markdown, showing it as written: {e}");
-        slint::StyledText::from_plain_text(markdown)
-    });
-    NoteBlock {
-        styled,
+    Some(NoteBlock {
+        styled: slint::StyledText::from_markdown(markdown).ok()?,
         text: markdown.into(),
         code: false,
         lines: Default::default(),
         font_size,
+    })
+}
+
+/// One paragraph of a markdown region, as the blocks it takes to draw it.
+///
+/// Slint reads a **subset** of commonmark, and refuses the whole string over one line it does
+/// not know: headings, horizontal rules, block quotes, images, indented code and inline HTML
+/// are each enough to do it. So a single `> quote` used to cost every other line around it
+/// its bold and its bullets. When the paragraph will not parse it is rebuilt a line at a
+/// time: each run of lines that still parses together stays one block, and only the line that
+/// stopped it is drawn as it was typed.
+///
+/// None of this is worth a `diag!`. A memo holding a construct Slint cannot draw is ordinary
+/// writing, not a failure, and the note is re-split on **every keystroke** — one line per
+/// character typed would push the log's real contents out inside a paragraph.
+fn prose_blocks(markdown: &str, font_size: f32, out: &mut Vec<NoteBlock>) {
+    if let Some(block) = parsed(markdown, font_size) {
+        out.push(block);
+        return;
     }
+    let mut run: Vec<&str> = Vec::new();
+    for line in markdown.lines() {
+        run.push(line);
+        if parsed(&run.join("\n"), font_size).is_some() {
+            continue;
+        }
+        // This line is what stopped it: hand back the run without it, then the line itself.
+        run.pop();
+        flush_run(&mut run, font_size, out);
+        out.push(plain_block(line, font_size));
+    }
+    flush_run(&mut run, font_size, out);
+}
+
+/// Pushes a run of lines already known to parse, and empties it.
+fn flush_run(run: &mut Vec<&str>, font_size: f32, out: &mut Vec<NoteBlock>) {
+    if run.is_empty() {
+        return;
+    }
+    let text = run.join("\n");
+    run.clear();
+    // The `unwrap_or_else` cannot fire — the run parsed on the way in — and a note is not
+    // worth a panic if it ever did.
+    out.push(parsed(&text, font_size).unwrap_or_else(|| plain_block(&text, font_size)));
 }
 
 /// A block of writing that is not in a markdown region: shown exactly as it was typed.
-fn plain_block(text: &str) -> NoteBlock {
+fn plain_block(text: &str, font_size: f32) -> NoteBlock {
     let text = &crate::hangul::for_slint(text);
     NoteBlock {
         styled: slint::StyledText::from_plain_text(text),
         text: text.into(),
         code: false,
         lines: Default::default(),
-        font_size: BODY_FONT_PX,
+        font_size,
     }
 }
 
@@ -130,7 +166,7 @@ fn close(held: &mut Vec<&str>, lang: &str, out: &mut Vec<NoteBlock>) {
 /// Writing outside any fence: one block, exactly as typed.
 fn flush_plain(held: &mut Vec<&str>, out: &mut Vec<NoteBlock>) {
     if held.iter().any(|l| !l.trim().is_empty()) {
-        out.push(plain_block(&held.join("\n")));
+        out.push(plain_block(&held.join("\n"), BODY_FONT_PX));
     }
     held.clear();
 }
@@ -141,22 +177,37 @@ fn flush_markdown(held: &mut Vec<&str>, out: &mut Vec<NoteBlock>) {
     let mut para: Vec<&str> = Vec::new();
     fn flush(lines: &mut Vec<&str>, out: &mut Vec<NoteBlock>) {
         if lines.iter().any(|l| !l.trim().is_empty()) {
-            out.push(prose_block(&lines.join("\n"), BODY_FONT_PX));
+            prose_blocks(&lines.join("\n"), BODY_FONT_PX, out);
         }
         lines.clear();
     }
     for line in held.iter() {
+        // A blank line ends a paragraph, which is what it means in markdown and what keeps a
+        // line Slint refuses from dragging the paragraph on the other side of the gap down
+        // with it.
+        if line.trim().is_empty() {
+            flush(&mut para, out);
+            continue;
+        }
         match heading_level(line) {
             0 => para.push(line),
             level => {
                 flush(&mut para, out);
+                let title = line[level + 1..].trim();
+                // A heading with nothing after the hashes is nothing to draw — and wrapped
+                // in the `**` below it would be `****`, which commonmark reads as a
+                // horizontal rule and Slint then refuses outright.
+                if title.is_empty() {
+                    continue;
+                }
                 // Bold, because Slint's markdown has no headings of its own; the size is
                 // what actually says "heading" and the weight keeps it from reading as a
                 // paragraph that happens to be large.
-                out.push(prose_block(
-                    &format!("**{}**", escape(line[level + 1..].trim())),
+                prose_blocks(
+                    &format!("**{}**", escape(title)),
                     BODY_FONT_PX * HEADING_SCALE[level - 1],
-                ));
+                    out,
+                );
             }
         }
     }
@@ -293,6 +344,52 @@ mod tests {
         assert_eq!(got[0].text.to_string(), "**a \\*\\* b**");
     }
 
+    /// A line Slint's markdown cannot read costs only itself.
+    ///
+    /// It reads a subset, and refuses the whole string over one line outside it — so the
+    /// paragraph is rebuilt around the offending line rather than given up on.
+    #[test]
+    fn one_line_slint_cannot_read_does_not_flatten_the_rest() {
+        for bad in ["> quote", "![img](x.png)", "---", "<b>tag</b>", "#"] {
+            let body = format!("```\nbefore **bold**\n\n{bad}\n\nafter **bold**\n```");
+            let got = blocks(&body);
+            // The bad line is there, exactly as typed, drawn plain.
+            let plain = got
+                .iter()
+                .find(|b| b.text == bad)
+                .unwrap_or_else(|| panic!("{bad} should survive as its own block"));
+            assert_eq!(plain.styled, slint::StyledText::from_plain_text(bad), "{bad}");
+            // And the writing around it is still markdown.
+            for side in ["before **bold**", "after **bold**"] {
+                let b = got
+                    .iter()
+                    .find(|b| b.text == side)
+                    .unwrap_or_else(|| panic!("{side} should stay its own block next to {bad}"));
+                assert_ne!(b.styled, slint::StyledText::from_plain_text(side), "{bad}");
+            }
+        }
+    }
+
+    /// Every character of a paragraph comes back out, whatever Slint made of it.
+    #[test]
+    fn nothing_is_dropped_when_a_paragraph_is_rebuilt() {
+        let body = "```\n# Title\n> quote\nplain **bold**\n---\ntail\n```";
+        let joined: Vec<String> = blocks(body).iter().map(|b| b.text.to_string()).collect();
+        assert_eq!(joined.join("\n"), "**Title**\n> quote\nplain **bold**\n---\ntail");
+    }
+
+    /// `# ` with nothing after it is an empty heading, not a horizontal rule.
+    ///
+    /// Wrapped in the `**` that makes a heading bold it came out as `****`, which commonmark
+    /// reads as a rule — so the block was refused and the note drew four asterisks.
+    #[test]
+    fn a_heading_with_no_words_draws_nothing() {
+        assert!(blocks("```\n# \n```").is_empty());
+        let got = blocks("```\n# \nbody\n```");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].text.to_string(), "body");
+    }
+
     /// Blank lines alone are not a paragraph; an empty memo draws nothing.
     #[test]
     fn nothing_to_show_is_no_blocks() {
@@ -301,3 +398,4 @@ mod tests {
         assert!(blocks("```\n\n```").is_empty());
     }
 }
+
