@@ -209,6 +209,8 @@ component PhotoItem inherits Rectangle {
         width: 18px;
         height: 18px;
         enabled: root.active;
+        accessible-role: button;
+        accessible-label: Strings.ui_sticky_photo_remove;
         clicked => { root.remove(); }
     }
 
@@ -220,6 +222,8 @@ component PhotoItem inherits Rectangle {
         width: 18px;
         height: 18px;
         enabled: root.active;
+        accessible-role: button;
+        accessible-label: Strings.ui_sticky_photo_save;
         clicked => { root.save(); }
     }
 
@@ -231,6 +235,11 @@ component PhotoItem inherits Rectangle {
         width: 18px;
         height: 18px;
         enabled: root.active;
+        accessible-role: button;
+        // What pressing it does, like the glyph below — not what the photo is now.
+        accessible-label: root.flow
+            ? Strings.ui_sticky_photo_over_text
+            : Strings.ui_sticky_photo_under_text;
         clicked => { root.set-flow(!root.flow); }
     }
 
