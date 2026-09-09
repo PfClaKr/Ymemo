@@ -1,7 +1,6 @@
 //! Lock and unlock flow, plus applying language and settings across every window.
 
 use std::cell::{Cell, RefCell};
-use std::fs;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -139,11 +138,9 @@ pub(crate) fn reset_vault(ctx: &Ctx, syncthing: &Rc<RefCell<Option<Syncthing>>>)
     }
 
     ymemo_core::vault::wipe(ctx.dir.join("vault"))?;
-    // The cache is a plaintext copy of everything in the vault, so it goes with it.
-    let db = ctx.dir.join("ymemo.db");
-    if db.exists() {
-        fs::remove_file(&db)?;
-    }
+    // The cache is a plaintext copy of everything in the vault, so it goes with it — and so
+    // do the sidecars WAL mode keeps beside it, or a reset hands the memos back.
+    ymemo_core::Store::delete_file(ctx.dir.join("ymemo.db"))?;
     settings::clear_session(&ctx.dir);
 
     *ctx.vault.borrow_mut() = None;

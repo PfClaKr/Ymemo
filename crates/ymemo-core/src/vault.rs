@@ -830,6 +830,25 @@ impl Vault {
 
     /// Materializes the document into the SQLite cache.
     fn materialize(&mut self) -> Result<()> {
+        // One transaction for the whole cache, for two reasons. Every statement below was a
+        // transaction of its own, so a rebuild cost one fsync per memo, folder, photo and
+        // removal — a quarter of a second on an ordinary vault, on the UI thread, every time
+        // the merge timer fired. And the cache was *visibly* empty between the clear and the
+        // last write, which is what any reader running in between would have seen.
+        self.store.begin()?;
+        match self.materialize_all() {
+            Ok(()) => self.store.commit(),
+            Err(e) => {
+                // The cache is disposable and the next rebuild writes it again, so putting it
+                // back as it was is better than leaving it half-cleared.
+                let _ = self.store.rollback();
+                Err(e)
+            }
+        }
+    }
+
+    /// Everything [`Vault::materialize`] writes, inside the transaction it opens.
+    fn materialize_all(&mut self) -> Result<()> {
         // Clears memos, groups **and** attachments, so every one of them has to be written
         // back below — returning early on any of them would leave the cache short.
         self.store.clear_memos()?;

@@ -321,8 +321,44 @@ impl Store {
         let store = Self {
             conn: Connection::open(path)?,
         };
+        // SQLite's defaults are chosen for a database somebody would miss. This one is a
+        // **disposable view** of the vault — `Vault::rebuild` throws it away and writes it
+        // again from the logs — so the durability the defaults buy is paid for and never
+        // used. `DELETE` + `FULL` means an fsync per statement, and the rebuild that runs on
+        // the merge timer writes one statement per memo, folder, photo and removal: on an
+        // ordinary vault that was a quarter of a second of fsyncs, on the UI thread, every
+        // fifteen seconds. Measured.
+        store.conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;",
+        )?;
         store.init()?;
         Ok(store)
+    }
+
+    /// Deletes a cache file and the two sidecars WAL mode keeps beside it.
+    ///
+    /// `ymemo.db-wal` holds writes that have not been folded back into the database yet.
+    /// Deleting the database and leaving that behind is how a reset gives back the memos it
+    /// was asked to destroy, so the three always go together.
+    pub fn delete_file(path: impl AsRef<std::path::Path>) -> Result<()> {
+        let path = path.as_ref();
+        for p in [
+            path.to_path_buf(),
+            path.with_extension(format!(
+                "{}-wal",
+                path.extension().and_then(|e| e.to_str()).unwrap_or_default()
+            )),
+            path.with_extension(format!(
+                "{}-shm",
+                path.extension().and_then(|e| e.to_str()).unwrap_or_default()
+            )),
+        ] {
+            if p.exists() {
+                std::fs::remove_file(&p)?;
+            }
+        }
+        Ok(())
     }
 
     /// In-memory store, for tests.
@@ -451,6 +487,29 @@ impl Store {
     }
 
     /// Empties the memo/group/attachment tables before replaying the log; keeps `meta`.
+    /// Opens a transaction over the cache.
+    ///
+    /// Every write here is its own transaction otherwise, which is both a needless fsync each
+    /// and a cache that is visibly half-written while a rebuild is running. Paired with
+    /// [`Store::commit`] or [`Store::rollback`]; see `Vault::materialize`, which is the reason
+    /// this exists.
+    pub fn begin(&self) -> Result<()> {
+        self.conn.execute_batch("BEGIN")?;
+        Ok(())
+    }
+
+    /// Makes everything since [`Store::begin`] visible.
+    pub fn commit(&self) -> Result<()> {
+        self.conn.execute_batch("COMMIT")?;
+        Ok(())
+    }
+
+    /// Throws away everything since [`Store::begin`], leaving the cache as it was.
+    pub fn rollback(&self) -> Result<()> {
+        self.conn.execute_batch("ROLLBACK")?;
+        Ok(())
+    }
+
     pub fn clear_memos(&self) -> Result<()> {
         self.conn.execute("DELETE FROM memos", [])?;
         self.conn.execute("DELETE FROM groups", [])?;
@@ -916,6 +975,46 @@ mod tests {
         assert_eq!(store.list_groups().unwrap().len(), 1);
         store.delete_group(&g.id).unwrap();
         assert!(store.list_groups().unwrap().is_empty());
+    }
+
+    /// Deleting the cache takes the WAL with it.
+    ///
+    /// The database alone is not the cache: `-wal` holds writes not yet folded into it, and a
+    /// reset that leaves one behind is a reset that gives the memos back.
+    #[test]
+    fn deleting_the_cache_takes_its_sidecars() {
+        let path = std::env::temp_dir().join(format!("ymemo-wal-{}.db", uuid::Uuid::new_v4()));
+        {
+            let store = Store::open(&path).unwrap();
+            store.upsert(&Memo::new("secret", "secret")).unwrap();
+            // A write held in the WAL rather than folded back, which is the case that matters.
+            assert!(path.with_extension("db-wal").exists(), "WAL mode is on");
+        }
+        Store::delete_file(&path).unwrap();
+        assert!(!path.exists());
+        assert!(!path.with_extension("db-wal").exists());
+        assert!(!path.with_extension("db-shm").exists());
+        // And it is not an error to delete a cache that was never there.
+        Store::delete_file(&path).unwrap();
+    }
+
+    /// A rebuild's writes land together or not at all.
+    #[test]
+    fn a_rolled_back_cache_write_leaves_the_rows_alone() {
+        let store = Store::open_in_memory().unwrap();
+        store.upsert(&Memo::new("kept", "kept")).unwrap();
+
+        store.begin().unwrap();
+        store.clear_memos().unwrap();
+        store.upsert(&Memo::new("half written", "")).unwrap();
+        store.rollback().unwrap();
+        assert_eq!(store.list().unwrap().len(), 1);
+        assert_eq!(store.list().unwrap()[0].title, "kept");
+
+        store.begin().unwrap();
+        store.upsert(&Memo::new("second", "")).unwrap();
+        store.commit().unwrap();
+        assert_eq!(store.list().unwrap().len(), 2);
     }
 
     /// Opening a pre-color cache adds the columns with their defaults.
