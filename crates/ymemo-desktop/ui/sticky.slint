@@ -829,33 +829,27 @@ export component StickyWindow inherits Window {
                 VerticalLayout {
                     body-area := Rectangle {
                         vertical-stretch: 1;
-                        body := NotePad {
-                            width: 100%;
-                            height: 100%;
-                            // Must match BODY_FONT_PX in sticky.rs, which sizes the photos.
-                            font-size: 13px;
-                            // Transparent while the read view is over it. The field stays
-                            // where it is — it has to, or a click could not hand the caret
-                            // back to it — and simply draws nothing; painting the read view
-                            // over it instead showed the raw markers through the paper,
-                            // which is translucent on purpose.
-                            ink: body.has-focus ? #2b2b22 : #00000000;
-                            // Room along the bottom edge for the date, so the last line of a
-                            // full note is not written underneath it.
-                            pad-bottom: root.created-at == "" ? 4px : 14px;
-                            text <=> root.memo-text;
-                            edited => { root.edited(self.text); }
-                        }
-
-                        // ---- The memo as it reads: markdown drawn as markdown, over the
-                        // markdown as it is typed.
+                        // ---- The memo as it reads: markdown drawn as markdown, **under**
+                        // the field that holds the markdown as it is typed.
                         //
                         // Slint's editor has one font weight for the whole field, so there
                         // is no styling the text *while* it is being written. What there is
-                        // instead: the moment the caret leaves, this covers the field with
-                        // the same words set properly, and a click hands the caret back and
-                        // takes it away again. Writing is always the plain memo, with every
-                        // marker where the user put it. ----
+                        // instead: the moment the caret leaves, the field goes transparent
+                        // (`ink` above) and this shows through it with the same words set
+                        // properly. Writing is always the plain memo, with every marker where
+                        // the user put it.
+                        //
+                        // **Under, not over**, and that is the whole of why it works.
+                        // `StyledText` takes pointer events of its own and wins them against
+                        // anything below it whatever the declaration order says — so with
+                        // this on top, a click that landed on a *word* did nothing at all:
+                        // no caret, no selection, and a drag across the words selected
+                        // nothing, so copying it copied nothing. Only the blank space below
+                        // the last line ever answered. Underneath, the field is the thing
+                        // the pointer meets, exactly as it is when the note is being
+                        // written in. The cost is that a link in the read view is no longer
+                        // clickable, which is the right trade: this is a note being edited,
+                        // not a page being browsed. ----
                         if !body.has-focus && root.blocks.length > 0: Rectangle {
                             VerticalLayout {
                                 padding: 2px;
@@ -900,19 +894,24 @@ export component StickyWindow inherits Window {
                                     }
                                 }
                             }
+                        }
 
-                            // Declared last so it is on top of what it covers: `StyledText`
-                            // takes pointer events of its own (it can hold links), and a
-                            // touch area under it never saw the click — which left the read
-                            // view a trap with no way back into the writing.
-                            //
-                            // `focus-text`, not `focus`: NotePad is a component, and focusing
-                            // a component does nothing — the caret lives in the TextInput
-                            // inside it.
-                            read-ta := TouchArea {
-                                mouse-cursor: MouseCursor.text;
-                                clicked => { body.focus-text(); }
-                            }
+                        body := NotePad {
+                            width: 100%;
+                            height: 100%;
+                            // Must match BODY_FONT_PX in sticky.rs, which sizes the photos.
+                            font-size: 13px;
+                            // Transparent while the read view is over it. The field stays
+                            // where it is — it has to, or a click could not hand the caret
+                            // back to it — and simply draws nothing; painting the read view
+                            // over it instead showed the raw markers through the paper,
+                            // which is translucent on purpose.
+                            ink: body.has-focus ? #2b2b22 : #00000000;
+                            // Room along the bottom edge for the date, so the last line of a
+                            // full note is not written underneath it.
+                            pad-bottom: root.created-at == "" ? 4px : 14px;
+                            text <=> root.memo-text;
+                            edited => { root.edited(self.text); }
                         }
 
                         // ---- Created-at, along the bottom of the *writing*. Declared after
