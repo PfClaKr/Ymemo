@@ -88,6 +88,13 @@ export component ListWindow inherits Window {
     // Start a note already filed in this folder.
     callback new-memo-in(string);
     callback new-group();
+    // Throw away a folder that was made and then backed out of, without the undo offer a real
+    // delete gets: nothing was lost, the folder simply never happened.
+    callback discard-group(string);
+    // The folder the "new folder" button has just made, while its name box is still open and
+    // untouched. Escape in that box un-makes it; once the name is committed this is cleared
+    // and Escape only backs out of a rename, like anywhere else.
+    in-out property <string> fresh-group-id;
     callback toggle-group(string);         // expand/collapse, device-local state
     callback rename-group(string, string); // id, new name
     // id, is-group, palette key. Folders and memos both carry a colour and both sync it.
@@ -177,6 +184,21 @@ export component ListWindow inherits Window {
         root.selected = Math.max(0, Math.min(root.rows.length - 1, root.selected + delta));
     }
 
+    // F2 renames the selected folder, which is the key every file manager uses for it. Memos
+    // have no name of their own here — a sticky's title *is* its first line — so on one this
+    // does nothing rather than opening a box that would not stick.
+    function rename-selected() {
+        if (root.selected < 0 || root.selected >= root.rows.length) {
+            return;
+        }
+        if (!root.rows[root.selected].is-group) {
+            return;
+        }
+        root.commit-edit();
+        root.editing-text = root.rows[root.selected].title;
+        root.editing-id = root.rows[root.selected].id;
+    }
+
     // Return does to the selected row exactly what a click does to it: opens a memo, opens or
     // shuts a folder. The row is read out of `rows` by index rather than from inside the
     // `for`, because an id declared in a `for` cannot be reached from out here.
@@ -212,6 +234,8 @@ export component ListWindow inherits Window {
             root.rename-group(root.editing-id, root.editing-text);
             root.editing-id = "";
         }
+        // Named, so it is a folder like any other now — a later Escape must not un-make it.
+        root.fresh-group-id = "";
         // **Always**, not only when something was being renamed. A `TouchArea` does not hold
         // the keyboard focus, so every click on a row, a toolbar button or an icon leaves it
         // on nothing at all and the window-wide keys go dead until the window is reopened.
@@ -255,6 +279,35 @@ export component ListWindow inherits Window {
             }
             if (ev.text == Key.Return) {
                 root.activate-selected();
+                return accept;
+            }
+            if (ev.text == Key.F2) {
+                root.rename-selected();
+                return accept;
+            }
+            // Delete asks nothing, like the trash icon on the row does not: what softens both
+            // is the undo bar above, which is a click away for the next few seconds.
+            if (ev.text == Key.Delete && root.selected >= 0
+                && root.selected < root.rows.length) {
+                root.commit-edit();
+                root.delete-row(root.rows[root.selected].id,
+                                root.rows[root.selected].is-group);
+                return accept;
+            }
+            // Take the delete back. Only while the bar is up — this is that bar's button, not
+            // an undo history, and a Ctrl+Z that silently did nothing would suggest there was
+            // one.
+            if (ev.modifiers.control && ev.text == "z" && root.undo-message != "") {
+                root.undo-delete();
+                return accept;
+            }
+            // The ends of the list, for the same reason every list has them.
+            if (ev.text == Key.Home && root.rows.length > 0) {
+                root.selected = 0;
+                return accept;
+            }
+            if (ev.text == Key.End && root.rows.length > 0) {
+                root.selected = root.rows.length - 1;
                 return accept;
             }
             if (ev.text == Key.Escape && root.selected >= 0) {
@@ -849,7 +902,15 @@ export component ListWindow inherits Window {
                         // renamed to what it was already called.
                         key-pressed(ev) => {
                             if (ev.text == Key.Escape) {
+                                // A folder that was just made and never named goes with the
+                                // box: pressing the button and changing your mind should
+                                // leave the list as it was, not leave a "New folder" behind.
+                                if (root.fresh-group-id != ""
+                                    && root.editing-id == root.fresh-group-id) {
+                                    root.discard-group(root.editing-id);
+                                }
                                 root.editing-id = "";
+                                root.fresh-group-id = "";
                                 keys.focus();
                                 return accept;
                             }
