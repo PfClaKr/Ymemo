@@ -693,7 +693,7 @@ impl Vault {
         // were being re-read and re-decrypted to reconstruct — a second full copy of the
         // vault built to answer a question about one memo. On a vault with a year in it that
         // was seconds of the UI thread on a single click. Measured.
-        crate::history::replay(self.doc.get_changes(&[]).to_vec(), entity, id)
+        crate::history::revisions(&mut self.doc, entity, id)
     }
 
     /// Writes the values from `revision` back, as a new edit.
@@ -2512,6 +2512,47 @@ mod tests {
         let merged = b.store().get(&base.id).unwrap().unwrap();
         assert_eq!(merged.title, "A wrote again", "A's change must survive B's own write");
         assert!(b.store().get("b-memo").unwrap().is_some());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A revision is the memo as it stood *after* that change, merges included.
+    ///
+    /// Two devices editing different fields at once produce two changes that neither has
+    /// seen the other make. Reading either one on its own shows that device's branch — and
+    /// the newest revision would then be missing the other's edit, which `restore` writes
+    /// back field by field: putting the latest version back would silently undo it.
+    #[test]
+    fn a_revision_after_a_concurrent_edit_carries_the_merge() {
+        let dir = std::env::temp_dir().join(format!("ymemo-conc-{}", uuid::Uuid::new_v4()));
+        let mut a = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let mut b = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+
+        let m = Memo::new("start", "body");
+        a.upsert(&m).unwrap();
+        b.rebuild().unwrap();
+
+        // Neither has seen the other's edit when it makes its own.
+        let mut a_edit = m.clone();
+        a_edit.title = "A title".into();
+        a.upsert(&a_edit).unwrap();
+        let mut b_edit = m.clone();
+        b_edit.body = "B body".into();
+        b.upsert(&b_edit).unwrap();
+        a.rebuild().unwrap();
+        b.rebuild().unwrap();
+
+        for v in [&mut a, &mut b] {
+            let hist = v.history(Entity::Memo, &m.id).unwrap();
+            let last = hist.last().unwrap();
+            assert_eq!(last.field("title"), "A title", "the newest revision holds A's edit");
+            assert_eq!(last.field("body"), "B body", "and B's");
+            // It names only what that one change moved. *Which* of the two is last is up to
+            // the order the changes merge in and differs between the devices — the field
+            // values above are what both agree on, and what `restore` writes back.
+            assert_eq!(last.changed.len(), 1);
+            assert!(["title", "body"].contains(&last.changed[0].as_str()));
+        }
 
         fs::remove_dir_all(&dir).ok();
     }
