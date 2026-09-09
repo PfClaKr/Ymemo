@@ -46,7 +46,7 @@ pub(crate) fn refresh_list(
         let mut rows: Vec<ListRow> = groups
             .iter()
             .filter(|g| g.name.to_lowercase().contains(&needle))
-            .map(|g| group_row(g, 0, false, 0))
+            .map(|g| in_folder(group_row(g, 0, false, 0), &g.parent_id, &groups))
             .collect();
         rows.extend(
             memos
@@ -55,7 +55,9 @@ pub(crate) fn refresh_list(
                     m.title.to_lowercase().contains(&needle)
                         || m.body.to_lowercase().contains(&needle)
                 })
-                .map(|m| memo_row(m, 0, with_photo.contains(&m.id))),
+                .map(|m| {
+                    in_folder(memo_row(m, 0, with_photo.contains(&m.id)), &m.group_id, &groups)
+                }),
         );
         model.set_vec(rows);
         return;
@@ -344,6 +346,7 @@ pub(crate) fn group_row(
         is_group: true,
         expanded,
         child_count,
+        folder: SharedString::new(),
     }
 }
 
@@ -369,6 +372,22 @@ pub(crate) fn memo_row(memo: &Memo, depth: i32, has_photo: bool) -> ListRow {
         expanded: false,
         child_count: 0,
         has_photo,
+        folder: SharedString::new(),
+    }
+}
+
+/// Says which folder a row came out of; only a search asks for this.
+///
+/// The immediate parent, not the whole path: the row is narrow and shares it with the title,
+/// and "which of my folders is this in" is answered by the one name.
+fn in_folder(row: ListRow, parent_id: &str, groups: &[ymemo_core::Group]) -> ListRow {
+    let Some(g) = groups.iter().find(|g| g.id == parent_id) else {
+        return row; // top level, or a folder that is no longer there
+    };
+    let name = if g.name.is_empty() { t!("ui.list_group_untitled") } else { g.name.clone() };
+    ListRow {
+        folder: SharedString::from(crate::hangul::for_slint(&name)),
+        ..row
     }
 }
 
@@ -499,6 +518,43 @@ mod tests {
             refresh_list(v, &ctx.model, &collapsed, "  ");
             assert!(titles(&ctx).contains(&"alpha".to_string()));
         }
+    }
+
+    /// A search result says which folder it came out of, and a top-level one says nothing.
+    ///
+    /// The tree is set aside while searching, so the row's own indent cannot carry this: two
+    /// memos called the same thing in two folders came back as the same row twice.
+    #[test]
+    fn a_search_result_says_which_folder_it_came_from() {
+        use slint::Model;
+        let (ctx, _) = ctx_with(&["loose note"]);
+        let mut guard = ctx.vault.borrow_mut();
+        let v = guard.as_mut().unwrap();
+        let outer = group("outer", "Work", "");
+        let inner = group("inner", "Q1", "outer");
+        v.upsert_group(&outer).unwrap();
+        v.upsert_group(&inner).unwrap();
+        let mut note = Memo::new("note in Q1", "");
+        note.group_id = inner.id.clone();
+        v.upsert(&note).unwrap();
+
+        refresh_list(v, &ctx.model, &HashSet::new(), "note");
+        let folders: Vec<String> = ctx
+            .model
+            .iter()
+            .map(|r| (r.title.to_string(), r.folder.to_string()))
+            .filter(|(t, _)| t == "note in Q1" || t == "loose note")
+            .map(|(_, f)| f)
+            .collect();
+        assert_eq!(folders, vec!["Q1".to_string(), String::new()]);
+
+        // A folder that matches says where *it* lives.
+        refresh_list(v, &ctx.model, &HashSet::new(), "q1");
+        assert_eq!(ctx.model.row_data(0).unwrap().folder.to_string(), "Work");
+
+        // Nothing carries it once the search is gone.
+        refresh_list(v, &ctx.model, &HashSet::new(), "");
+        assert!(ctx.model.iter().all(|r| r.folder.is_empty()));
     }
 
     /// Folders are dropped *on* rows, never between them; `move_row` owns that.

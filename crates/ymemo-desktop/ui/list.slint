@@ -17,6 +17,11 @@ export struct ListRow {
     // Whether the memo has a photo on it, so one with nothing written is not an untitled row
     // beside another untitled row.
     has-photo: bool,
+    // The folder this row lives in, filled **only while searching**. A search sets the tree
+    // aside and lists the matches flat, which answers "where is the memo that said X" with
+    // the memo but not the where — two rows called "회의" in two folders came back looking
+    // like the same memo twice.
+    folder: string,
 }
 
 
@@ -721,6 +726,20 @@ export component ListWindow inherits Window {
                         vertical-alignment: center;
                         overflow: elide;
                         horizontal-stretch: 1;
+                    }
+
+                    // Which folder the match came out of. Only a search fills this in, and
+                    // it gives up its room to the title first: the name is what was searched
+                    // for, this only says where it was found.
+                    if row.folder != "": Text {
+                        text: row.folder;
+                        font-size: 11px;
+                        color: #8d8778;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        // Out of the way of the two buttons that appear over it on hover.
+                        opacity: ta.has-hover ? 0 : 1;
+                        animate opacity { duration: 120ms; easing: ease-out; }
                     }
 
                     // A memo with a picture on it says so. It matters most for the memo with
