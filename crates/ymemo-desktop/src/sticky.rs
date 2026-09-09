@@ -1180,8 +1180,15 @@ pub(crate) fn snap_tick(stickies: &Stickies) {
     if map.is_empty() {
         return;
     }
-    // 1) Read rect, scale and monitor of the visible windows (only works on X11).
-    let mut rects: Vec<(String, Rect, f32, Option<Rect>)> = Vec::new();
+    // 1) Read rect and scale of the visible windows (only works on X11).
+    //
+    // **Not the monitor.** `current_monitor()` is a question for the windowing system, and
+    // asking it for every note eleven times a second — to answer something only the one note
+    // that just stopped being dragged ever asks — is most of what a desk full of notes costs
+    // while nobody is touching it: measured at 4.3% of a core with two notes open and 14.4%
+    // with eight, doing nothing at all. It is asked for below instead, once, of the one note
+    // that needs it.
+    let mut rects: Vec<(String, Rect, f32)> = Vec::new();
     for (id, e) in map.iter() {
         if !e.window.window().is_visible() {
             continue;
@@ -1189,20 +1196,15 @@ pub(crate) fn snap_tick(stickies: &Stickies) {
         let got = e.window.window().with_winit_window(|ww| {
             let p = ww.outer_position().ok()?;
             let s = ww.inner_size();
-            let mon = ww.current_monitor().map(|m| {
-                let mp = m.position();
-                let ms = m.size();
-                (mp.x, mp.y, ms.width as i32, ms.height as i32)
-            });
-            Some(((p.x, p.y, s.width as i32, s.height as i32), ww.scale_factor() as f32, mon))
+            Some(((p.x, p.y, s.width as i32, s.height as i32), ww.scale_factor() as f32))
         });
-        if let Some(Some((rect, scale, mon))) = got {
-            rects.push((id.clone(), rect, scale, mon));
+        if let Some(Some((rect, scale))) = got {
+            rects.push((id.clone(), rect, scale));
         }
     }
 
     // 2) Compare with the last tick to detect the end of a move, then snap once.
-    for (idx, (id, rect, scale, mon)) in rects.iter().enumerate() {
+    for (idx, (id, rect, scale)) in rects.iter().enumerate() {
         let Some(e) = map.get(id) else { continue };
         let cur = (rect.0, rect.1);
         // A window being dragged is already snapped live by drag_move.
@@ -1220,15 +1222,27 @@ pub(crate) fn snap_tick(stickies: &Stickies) {
         if !e.moving.get() {
             continue; // still at rest, leave it alone
         }
-        // Just stopped: snap to the other windows and the screen edges.
+        // Just stopped: snap to the other windows and the screen edges. The monitor is asked
+        // for here and nowhere else — one note, once, at the end of one drag.
         let others: Vec<Rect> = rects
             .iter()
             .enumerate()
             .filter(|(j, _)| *j != idx)
             .map(|(_, r)| r.1)
             .collect();
+        let mon = e
+            .window
+            .window()
+            .with_winit_window(|ww| {
+                ww.current_monitor().map(|m| {
+                    let mp = m.position();
+                    let ms = m.size();
+                    (mp.x, mp.y, ms.width as i32, ms.height as i32)
+                })
+            })
+            .flatten();
         let threshold = (SNAP_DIST * *scale) as i32;
-        let (nx, ny) = snap_position(*rect, &others, *mon, threshold);
+        let (nx, ny) = snap_position(*rect, &others, mon, threshold);
         if (nx, ny) != cur {
             e.window.window().with_winit_window(|ww| {
                 ww.set_outer_position(PhysicalPosition::new(nx, ny));
