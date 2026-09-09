@@ -44,7 +44,13 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
         let mut guard = ctx.vault.borrow_mut();
         let Some(v) = guard.as_mut() else { return };
         match v.rebuild() {
-            Ok(()) => {
+            // Nothing arrived. Everything below is about carrying a change into the windows,
+            // and there is no change: the list already shows it, the open notes already say
+            // it, and their photos are already decoded. Doing it anyway meant rebuilding the
+            // whole list model and **decrypting and decoding every photo of every open note**
+            // every fifteen seconds, for a desk nobody had touched.
+            Ok(false) => {}
+            Ok(true) => {
                 // A merge can carry a device removal made somewhere else. Applying it here is
                 // what makes the removal stick: every device drops the peer, so nobody is
                 // left to introduce it back. See `RevokedDevice`.

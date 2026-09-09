@@ -626,14 +626,17 @@ impl Vault {
 
     /// Merges every log in `logs/` into a fresh document and rebuilds the SQLite cache from
     /// scratch. One call picks up whatever Syncthing has delivered.
-    pub fn rebuild(&mut self) -> Result<()> {
+    /// Returns whether anything was actually re-read, so a caller with work to do **after** a
+    /// merge — pushing changes into open windows, redrawing a list, decoding photos — can
+    /// skip it too. Nearly every tick has nothing in it.
+    pub fn rebuild(&mut self) -> Result<bool> {
         // Read *before* the logs are, not after: reading them is not one atomic act, and a
         // record that lands halfway through must leave the vault looking out of date rather
         // than be recorded as already merged. The cost of being wrong this way is one more
         // rebuild; the cost of being wrong the other way is a change that never arrives.
         let state = self.log_state();
         if self.built_from.as_ref() == Some(&state) {
-            return Ok(()); // nothing new to merge, and the cache already says so
+            return Ok(false); // nothing new to merge, and the cache already says so
         }
         let mut doc = AutoCommit::new();
         doc.apply_changes(self.read_all_changes()?)?;
@@ -642,7 +645,7 @@ impl Vault {
         self.doc = doc;
         self.materialize()?;
         self.built_from = Some(state);
-        Ok(())
+        Ok(true)
     }
 
     /// Records our own log at its current length as already merged, leaving every other
