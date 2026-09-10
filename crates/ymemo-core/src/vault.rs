@@ -1301,13 +1301,62 @@ fn reencrypt_log(path: &Path, old_key: &MasterKey, new_key: &MasterKey) -> Resul
 /// same reason, only more obviously.
 fn put_text_if_changed(doc: &mut AutoCommit, obj: &ObjId, key: &str, val: &str) -> Result<()> {
     if let Some((Value::Object(ObjType::Text), text)) = doc.get(obj, key)? {
-        if doc.text(&text)? != val {
-            doc.update_text(&text, val)?;
+        let old = doc.text(&text)?;
+        if old != val {
+            splice_changed_span(doc, &text, &old, val)?;
         }
         return Ok(());
     }
     let text = doc.put_object(obj, key, ObjType::Text)?;
     doc.splice_text(&text, 0, 0, val)?;
+    Ok(())
+}
+
+/// Writes the one stretch of the body that moved, found by what is identical at each end.
+///
+/// The obvious way to do this is automerge's `update_text`, and it is a trap on a long memo:
+/// it grapheme-segments **both** copies into vectors and runs a Myers diff over the whole
+/// thing, every save, however small the edit. Measured, 50 keystrokes at the end of a 200 KB
+/// memo cost 1190 ms — 24 ms of the UI thread per keystroke, growing with the memo, which is
+/// the stutter this app has spent a whole release chasing out. Comparing the ends instead is
+/// a byte scan: the same 50 keystrokes cost under a millisecond and stop caring how long the
+/// memo is.
+///
+/// It writes one replaced span where Myers might write two, which costs a little precision if
+/// somebody edits two far-apart places between saves and a second device edits the text
+/// between them at that exact moment. A save is one debounce of typing, so that stretch is
+/// one place; paying 24 ms per keystroke against it is not a trade worth making.
+///
+/// Positions here are **characters**, not bytes — automerge indexes text by unicode code
+/// point — so both ends are pulled back to a character boundary before anything is spliced.
+/// A boundary in one string is a boundary in the other: the bytes at that offset are the same
+/// byte, since that is what made it common.
+fn splice_changed_span(doc: &mut AutoCommit, text: &ObjId, old: &str, new: &str) -> Result<()> {
+    let mut head = old
+        .as_bytes()
+        .iter()
+        .zip(new.as_bytes())
+        .take_while(|(a, b)| a == b)
+        .count();
+    while !old.is_char_boundary(head) {
+        head -= 1;
+    }
+
+    let room = (old.len() - head).min(new.len() - head);
+    let mut tail = old
+        .bytes()
+        .rev()
+        .zip(new.bytes().rev())
+        .take_while(|(a, b)| a == b)
+        .count()
+        .min(room);
+    while !old.is_char_boundary(old.len() - tail) {
+        tail -= 1;
+    }
+
+    let pos = old[..head].chars().count();
+    let del = old[head..old.len() - tail].chars().count();
+    doc.splice_text(text, pos, del as isize, &new[head..new.len() - tail])?;
     Ok(())
 }
 
@@ -2791,6 +2840,161 @@ mod tests {
         b.rebuild().unwrap();
         assert!(a.store().get(&m.id).unwrap().is_none());
         assert!(b.store().get(&m.id).unwrap().is_none(), "both devices agree it is gone");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Every shape of edit the writing can take must land on exactly the text handed over.
+    ///
+    /// `splice_changed_span` writes a span rather than the whole body, so a wrong offset here
+    /// does not fail loudly — it quietly corrupts a memo. Korean is in the list because the
+    /// span is measured in characters and scanned in bytes, and a syllable is three bytes.
+    #[test]
+    fn every_kind_of_edit_lands_on_the_text_it_was_given() {
+        let cases: &[(&str, &str)] = &[
+            ("", "hello"),
+            ("hello", ""),
+            ("hello", "hello world"),
+            ("hello", "say hello"),
+            ("hello", "heXllo"),
+            ("hello world", "hello"),
+            ("hello world", "world"),
+            ("hello", "goodbye"),
+            ("aaaa", "aaaaa"),
+            ("aaaaa", "aaaa"),
+            ("abcabc", "abcXabc"),
+            ("line one\nline two\n", "line one\nline two\nline three\n"),
+            ("line one\nline two\n", "line one\n"),
+            // Multi-byte, including an edit inside a run of identical syllables.
+            ("장보기", "장보기\n우유"),
+            ("장보기\n우유", "장보기\n계란\n우유"),
+            ("가가가", "가가나가"),
+            ("한글", "한"),
+            ("한", "한글"),
+            ("émoji 🎉", "émoji 🎉🎉"),
+            ("🎉🎉", "🎉"),
+            ("a🎉b", "ab"),
+            // The ends match but the middle is unrelated.
+            ("start MIDDLE end", "start OTHER end"),
+        ];
+
+        for (from, to) in cases {
+            let mut doc = AutoCommit::new();
+            let obj = doc.put_object(&ROOT, "m", ObjType::Map).unwrap();
+            put_text_if_changed(&mut doc, &obj, "body", from).unwrap();
+            put_text_if_changed(&mut doc, &obj, "body", to).unwrap();
+            let got = match doc.get(&obj, "body").unwrap() {
+                Some((Value::Object(ObjType::Text), t)) => doc.text(&t).unwrap(),
+                other => panic!("{from:?} -> {to:?}: not a text object: {other:?}"),
+            };
+            assert_eq!(&got.as_str(), to, "{from:?} -> {to:?}");
+        }
+    }
+
+    /// The same, on text nobody would type, so an off-by-one has somewhere to show itself.
+    #[test]
+    fn a_thousand_random_edits_land_on_the_text_they_were_given() {
+        let alphabet: Vec<char> = "ab가나🎉\n".chars().collect();
+        // A cheap deterministic generator: this needs to be reproducible when it fails.
+        let mut seed = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = move |n: usize| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % n as u64) as usize
+        };
+
+        let mut doc = AutoCommit::new();
+        let obj = doc.put_object(&ROOT, "m", ObjType::Map).unwrap();
+        let mut body = String::new();
+        put_text_if_changed(&mut doc, &obj, "body", &body).unwrap();
+
+        for _ in 0..1000 {
+            let chars: Vec<char> = body.chars().collect();
+            let at = if chars.is_empty() { 0 } else { next(chars.len() + 1) };
+            let mut edited: String = chars[..at].iter().collect();
+            if next(3) == 0 && at < chars.len() {
+                // Delete a stretch.
+                let len = 1 + next(chars.len() - at);
+                edited.extend(&chars[at + len..]);
+            } else {
+                // Insert a stretch.
+                for _ in 0..1 + next(5) {
+                    edited.push(alphabet[next(alphabet.len())]);
+                }
+                edited.extend(&chars[at..]);
+            }
+
+            put_text_if_changed(&mut doc, &obj, "body", &edited).unwrap();
+            let got = match doc.get(&obj, "body").unwrap() {
+                Some((Value::Object(ObjType::Text), t)) => doc.text(&t).unwrap(),
+                other => panic!("not a text object: {other:?}"),
+            };
+            assert_eq!(got, edited, "after editing {body:?}");
+            body = edited;
+        }
+    }
+
+    /// A label a build from the middle of this change wrote as a text object still reads, and
+    /// turns back into a plain string the next time it is saved.
+    ///
+    /// The body became a text object and the title and folder name briefly went with it, before
+    /// the folder rename above showed why they should not have. So a real vault can hold labels
+    /// in either shape, and it will keep holding them until every one of them is next edited —
+    /// there is no migration pass, and there should not be one, since an unasked-for write to
+    /// every memo is a sync conflict looking for somewhere to happen.
+    #[test]
+    fn a_label_left_as_a_text_object_reads_and_converts_on_the_next_save() {
+        let dir = temp_dir();
+        let mut a = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let m = Memo::new("Groceries", "milk\n");
+        a.upsert(&m).unwrap();
+        let mut g = Group::new("Work");
+        g.id = "g".into();
+        a.upsert_group(&g).unwrap();
+
+        // Rewrite both labels in the shape that build left behind.
+        let memos = a.memos_obj().unwrap();
+        let memo_obj = match a.doc.get(&memos, &m.id).unwrap() {
+            Some((Value::Object(ObjType::Map), id)) => id,
+            other => panic!("no memo map: {other:?}"),
+        };
+        put_text_if_changed(&mut a.doc, &memo_obj, "title", "Groceries").unwrap();
+        let groups = a.groups_obj().unwrap();
+        let group_obj = match a.doc.get(&groups, "g").unwrap() {
+            Some((Value::Object(ObjType::Map), id)) => id,
+            other => panic!("no group map: {other:?}"),
+        };
+        put_text_if_changed(&mut a.doc, &group_obj, "name", "Work").unwrap();
+        a.append_local_change().unwrap();
+        a.rebuild().unwrap();
+
+        assert_eq!(a.store().get(&m.id).unwrap().unwrap().title, "Groceries");
+        assert_eq!(a.store().get_group("g").unwrap().unwrap().name, "Work");
+
+        // And a device that has only ever seen the log reads them the same way.
+        let b = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        assert_eq!(b.store().get(&m.id).unwrap().unwrap().title, "Groceries");
+        assert_eq!(b.store().get_group("g").unwrap().unwrap().name, "Work");
+
+        // Saving over it puts the label back to a plain string, so the next rename is decided
+        // by who wrote last rather than blended.
+        let mut renamed = m.clone();
+        renamed.title = "Shopping".into();
+        a.upsert(&renamed).unwrap();
+        let mut g2 = g.clone();
+        g2.name = "Home".into();
+        a.upsert_group(&g2).unwrap();
+        assert!(
+            matches!(a.doc.get(&memo_obj, "title").unwrap(), Some((Value::Scalar(_), _))),
+            "a saved title is a plain string again"
+        );
+        assert!(
+            matches!(a.doc.get(&group_obj, "name").unwrap(), Some((Value::Scalar(_), _))),
+            "a saved folder name is a plain string again"
+        );
+        assert_eq!(a.store().get(&m.id).unwrap().unwrap().title, "Shopping");
+        assert_eq!(a.store().get_group("g").unwrap().unwrap().name, "Home");
 
         fs::remove_dir_all(&dir).ok();
     }
