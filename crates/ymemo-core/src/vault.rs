@@ -274,7 +274,9 @@ impl Vault {
             Some((Value::Object(ObjType::Map), id)) => id,
             _ => self.doc.put_object(&memos, &memo.id, ObjType::Map)?,
         };
-        put_text_if_changed(&mut self.doc, &obj, "title", &memo.title)?;
+        // The title is a **label**, not prose: see `put_text_if_changed` for why merging one
+        // is worse than losing one.
+        put_str_if_changed(&mut self.doc, &obj, "title", &memo.title)?;
         put_text_if_changed(&mut self.doc, &obj, "body", &memo.body)?;
         put_str_if_changed(&mut self.doc, &obj, "color", &memo.color)?;
         put_i64_if_changed(&mut self.doc, &obj, "opacity", crate::clamp_opacity(memo.opacity))?;
@@ -502,7 +504,8 @@ impl Vault {
             Some((Value::Object(ObjType::Map), id)) => id,
             _ => self.doc.put_object(&groups, &group.id, ObjType::Map)?,
         };
-        put_text_if_changed(&mut self.doc, &obj, "name", &group.name)?;
+        // A label, like a memo's title — last-write-wins on purpose.
+        put_str_if_changed(&mut self.doc, &obj, "name", &group.name)?;
         put_str_if_changed(&mut self.doc, &obj, "parent_id", &group.parent_id)?;
         put_str_if_changed(&mut self.doc, &obj, "color", &group.color)?;
         put_i64_if_changed(&mut self.doc, &obj, "created_at", group.created_at)?;
@@ -1289,8 +1292,13 @@ fn reencrypt_log(path: &Path, old_key: &MasterKey, new_key: &MasterKey) -> Resul
 /// devices converting the same memo at once can still lose an edit, since replacing the key
 /// is itself a `put`.
 ///
-/// **Only for prose.** A colour is a palette key and an id is an id: last-write-wins is the
-/// right answer for those, and they stay [`put_str_if_changed`].
+/// **Only the body.** The rule is not "anything the user types" — it is *prose that is added
+/// to*. A title and a folder's name are short labels, replaced whole rather than extended, and
+/// merging two of them is worse than losing one: renaming a folder to "Work" on one device and
+/// "Home" on the other gives **"WHorkme"**, which is not a name anybody chose and which the
+/// user now has to notice and repair. Measured. Last-write-wins leaves a name somebody meant,
+/// and the one that lost is still in the change history. Colours and ids stay strings for the
+/// same reason, only more obviously.
 fn put_text_if_changed(doc: &mut AutoCommit, obj: &ObjId, key: &str, val: &str) -> Result<()> {
     if let Some((Value::Object(ObjType::Text), text)) = doc.get(obj, key)? {
         if doc.text(&text)? != val {
@@ -2680,16 +2688,16 @@ mod tests {
         let mut b = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
 
         let mut a_edit = base.clone();
-        a_edit.title = "from A".into();
+        a_edit.body = "from A".into();
         a.upsert(&a_edit).unwrap();
         let mut b_edit = base.clone();
-        b_edit.title = "from B".into();
+        b_edit.body = "from B".into();
         b.upsert(&b_edit).unwrap();
 
         a.rebuild().unwrap();
         b.rebuild().unwrap();
-        let ta = a.store().get(&base.id).unwrap().unwrap().title;
-        let tb = b.store().get(&base.id).unwrap().unwrap().title;
+        let ta = a.store().get(&base.id).unwrap().unwrap().body;
+        let tb = b.store().get(&base.id).unwrap().unwrap().body;
         assert_eq!(ta, tb, "both devices must agree");
         assert!(ta.contains("from A"), "A's edit survived: {ta:?}");
         assert!(tb.contains("from B"), "B's edit survived: {tb:?}");
@@ -2723,6 +2731,66 @@ mod tests {
         for line in ["milk", "bread", "apples", "eggs"] {
             assert!(ba.contains(line), "{line:?} survived the merge: {ba:?}");
         }
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A **label** edited on two devices at once settles on one somebody chose.
+    ///
+    /// The other half of the rule in `put_text_if_changed`: a folder's name and a memo's
+    /// title are replaced whole, not added to, so they stay last-write-wins. Merging them
+    /// character by character turned "Work" and "Home" into **"WHorkme"** — both edits
+    /// technically kept, and a folder nobody named that the user now has to repair. The one
+    /// that lost is still in the change history.
+    #[test]
+    fn two_devices_renaming_one_folder_settle_on_a_real_name() {
+        let dir = temp_dir();
+        let mut a = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let mut g = Group::new("Inbox");
+        g.id = "g".into();
+        a.upsert_group(&g).unwrap();
+        let mut b = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+
+        let mut ga = g.clone();
+        ga.name = "Work".into();
+        a.upsert_group(&ga).unwrap();
+        let mut gb = g.clone();
+        gb.name = "Home".into();
+        b.upsert_group(&gb).unwrap();
+
+        a.rebuild().unwrap();
+        b.rebuild().unwrap();
+        let na = a.store().get_group("g").unwrap().unwrap().name;
+        let nb = b.store().get_group("g").unwrap().unwrap().name;
+        assert_eq!(na, nb, "both devices must agree");
+        assert!(na == "Work" || na == "Home", "a name somebody chose, not a merge: {na:?}");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A delete on one device beats an edit on the other, and both agree it is gone.
+    ///
+    /// Not an accident of the merge — worth pinning, because the alternative (an edit
+    /// resurrecting a memo somebody deleted) is the more surprising of the two. What was
+    /// typed is still in the change history, and the delete itself is what the undo bar
+    /// hands back.
+    #[test]
+    fn a_delete_beats_an_edit_made_at_the_same_time() {
+        let dir = temp_dir();
+        let mut a = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let m = Memo::new("keep", "line one\n");
+        a.upsert(&m).unwrap();
+        let mut b = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+
+        a.delete(&m.id).unwrap();
+        let mut edit = m.clone();
+        edit.body = "line one\nline two\n".into();
+        b.upsert(&edit).unwrap();
+
+        a.rebuild().unwrap();
+        b.rebuild().unwrap();
+        assert!(a.store().get(&m.id).unwrap().is_none());
+        assert!(b.store().get(&m.id).unwrap().is_none(), "both devices agree it is gone");
 
         fs::remove_dir_all(&dir).ok();
     }
