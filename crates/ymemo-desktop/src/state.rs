@@ -77,6 +77,10 @@ pub(crate) struct Ctx {
     /// there the two together would leave a note with no way back to it. So the notes keep
     /// their taskbar buttons when this is false. Set once, after `tray::start`.
     pub(crate) has_tray: Rc<Cell<bool>>,
+    /// Set while this launch was started by the session (`--hidden`) and has not yet been
+    /// asked for. It is what keeps a machine that has just booted from handing its owner the
+    /// whole desk; `lock::show_desk` clears it. See `autostart.rs`.
+    pub(crate) quiet_start: Rc<Cell<bool>>,
 }
 
 /// Marks user activity, resetting the idle auto-lock.

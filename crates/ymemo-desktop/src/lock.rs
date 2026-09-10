@@ -216,6 +216,25 @@ pub(crate) fn apply_opened_vault(
     if let Some(list) = list_weak.upgrade() {
         // The name comes out of the vault, so it is only knowable once one is open.
         crate::list::set_vault_name(&list, &name);
+    }
+    // Started by the session: the vault is open, and that is all that happens. Putting the
+    // list and every note on screen is what the user gets when they ask for the app — see
+    // `show_desk`, which is what asking calls. Without this, "comes up quietly in the tray"
+    // meant a machine that had just booted handed its owner their whole desk.
+    if ctx.quiet_start.get() {
+        return;
+    }
+    show_desk(ctx, list_weak);
+}
+
+/// Puts the list and the notes on screen, and stops the start being a quiet one.
+///
+/// Called by everything that means "the user asked for the app": a tray click, a second
+/// launch, the tray's "bring the notes forward". Also called the moment the tray turns out
+/// **not** to exist, since a quiet start with nowhere to click is an app nobody can reach.
+pub(crate) fn show_desk(ctx: &Ctx, list_weak: &slint::Weak<ListWindow>) {
+    ctx.quiet_start.set(false);
+    if let Some(list) = list_weak.upgrade() {
         let saved = ctx.settings.borrow().list_window;
         present(&list);
         match saved {
