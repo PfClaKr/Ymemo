@@ -1054,6 +1054,9 @@ fn main() -> Result<()> {
         if !tray.is_available() {
             diag!("no tray on this desktop; the notes keep their taskbar buttons");
         }
+        // The desk is often already on screen by now: a valid session opens the vault — and
+        // with it every note that was left out — well before this point. See the function.
+        sticky::hide_open_notes_from_taskbar(&ctx);
         *tray_handle.borrow_mut() = Some(tray);
     }
 
