@@ -75,6 +75,11 @@ export component SettingsWindow inherits Window {
     // Whether to ask GitHub about new releases. The only outbound request the app makes, so
     // it is a setting rather than a given.
     in-out property <bool> update-check: true;
+    // Starting with the session. Read from the desktop itself rather than from settings.json
+    // — see `autostart.rs` — so this is filled in every time the window opens.
+    in-out property <bool> start-at-login: false;
+    // Whether this build has anywhere to write that; the row is hidden where it has not.
+    in property <bool> autostart-supported: false;
     // Version of a newer release, empty when there is none (or none known yet).
     in property <string> update-version;
     // File name of the package for this machine, empty when the release carries none for it
@@ -267,6 +272,28 @@ export component SettingsWindow inherits Window {
                         Button {
                             text: Strings.ui_settings_log_open;
                             clicked => { root.open-log(); }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                }
+
+                // ---- Start at login ----
+                if root.autostart-supported: SettingRow {
+                    label: Strings.ui_settings_start_at_login;
+                    hint: Strings.ui_settings_start_at_login_hint;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        TabButton {
+                            label: Strings.ui_settings_update_on;
+                            active: root.start-at-login;
+                            ink: #d8d2c2;
+                            clicked => { root.start-at-login = true; }
+                        }
+                        TabButton {
+                            label: Strings.ui_settings_update_off;
+                            active: !root.start-at-login;
+                            ink: #d8d2c2;
+                            clicked => { root.start-at-login = false; }
                         }
                         Rectangle { horizontal-stretch: 1; }
                     }
