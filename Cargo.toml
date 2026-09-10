@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/ymemo-core", "crates/ymemo-desktop", "crates/ymemo-ffi", "crates/ymemo-i18n"]
 
 [workspace.package]
-version = "1.0.8"
+version = "1.0.9"
 edition = "2021"
 license = "GPL-3.0-only"
 repository = "https://github.com/PfClaKr/Ymemo"
@@ -73,6 +73,8 @@ windows-sys = { version = "0.61", features = [
     "Win32_Security",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
+    # Starting with the session: the per-user `...\CurrentVersion\Run` value. See autostart.rs.
+    "Win32_System_Registry",
     # WS_EX_TOOLWINDOW on the sticky windows: the shell's own "not an application", and the
     # only way to keep it from handing one a taskbar button in the first place.
     "Win32_UI_WindowsAndMessaging",

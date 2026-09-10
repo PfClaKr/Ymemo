@@ -8,10 +8,11 @@
 // en.json and a field in FfiStrings in crates/ymemo-ffi; the ymemo-i18n tests check it.
 
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show Directory, FileSystemEvent, Platform;
 import 'dart:math' show max;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -823,7 +824,7 @@ class MemoListScreen extends StatefulWidget {
   State<MemoListScreen> createState() => _MemoListScreenState();
 }
 
-class _MemoListScreenState extends State<MemoListScreen> {
+class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObserver {
   /// How often logs that have arrived are merged in — the settings screen's "pull
   /// interval", which was fixed at 15 seconds before it became one. The daemon delivers
   /// files whenever it likes; this is what turns them into memos on screen.
@@ -833,9 +834,31 @@ class _MemoListScreenState extends State<MemoListScreen> {
   Duration get _mergeInterval =>
       Duration(seconds: widget.settings.value.mergeSeconds);
 
+  /// How long after coming back to the front the catch-up merges run.
+  ///
+  /// Android will not let this app sync while it is away — measured: with a network
+  /// constraint a periodic job never runs in deep Doze at all, and an allow-while-idle alarm
+  /// is deferred past half an hour even from the most privileged standby bucket. So what
+  /// arrives, arrives while the app is open, and the seconds right after it opens are the
+  /// ones that decide whether a memo written on the laptop is already here or is fifteen
+  /// seconds late. The daemon needs a moment to start and connect, which is why this is a
+  /// short burst and not a single try.
+  ///
+  /// Cheap to be wrong about: a merge with nothing new to read costs nothing now — the core
+  /// fingerprints the logs and returns without re-reading them.
+  static const _catchUpAfterResume = [
+    Duration.zero,
+    Duration(seconds: 3),
+    Duration(seconds: 8),
+  ];
+
   List<FfiMemo> _memos = [];
   List<FfiGroup> _folders = [];
   Timer? _merge;
+  final List<Timer> _catchUp = [];
+  /// Watches `vault/logs` so an arriving change is merged as it lands.
+  StreamSubscription<FileSystemEvent>? _logWatch;
+  Timer? _logSettle;
   FfiRelease? _update;
 
   /// What the vault is called, empty until it is named. It comes out of the synced document,
@@ -852,8 +875,14 @@ class _MemoListScreenState extends State<MemoListScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _reload();
     _merge = Timer.periodic(_mergeInterval, (_) => _mergeNow());
+    // A cold start never delivers `resumed` — the app is already resumed by the time this
+    // observer exists — and a cold start is exactly what tapping a widget usually is. So the
+    // burst is armed from here as well as from the lifecycle callback.
+    _catchUpNow();
+    _watchLogs();
     if (_atRoot) {
       _checkForUpdate(); // one banner, on the screen you always start from
       // Only the root screen answers widget taps: it is the one that is always there, and
@@ -923,9 +952,66 @@ class _MemoListScreenState extends State<MemoListScreen> {
     }
   }
 
+  /// Back in front: merge at once instead of waiting out the pull interval.
+  ///
+  /// See [_catchUpAfterResume] for why the moment the app opens is the only moment that can
+  /// be made faster.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _catchUpNow();
+  }
+
+  /// Merges the moment another device's log lands, instead of waiting for the next tick.
+  ///
+  /// The daemon delivers files into `vault/logs`, and one arriving is the only moment there
+  /// is anything new to merge at all. Watching for it is what makes a memo written on the
+  /// laptop appear as it arrives rather than up to `merge_seconds` afterwards — and it costs
+  /// nothing at all while nothing is arriving, which a shorter timer would not.
+  ///
+  /// The timer stays as the net under it: a watch can be refused (no inotify left, a
+  /// filesystem that has none) and is silently nothing when it is.
+  void _watchLogs() {
+    final logs = Directory('${widget.sync.paths.vaultDir}/logs');
+    if (!logs.existsSync()) return;
+    try {
+      _logWatch = logs.watch().listen(
+        (_) {
+          // One arrival is a burst of writes — syncthing writes a temporary file and renames
+          // it — so this settles before reading rather than merging once per event.
+          _logSettle?.cancel();
+          _logSettle = Timer(const Duration(milliseconds: 400), () {
+            if (mounted) _mergeNow();
+          });
+        },
+        onError: (Object e) => debugPrint('log watch stopped: $e'),
+      );
+    } catch (e) {
+      debugPrint('cannot watch the log directory: $e');
+    }
+  }
+
+  /// Arms the catch-up merges, replacing any burst still running.
+  void _catchUpNow() {
+    for (final t in _catchUp) {
+      t.cancel();
+    }
+    _catchUp.clear();
+    for (final after in _catchUpAfterResume) {
+      _catchUp.add(Timer(after, () {
+        if (mounted) _mergeNow();
+      }));
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _merge?.cancel();
+    _logWatch?.cancel();
+    _logSettle?.cancel();
+    for (final t in _catchUp) {
+      t.cancel();
+    }
     _search.dispose();
     if (_atRoot) widgets.pendingWidgetRequest.removeListener(_runWidgetRequest);
     super.dispose();
@@ -958,7 +1044,14 @@ class _MemoListScreenState extends State<MemoListScreen> {
     // Re-read on every reload rather than once: a merge can bring a rename from another
     // device, and the heading is where that shows up.
     final name = _atRoot ? await vaultName() : '';
-    if (mounted) {
+    // Nothing moved: leave the screen alone. Reloads are cheap to *ask* for and most of them
+    // find nothing — the merge timer's, and now every save of your own, which the log watch
+    // notices as a change to this device's own file. Rebuilding the list for those would be
+    // work with nothing to show for it.
+    final same = listEquals(_folders, folders) &&
+        listEquals(_memos, memos) &&
+        _vaultName == name;
+    if (mounted && !same) {
       setState(() {
         _folders = folders;
         _memos = memos;

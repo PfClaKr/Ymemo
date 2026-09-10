@@ -36,6 +36,11 @@ pub(crate) fn fill_settings_window(ctx: &Ctx, win: &SettingsWindow) {
     win.set_rescan_seconds(s.rescan_seconds);
     win.set_keep_versions_days(s.keep_versions_days);
     win.set_update_check(s.update_check);
+    // Not from `settings.json`: the desktop's own autostart entry is the record, so this is
+    // read back from it each time the window opens — including after a failed write, which is
+    // how the toggle stays honest about what actually happened.
+    win.set_autostart_supported(crate::autostart::supported());
+    win.set_start_at_login(crate::autostart::enabled());
 }
 
 /// Applies the language to **every** window.
