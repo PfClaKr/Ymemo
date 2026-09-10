@@ -8,10 +8,11 @@
 // en.json and a field in FfiStrings in crates/ymemo-ffi; the ymemo-i18n tests check it.
 
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show Directory, FileSystemEvent, Platform;
 import 'dart:math' show max;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -855,6 +856,9 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
   List<FfiGroup> _folders = [];
   Timer? _merge;
   final List<Timer> _catchUp = [];
+  /// Watches `vault/logs` so an arriving change is merged as it lands.
+  StreamSubscription<FileSystemEvent>? _logWatch;
+  Timer? _logSettle;
   FfiRelease? _update;
 
   /// What the vault is called, empty until it is named. It comes out of the synced document,
@@ -878,6 +882,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
     // observer exists — and a cold start is exactly what tapping a widget usually is. So the
     // burst is armed from here as well as from the lifecycle callback.
     _catchUpNow();
+    _watchLogs();
     if (_atRoot) {
       _checkForUpdate(); // one banner, on the screen you always start from
       // Only the root screen answers widget taps: it is the one that is always there, and
@@ -956,6 +961,35 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
     if (state == AppLifecycleState.resumed) _catchUpNow();
   }
 
+  /// Merges the moment another device's log lands, instead of waiting for the next tick.
+  ///
+  /// The daemon delivers files into `vault/logs`, and one arriving is the only moment there
+  /// is anything new to merge at all. Watching for it is what makes a memo written on the
+  /// laptop appear as it arrives rather than up to `merge_seconds` afterwards — and it costs
+  /// nothing at all while nothing is arriving, which a shorter timer would not.
+  ///
+  /// The timer stays as the net under it: a watch can be refused (no inotify left, a
+  /// filesystem that has none) and is silently nothing when it is.
+  void _watchLogs() {
+    final logs = Directory('${widget.sync.paths.vaultDir}/logs');
+    if (!logs.existsSync()) return;
+    try {
+      _logWatch = logs.watch().listen(
+        (_) {
+          // One arrival is a burst of writes — syncthing writes a temporary file and renames
+          // it — so this settles before reading rather than merging once per event.
+          _logSettle?.cancel();
+          _logSettle = Timer(const Duration(milliseconds: 400), () {
+            if (mounted) _mergeNow();
+          });
+        },
+        onError: (Object e) => debugPrint('log watch stopped: $e'),
+      );
+    } catch (e) {
+      debugPrint('cannot watch the log directory: $e');
+    }
+  }
+
   /// Arms the catch-up merges, replacing any burst still running.
   void _catchUpNow() {
     for (final t in _catchUp) {
@@ -973,6 +1007,8 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _merge?.cancel();
+    _logWatch?.cancel();
+    _logSettle?.cancel();
     for (final t in _catchUp) {
       t.cancel();
     }
@@ -1008,7 +1044,14 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
     // Re-read on every reload rather than once: a merge can bring a rename from another
     // device, and the heading is where that shows up.
     final name = _atRoot ? await vaultName() : '';
-    if (mounted) {
+    // Nothing moved: leave the screen alone. Reloads are cheap to *ask* for and most of them
+    // find nothing — the merge timer's, and now every save of your own, which the log watch
+    // notices as a change to this device's own file. Rebuilding the list for those would be
+    // work with nothing to show for it.
+    final same = listEquals(_folders, folders) &&
+        listEquals(_memos, memos) &&
+        _vaultName == name;
+    if (mounted && !same) {
       setState(() {
         _folders = folders;
         _memos = memos;
