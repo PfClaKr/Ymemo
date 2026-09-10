@@ -823,7 +823,7 @@ class MemoListScreen extends StatefulWidget {
   State<MemoListScreen> createState() => _MemoListScreenState();
 }
 
-class _MemoListScreenState extends State<MemoListScreen> {
+class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObserver {
   /// How often logs that have arrived are merged in — the settings screen's "pull
   /// interval", which was fixed at 15 seconds before it became one. The daemon delivers
   /// files whenever it likes; this is what turns them into memos on screen.
@@ -833,9 +833,28 @@ class _MemoListScreenState extends State<MemoListScreen> {
   Duration get _mergeInterval =>
       Duration(seconds: widget.settings.value.mergeSeconds);
 
+  /// How long after coming back to the front the catch-up merges run.
+  ///
+  /// Android will not let this app sync while it is away — measured: with a network
+  /// constraint a periodic job never runs in deep Doze at all, and an allow-while-idle alarm
+  /// is deferred past half an hour even from the most privileged standby bucket. So what
+  /// arrives, arrives while the app is open, and the seconds right after it opens are the
+  /// ones that decide whether a memo written on the laptop is already here or is fifteen
+  /// seconds late. The daemon needs a moment to start and connect, which is why this is a
+  /// short burst and not a single try.
+  ///
+  /// Cheap to be wrong about: a merge with nothing new to read costs nothing now — the core
+  /// fingerprints the logs and returns without re-reading them.
+  static const _catchUpAfterResume = [
+    Duration.zero,
+    Duration(seconds: 3),
+    Duration(seconds: 8),
+  ];
+
   List<FfiMemo> _memos = [];
   List<FfiGroup> _folders = [];
   Timer? _merge;
+  final List<Timer> _catchUp = [];
   FfiRelease? _update;
 
   /// What the vault is called, empty until it is named. It comes out of the synced document,
@@ -852,8 +871,13 @@ class _MemoListScreenState extends State<MemoListScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _reload();
     _merge = Timer.periodic(_mergeInterval, (_) => _mergeNow());
+    // A cold start never delivers `resumed` — the app is already resumed by the time this
+    // observer exists — and a cold start is exactly what tapping a widget usually is. So the
+    // burst is armed from here as well as from the lifecycle callback.
+    _catchUpNow();
     if (_atRoot) {
       _checkForUpdate(); // one banner, on the screen you always start from
       // Only the root screen answers widget taps: it is the one that is always there, and
@@ -923,9 +947,35 @@ class _MemoListScreenState extends State<MemoListScreen> {
     }
   }
 
+  /// Back in front: merge at once instead of waiting out the pull interval.
+  ///
+  /// See [_catchUpAfterResume] for why the moment the app opens is the only moment that can
+  /// be made faster.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _catchUpNow();
+  }
+
+  /// Arms the catch-up merges, replacing any burst still running.
+  void _catchUpNow() {
+    for (final t in _catchUp) {
+      t.cancel();
+    }
+    _catchUp.clear();
+    for (final after in _catchUpAfterResume) {
+      _catchUp.add(Timer(after, () {
+        if (mounted) _mergeNow();
+      }));
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _merge?.cancel();
+    for (final t in _catchUp) {
+      t.cancel();
+    }
     _search.dispose();
     if (_atRoot) widgets.pendingWidgetRequest.removeListener(_runWidgetRequest);
     super.dispose();
