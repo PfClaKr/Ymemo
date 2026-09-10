@@ -371,7 +371,7 @@
   "ui.settings_update_check": "업데이트 확인",
   "ui.settings_update_check_hint": "하루 한 번 GitHub에 새 버전이 있는지 묻습니다. 내려받거나 설치하지 않으며 사용자나 메모에 관한 정보도 보내지 않지만, 접속 주소는 GitHub에 남으므로 끌 수 있게 해두었습니다.",
   "ui.settings_start_at_login": "로그인할 때 시작",
-  "ui.settings_start_at_login_hint": "컴퓨터에 로그인하면 Ymemo가 트레이에 조용히 올라옵니다. 보관함은 잠긴 채로 있고 비밀번호를 물어보지도 않습니다 — 트레이 아이콘을 누를 때까지 창은 뜨지 않습니다. 이 기기에만 적용되며 관리자 권한은 필요하지 않습니다.",
+  "ui.settings_start_at_login_hint": "컴퓨터에 로그인하면 Ymemo가 트레이에 조용히 올라옵니다. 창도 뜨지 않고 비밀번호도 묻지 않습니다. 잠금 해제 유지 기간이 남아 있으면 보관함은 조용히 열리지만 화면에는 아무것도 나오지 않습니다 — 목록과 메모는 트레이 아이콘을 누를 때 나옵니다. 이 기기에만 적용되며 관리자 권한은 필요하지 않습니다.",
   "ui.settings_update_off": "끄기",
   "ui.settings_update_on": "켜기",
   "ui.settings_version": "버전",

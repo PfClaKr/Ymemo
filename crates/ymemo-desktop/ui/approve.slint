@@ -61,77 +61,96 @@ export component ApproveWindow inherits Window {
     callback reject();
     callback close-requested();
 
-    VerticalLayout {
-        padding: 20px;
-        spacing: 12px;
-
-        Text {
-            text: Strings.ui_approve_heading;
-            font-size: 15px;
-            font-weight: 700;
-            color: #f0ead6;
-            wrap: word-wrap;
-        }
-
-        Field {
-            label: Strings.ui_approve_device_name;
-            value: root.device-name == "" ? "—" : root.device-name;
-        }
-        Field {
-            label: Strings.ui_approve_device_id;
-            value: root.device-id;
-            value-size: 10px;
-        }
-
-        // The comparison the user is actually being asked to make, so it is the largest
-        // thing on the window.
-        Rectangle { height: 1px; background: #f0ead6; opacity: 0.2; }
-        Text {
-            text: Strings.ui_approve_verify;
-            font-size: 11px;
-            color: #a8a294;
-            wrap: word-wrap;
-        }
-        Text {
-            text: root.verification-code;
-            font-size: 30px;
-            font-weight: 800;
-            letter-spacing: 4px;
-            color: #ffe15c;
-            horizontal-alignment: center;
-        }
-        Text {
-            text: Strings.ui_approve_hint;
-            font-size: 10px;
-            color: #a8a294;
-            wrap: word-wrap;
-        }
-
-        if root.status != "": Text {
-            text: root.status;
-            font-size: 11px;
-            color: root.status-is-error ? #d98a8a : #a8c8a0;
-            wrap: word-wrap;
-        }
-        if root.more-message != "": Text {
-            text: root.more-message;
-            font-size: 10px;
-            color: #a8a294;
-            wrap: word-wrap;
-        }
-
-        Rectangle {} // pushes the buttons to the bottom
-
-        HorizontalLayout {
-            spacing: 8px;
-            Button {
-                text: Strings.ui_approve_reject;
-                clicked => { root.reject(); }
+    // Escape closes this window, the way it closes the folder-name box and puts a
+    // note down. A `FocusScope` around the whole of it rather than a handler on one
+    // control: Slint sends a key to the focused item first and then up through its
+    // ancestors, so this is reached whatever the user last clicked into.
+    keys := FocusScope {
+        // Nothing has the focus in a window that has just opened, so it takes it;
+        // anything clicked into takes it away and gets its keys first.
+        init => { self.focus(); }
+        // Qualified, unlike the other windows: this one has a `reject` callback of its own
+        // and a bare `reject` here resolves to that instead of to the event result.
+        key-pressed(ev) => {
+            if (ev.text == Key.Escape) {
+                root.close-requested();
+                return EventResult.accept;
             }
-            Button {
-                text: Strings.ui_approve_allow;
-                primary: true;
-                clicked => { root.allow(); }
+            return EventResult.reject;
+        }
+
+        VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+
+            Text {
+                text: Strings.ui_approve_heading;
+                font-size: 15px;
+                font-weight: 700;
+                color: #f0ead6;
+                wrap: word-wrap;
+            }
+
+            Field {
+                label: Strings.ui_approve_device_name;
+                value: root.device-name == "" ? "—" : root.device-name;
+            }
+            Field {
+                label: Strings.ui_approve_device_id;
+                value: root.device-id;
+                value-size: 10px;
+            }
+
+            // The comparison the user is actually being asked to make, so it is the largest
+            // thing on the window.
+            Rectangle { height: 1px; background: #f0ead6; opacity: 0.2; }
+            Text {
+                text: Strings.ui_approve_verify;
+                font-size: 11px;
+                color: #a8a294;
+                wrap: word-wrap;
+            }
+            Text {
+                text: root.verification-code;
+                font-size: 30px;
+                font-weight: 800;
+                letter-spacing: 4px;
+                color: #ffe15c;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: Strings.ui_approve_hint;
+                font-size: 10px;
+                color: #a8a294;
+                wrap: word-wrap;
+            }
+
+            if root.status != "": Text {
+                text: root.status;
+                font-size: 11px;
+                color: root.status-is-error ? #d98a8a : #a8c8a0;
+                wrap: word-wrap;
+            }
+            if root.more-message != "": Text {
+                text: root.more-message;
+                font-size: 10px;
+                color: #a8a294;
+                wrap: word-wrap;
+            }
+
+            Rectangle {} // pushes the buttons to the bottom
+
+            HorizontalLayout {
+                spacing: 8px;
+                Button {
+                    text: Strings.ui_approve_reject;
+                    clicked => { root.reject(); }
+                }
+                Button {
+                    text: Strings.ui_approve_allow;
+                    primary: true;
+                    clicked => { root.allow(); }
+                }
             }
         }
     }

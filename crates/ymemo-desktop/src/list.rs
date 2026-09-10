@@ -445,6 +445,7 @@ mod tests {
             settings: Rc::new(RefCell::new(crate::settings::Settings::default())),
             last_activity: Rc::new(Cell::new(Instant::now())),
             has_tray: Rc::new(Cell::new(false)),
+            quiet_start: Rc::new(Cell::new(false)),
         };
         (ctx, ids)
     }

@@ -266,6 +266,24 @@ pub(crate) fn present_sticky(ctx: &Ctx, window: &StickyWindow) {
     }
 }
 
+/// Re-applies the taskbar hint to every note already on screen.
+///
+/// The desk is put back while the vault is opened, and on the ordinary way in — a session
+/// that is still valid, so the app comes up already unlocked — that happens **before** the
+/// tray has said whether it exists. `present_sticky` asks `has_tray` and it was still false,
+/// so every restored note kept the taskbar button a sticky is never supposed to have. Called
+/// once, the moment the answer is known.
+pub(crate) fn hide_open_notes_from_taskbar(ctx: &Ctx) {
+    if !ctx.has_tray.get() {
+        return; // nowhere else to reach them from; they keep their buttons on purpose
+    }
+    for entry in ctx.stickies.borrow().values() {
+        if entry.window.window().is_visible() {
+            skip_taskbar(&entry.window);
+        }
+    }
+}
+
 /// Brings one sticky to the front, showing it first if it is not on screen.
 pub(crate) fn raise_sticky(ctx: &Ctx, window: &StickyWindow) {
     if window.window().is_visible() {

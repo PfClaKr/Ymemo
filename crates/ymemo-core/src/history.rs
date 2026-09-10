@@ -240,10 +240,20 @@ fn snapshot_at(
     };
     let mut fields = BTreeMap::new();
     for name in entity.fields() {
-        if let Ok(Some((Value::Scalar(s), _))) = doc.get_at(&obj, *name, heads) {
-            if let Some(v) = scalar_to_string(s.as_ref()) {
-                fields.insert((*name).to_string(), v);
+        match doc.get_at(&obj, *name, heads) {
+            // What the user typed is a text object — see `put_text_if_changed` in `vault.rs`.
+            // Reading only scalars here left every title and body **blank** in the history.
+            Ok(Some((Value::Object(ObjType::Text), text))) => {
+                if let Ok(v) = doc.text_at(&text, heads) {
+                    fields.insert((*name).to_string(), v);
+                }
             }
+            Ok(Some((Value::Scalar(s), _))) => {
+                if let Some(v) = scalar_to_string(s.as_ref()) {
+                    fields.insert((*name).to_string(), v);
+                }
+            }
+            _ => {}
         }
     }
     Some(fields)

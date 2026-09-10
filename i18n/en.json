@@ -371,7 +371,7 @@
   "ui.settings_update_check": "Update check",
   "ui.settings_update_check_hint": "Asks GitHub once a day whether a newer version exists. Nothing is downloaded or installed, and nothing about you or your memos is sent — but your address does reach GitHub, so this can be turned off.",
   "ui.settings_start_at_login": "Start at login",
-  "ui.settings_start_at_login_hint": "Ymemo comes up quietly in the tray when you log in. The vault stays locked and nothing asks for a password — no window appears until you click the tray icon. This device only, and it needs no administrator rights.",
+  "ui.settings_start_at_login_hint": "Ymemo comes up quietly in the tray when you log in: no window, and nothing asks for a password. If your stay-unlocked days have not run out the vault is opened quietly, but nothing is put on screen — the list and your notes arrive when you click the tray icon. This device only, and it needs no administrator rights.",
   "ui.settings_update_off": "Off",
   "ui.settings_update_on": "On",
   "ui.settings_version": "Version",

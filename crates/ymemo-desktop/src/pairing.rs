@@ -255,19 +255,23 @@ pub(crate) fn wire(
     }
 
     // Refresh the displayed code and register whoever paired, on a timer.
-    if let Some(lan) = lan.clone() {
+    //
+    // **The timer runs whether or not this device could open the listener.** Only the top
+    // half needs one: showing our own six digits, and taking the peers that joined with them.
+    // Draining `join_rx` is the other direction — someone typed *their* code here — and that
+    // needs no listener at all, which is exactly the case the panel promises still works when
+    // something else already holds the port. With the whole timer behind `lan` the join
+    // thread's answer sat in the channel forever: the peer was never registered, the folder
+    // never shared back, and the panel stayed on "connecting" until it was closed. The other
+    // device then dialled in as a stranger and asked to be approved — a screen that tells the
+    // user to check eight characters against a device which, having paired over the six
+    // digits already, has no reason to be showing them.
+    {
+        let lan = lan.clone();
         let lock_w = lock.as_weak();
         let list_w = list.as_weak();
         let syncthing = syncthing.clone();
         pair_timer.start(TimerMode::Repeated, Duration::from_millis(800), move || {
-            // Show this device's current code in both windows.
-            let code = SharedString::from(lan.code());
-            if let Some(w) = lock_w.upgrade() {
-                w.set_lan_pair_code(code.clone());
-            }
-            if let Some(w) = list_w.upgrade() {
-                w.set_lan_pair_code(code.clone());
-            }
             let set_msg = |m: String| {
                 let m = SharedString::from(m);
                 if let Some(w) = lock_w.upgrade() {
@@ -277,9 +281,19 @@ pub(crate) fn wire(
                     w.set_lan_message(m);
                 }
             };
-            // Peers that joined with our code (host side).
-            while let Some(peer) = lan.next_paired_peer() {
-                set_msg(register_peer(&syncthing, &peer));
+            if let Some(lan) = lan.as_ref() {
+                // Show this device's current code in both windows.
+                let code = SharedString::from(lan.code());
+                if let Some(w) = lock_w.upgrade() {
+                    w.set_lan_pair_code(code.clone());
+                }
+                if let Some(w) = list_w.upgrade() {
+                    w.set_lan_pair_code(code.clone());
+                }
+                // Peers that joined with our code (host side).
+                while let Some(peer) = lan.next_paired_peer() {
+                    set_msg(register_peer(&syncthing, &peer));
+                }
             }
             // Results of us joining with their code (joiner side).
             while let Ok(res) = join_rx.try_recv() {

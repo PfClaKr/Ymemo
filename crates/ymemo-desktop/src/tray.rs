@@ -35,6 +35,10 @@ pub(crate) fn request_raise_notes() {
             let borrow = a.borrow();
             let Some(app) = borrow.as_ref() else { return };
             touch(&app.ctx);
+            // A quiet start puts nothing on screen; being asked for is what ends it.
+            if app.ctx.quiet_start.get() {
+                crate::lock::show_desk(&app.ctx, &app.list.as_weak());
+            }
             if !app.unlocked.get() {
                 present(&app.lock);
                 return;
@@ -58,6 +62,10 @@ pub(crate) fn request_toggle() {
             let borrow = a.borrow();
             let Some(app) = borrow.as_ref() else { return };
             touch(&app.ctx);
+            // A quiet start puts nothing on screen; being asked for is what ends it.
+            if app.ctx.quiet_start.get() {
+                crate::lock::show_desk(&app.ctx, &app.list.as_weak());
+            }
             if !app.unlocked.get() {
                 present(&app.lock);
             } else if app.list.window().is_visible() {
@@ -77,6 +85,10 @@ pub(crate) fn request_show() {
             let borrow = a.borrow();
             let Some(app) = borrow.as_ref() else { return };
             touch(&app.ctx);
+            // A quiet start puts nothing on screen; being asked for is what ends it.
+            if app.ctx.quiet_start.get() {
+                crate::lock::show_desk(&app.ctx, &app.list.as_weak());
+            }
             if app.unlocked.get() {
                 present(&app.list);
             } else {

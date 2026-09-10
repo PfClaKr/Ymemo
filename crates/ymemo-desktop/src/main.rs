@@ -302,6 +302,7 @@ fn main() -> Result<()> {
         last_activity: Rc::new(Cell::new(Instant::now())),
         // Answered below, once the tray has had its go.
         has_tray: Rc::new(Cell::new(false)),
+        quiet_start: Rc::new(Cell::new(autostart::launched_hidden())),
     };
     list.set_rows(ModelRc::from(ctx.model.clone()));
     let unlocked = Rc::new(Cell::new(false));
@@ -1053,6 +1054,14 @@ fn main() -> Result<()> {
         ctx.has_tray.set(tray.is_available());
         if !tray.is_available() {
             diag!("no tray on this desktop; the notes keep their taskbar buttons");
+        }
+        // The desk is often already on screen by now: a valid session opens the vault — and
+        // with it every note that was left out — well before this point. See the function.
+        sticky::hide_open_notes_from_taskbar(&ctx);
+        // A quiet start needs somewhere to be quiet *in*. With no tray there is no icon to
+        // click, so the app would sit invisible holding an unlocked vault — show it instead.
+        if ctx.quiet_start.get() && !ctx.has_tray.get() {
+            lock::show_desk(&ctx, &list.as_weak());
         }
         *tray_handle.borrow_mut() = Some(tray);
     }
