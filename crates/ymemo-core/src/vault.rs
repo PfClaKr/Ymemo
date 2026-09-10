@@ -2273,6 +2273,75 @@ mod tests {
         fs::remove_file(&db).ok();
     }
 
+    /// A restore puts back **every** field of that version, and it survives the log.
+    ///
+    /// `restoring_appends_rather_than_rewrites` above covers the body and the appending; what
+    /// is left untested is the rest of the memo (a restore that put the old text back under
+    /// today's colour would look like a bug to the person who clicked it), the trip through
+    /// the log another device reads, and stepping forward again afterwards.
+    #[test]
+    fn a_restore_puts_the_whole_version_back_and_can_be_stepped_forward_again() {
+        let dir = temp_dir();
+        let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+
+        let mut memo = Memo::new("shopping", "milk\n");
+        v.upsert(&memo).unwrap();
+        memo.body = "milk\nbread\n".into();
+        memo.title = "groceries".into();
+        memo.color = "blue".into();
+        memo.opacity = 60;
+        v.upsert(&memo).unwrap();
+
+        let hist = v.history(Entity::Memo, &memo.id).unwrap();
+        v.restore(Entity::Memo, &memo.id, &hist[0]).unwrap();
+
+        let back = v.store().get(&memo.id).unwrap().unwrap();
+        assert_eq!(back.title, "shopping");
+        assert_eq!(back.body, "milk\n");
+        assert_eq!(back.color, crate::DEFAULT_COLOR, "the colour of that version, not today's");
+        assert_eq!(back.opacity, crate::DEFAULT_OPACITY);
+
+        // What another device will read is the log, not the cache.
+        v.rebuild().unwrap();
+        assert_eq!(v.store().get(&memo.id).unwrap().unwrap().body, "milk\n");
+
+        // And the version that was stepped over is still there to step back to.
+        let hist = v.history(Entity::Memo, &memo.id).unwrap();
+        v.restore(Entity::Memo, &memo.id, &hist[1]).unwrap();
+        let forward = v.store().get(&memo.id).unwrap().unwrap();
+        assert_eq!(forward.body, "milk\nbread\n");
+        assert_eq!(forward.color, "blue");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A folder can be restored too, and its name takes the other write path — a label rather
+    /// than prose. Nothing covered this side of `restore` at all.
+    #[test]
+    fn restoring_a_folder_puts_its_old_name_and_colour_back() {
+        let dir = temp_dir();
+        let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+
+        let mut g = Group::new("Inbox");
+        g.id = "g".into();
+        v.upsert_group(&g).unwrap();
+        g.name = "Work".into();
+        g.color = "blue".into();
+        v.upsert_group(&g).unwrap();
+
+        let hist = v.history(Entity::Group, "g").unwrap();
+        v.restore(Entity::Group, "g", &hist[0]).unwrap();
+
+        let back = v.store().get_group("g").unwrap().unwrap();
+        assert_eq!(back.name, "Inbox");
+        assert_eq!(back.color, crate::DEFAULT_COLOR);
+
+        v.rebuild().unwrap();
+        assert_eq!(v.store().get_group("g").unwrap().unwrap().name, "Inbox");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
     /// Revisions must be dated. Automerge's default commit leaves the time at zero, which
     /// showed every version as 1970 until the vault started stamping its own.
     #[test]
