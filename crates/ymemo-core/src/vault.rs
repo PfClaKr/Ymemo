@@ -274,8 +274,8 @@ impl Vault {
             Some((Value::Object(ObjType::Map), id)) => id,
             _ => self.doc.put_object(&memos, &memo.id, ObjType::Map)?,
         };
-        put_str_if_changed(&mut self.doc, &obj, "title", &memo.title)?;
-        put_str_if_changed(&mut self.doc, &obj, "body", &memo.body)?;
+        put_text_if_changed(&mut self.doc, &obj, "title", &memo.title)?;
+        put_text_if_changed(&mut self.doc, &obj, "body", &memo.body)?;
         put_str_if_changed(&mut self.doc, &obj, "color", &memo.color)?;
         put_i64_if_changed(&mut self.doc, &obj, "opacity", crate::clamp_opacity(memo.opacity))?;
         put_str_if_changed(&mut self.doc, &obj, "group_id", &memo.group_id)?;
@@ -502,7 +502,7 @@ impl Vault {
             Some((Value::Object(ObjType::Map), id)) => id,
             _ => self.doc.put_object(&groups, &group.id, ObjType::Map)?,
         };
-        put_str_if_changed(&mut self.doc, &obj, "name", &group.name)?;
+        put_text_if_changed(&mut self.doc, &obj, "name", &group.name)?;
         put_str_if_changed(&mut self.doc, &obj, "parent_id", &group.parent_id)?;
         put_str_if_changed(&mut self.doc, &obj, "color", &group.color)?;
         put_i64_if_changed(&mut self.doc, &obj, "created_at", group.created_at)?;
@@ -936,8 +936,8 @@ impl Vault {
                 };
                 let memo = Memo {
                     id: id.clone(),
-                    title: get_str(&self.doc, &obj, "title")?,
-                    body: get_str(&self.doc, &obj, "body")?,
+                    title: get_text(&self.doc, &obj, "title")?,
+                    body: get_text(&self.doc, &obj, "body")?,
                     // color/opacity came later, so old changes may not carry them.
                     color: get_str_or(&self.doc, &obj, "color", crate::DEFAULT_COLOR),
                     opacity: crate::clamp_opacity(get_i64_or(
@@ -1049,7 +1049,8 @@ impl Vault {
             };
             let group = Group {
                 id: id.clone(),
-                name: get_str_or(&self.doc, &obj, "name", ""),
+                // Text now; `get_text_or` still reads the plain string older changes carry.
+                name: get_text_or(&self.doc, &obj, "name", ""),
                 parent_id: get_str_or(&self.doc, &obj, "parent_id", ""),
                 // Folders had no colour before, so old changes carry none.
                 color: get_str_or(&self.doc, &obj, "color", crate::DEFAULT_COLOR),
@@ -1270,6 +1271,56 @@ fn reencrypt_log(path: &Path, old_key: &MasterKey, new_key: &MasterKey) -> Resul
     Ok(())
 }
 
+/// Writes a field the user **types** — a memo's title or body, a folder's name.
+///
+/// These are automerge `Text`, not the plain strings the rest of the document uses, and that
+/// is the whole difference between two devices merging and one of them losing what somebody
+/// wrote. A `put` of a string is last-write-wins: edit the same memo on two devices inside
+/// the time it takes to sync and one version silently becomes the memo, with the other left
+/// only in the change history. A `Text` merges the two edits instead.
+///
+/// It is not magic. The UI hands over the **whole** body on every save, so the change has to
+/// be recovered by diffing (`update_text`) rather than captured as it was typed; two people
+/// typing at the same spot get their letters interleaved. Nothing is lost, which is the part
+/// that matters.
+///
+/// A field that is a plain string here was written by a build from before this, and is
+/// replaced by a text object the first time it changes — which is also the one moment two
+/// devices converting the same memo at once can still lose an edit, since replacing the key
+/// is itself a `put`.
+///
+/// **Only for prose.** A colour is a palette key and an id is an id: last-write-wins is the
+/// right answer for those, and they stay [`put_str_if_changed`].
+fn put_text_if_changed(doc: &mut AutoCommit, obj: &ObjId, key: &str, val: &str) -> Result<()> {
+    if let Some((Value::Object(ObjType::Text), text)) = doc.get(obj, key)? {
+        if doc.text(&text)? != val {
+            doc.update_text(&text, val)?;
+        }
+        return Ok(());
+    }
+    let text = doc.put_object(obj, key, ObjType::Text)?;
+    doc.splice_text(&text, 0, 0, val)?;
+    Ok(())
+}
+
+/// Reads a field written by [`put_text_if_changed`], or the plain string an older build left.
+fn get_text(doc: &AutoCommit, obj: &ObjId, key: &str) -> Result<String> {
+    match doc.get(obj, key)? {
+        Some((Value::Object(ObjType::Text), text)) => Ok(doc.text(&text)?),
+        // Written before the change above; still perfectly readable.
+        Some((Value::Scalar(s), _)) => match s.as_ref() {
+            ScalarValue::Str(v) => Ok(v.to_string()),
+            other => bail!(t!("core.field_not_string", key = key, found = format!("{other:?}"))),
+        },
+        _ => bail!(t!("core.field_missing", key = key)),
+    }
+}
+
+/// [`get_text`] with a fallback, for a field an old change may not carry at all.
+fn get_text_or(doc: &AutoCommit, obj: &ObjId, key: &str, default: &str) -> String {
+    get_text(doc, obj, key).unwrap_or_else(|_| default.to_string())
+}
+
 fn put_str_if_changed(doc: &mut AutoCommit, obj: &ObjId, key: &str, val: &str) -> Result<()> {
     let same = matches!(
         doc.get(obj, key)?,
@@ -1292,15 +1343,6 @@ fn put_i64_if_changed(doc: &mut AutoCommit, obj: &ObjId, key: &str, val: i64) ->
     Ok(())
 }
 
-fn get_str(doc: &AutoCommit, obj: &ObjId, key: &str) -> Result<String> {
-    match doc.get(obj, key)? {
-        Some((Value::Scalar(s), _)) => match s.as_ref() {
-            ScalarValue::Str(v) => Ok(v.to_string()),
-            other => bail!(t!("core.field_not_string", key = key, found = format!("{other:?}"))),
-        },
-        _ => bail!(t!("core.field_missing", key = key)),
-    }
-}
 
 /// Reads a string field, falling back to `default` when missing or of another type.
 fn get_str_or(doc: &AutoCommit, obj: &ObjId, key: &str, default: &str) -> String {
@@ -2617,7 +2659,16 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
-    /// A conflict on the same field converges to one value on both sides.
+    /// Two devices editing the **same field** keep both edits and agree on the result.
+    ///
+    /// This is what a memo being `Text` rather than a string buys. A plain string is
+    /// last-write-wins: measured on two real devices, typing into the same memo inside the
+    /// twenty seconds it takes to sync made one version simply become the memo, and the other
+    /// was only findable in the change history. Nothing said so.
+    ///
+    /// Replacing the *whole* field on both sides, as here, is the worst case and reads oddly —
+    /// the two versions end up run together. It is still the right trade: odd beats gone, and
+    /// editing different parts of a real note (the test below) merges cleanly.
     #[test]
     fn same_field_conflict_converges() {
         let dir = temp_dir();
@@ -2639,11 +2690,43 @@ mod tests {
         b.rebuild().unwrap();
         let ta = a.store().get(&base.id).unwrap().unwrap().title;
         let tb = b.store().get(&base.id).unwrap().unwrap().title;
-        assert_eq!(ta, tb); // whoever wins, both must agree
-        assert!(ta == "from A" || ta == "from B");
+        assert_eq!(ta, tb, "both devices must agree");
+        assert!(ta.contains("from A"), "A's edit survived: {ta:?}");
+        assert!(tb.contains("from B"), "B's edit survived: {tb:?}");
 
         fs::remove_dir_all(&dir).ok();
     }
+    /// Two devices adding a line each to the same note end up with both lines.
+    ///
+    /// The everyday shape of the case above: nobody replaces a whole note, they add to it.
+    #[test]
+    fn edits_in_different_places_merge_cleanly() {
+        let dir = temp_dir();
+        let mut a = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let base = Memo::new("list", "milk\nbread\n");
+        a.upsert(&base).unwrap();
+        let mut b = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+
+        // A adds to the end, B to the front; neither has seen the other.
+        let mut a_edit = base.clone();
+        a_edit.body = "milk\nbread\napples\n".into();
+        a.upsert(&a_edit).unwrap();
+        let mut b_edit = base.clone();
+        b_edit.body = "eggs\nmilk\nbread\n".into();
+        b.upsert(&b_edit).unwrap();
+
+        a.rebuild().unwrap();
+        b.rebuild().unwrap();
+        let ba = a.store().get(&base.id).unwrap().unwrap().body;
+        let bb = b.store().get(&base.id).unwrap().unwrap().body;
+        assert_eq!(ba, bb, "both devices must agree");
+        for line in ["milk", "bread", "apples", "eggs"] {
+            assert!(ba.contains(line), "{line:?} survived the merge: {ba:?}");
+        }
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
     /// A group must survive the cache being rebuilt from the logs — the merge timer does that
     /// every few seconds, so anything it drops disappears while the user is looking at it.
     #[test]
