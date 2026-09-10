@@ -77,142 +77,159 @@ export component SecurityWindow inherits Window {
     private property <bool> can-change:
         root.current-pw != "" && root.new-pw != "" && root.new-pw == root.confirm-pw;
 
-    VerticalLayout {
-        padding: 16px;
-        spacing: 14px;
-
-        Text {
-            text: Strings.ui_security_heading;
-            font-size: 16px;
-            font-weight: 700;
-            color: #f0ead6;
+    // Escape closes this window, the way it closes the folder-name box and puts a
+    // note down. A `FocusScope` around the whole of it rather than a handler on one
+    // control: Slint sends a key to the focused item first and then up through its
+    // ancestors, so this is reached whatever the user last clicked into.
+    keys := FocusScope {
+        // Nothing has the focus in a window that has just opened, so it takes it;
+        // anything clicked into takes it away and gets its keys first.
+        init => { self.focus(); }
+        key-pressed(ev) => {
+            if (ev.text == Key.Escape) {
+                root.close-requested();
+                return accept;
+            }
+            return reject;
         }
 
-        // Scrolls, and gives its content an explicit width so the wrapping hints inside can
-        // measure themselves; the close button below stays put.
-        scroll := ScrollView {
-            vertical-stretch: 1;
-            viewport-width: self.visible-width;
-            viewport-height: content.preferred-height;
+        VerticalLayout {
+            padding: 16px;
+            spacing: 14px;
 
-            content := VerticalLayout {
-                width: scroll.visible-width - Scroll.gutter;
-                spacing: 14px;
-
-                // ---- Master password ----
-                Section {
-                    label: Strings.ui_security_change_password;
-                    hint: Strings.ui_security_password_hint;
-                    FieldLabel { text: Strings.ui_security_current_password; }
-                    LineEdit {
-                        input-type: InputType.password;
-                        text <=> root.current-pw;
-                    }
-                    FieldLabel { text: Strings.ui_security_new_password; }
-                    LineEdit {
-                        input-type: InputType.password;
-                        text <=> root.new-pw;
-                    }
-                    FieldLabel { text: Strings.ui_security_confirm_password; }
-                    LineEdit {
-                        input-type: InputType.password;
-                        text <=> root.confirm-pw;
-                        accepted => {
-                            if (root.can-change) { root.change-password(root.current-pw, root.new-pw); }
-                        }
-                    }
-                    if root.confirm-pw != "" && root.new-pw != root.confirm-pw: Text {
-                        text: Strings.ui_security_mismatch;
-                        font-size: 10px;
-                        color: #e79a9a;
-                    }
-                    HorizontalLayout {
-                        alignment: start;
-                        Button {
-                            text: Strings.ui_security_change_button;
-                            primary: true;
-                            enabled: root.can-change;
-                            clicked => { root.change-password(root.current-pw, root.new-pw); }
-                        }
-            }
-            if root.status != "" && root.status-on-password: Text {
-                text: root.status;
-                font-size: 11px;
-                color: root.status-is-error ? #e79a9a : #a8d0a8;
-                wrap: word-wrap;
-            }
-        }
-
-        // ---- Recovery code ----
-        Section {
-            label: Strings.ui_security_recovery;
-            hint: Strings.ui_security_recovery_hint;
             Text {
-                text: root.has-recovery
-                    ? Strings.ui_security_recovery_present
-                    : Strings.ui_security_recovery_absent;
-                font-size: 11px;
-                color: root.has-recovery ? #a8d0a8 : #e8d98a;
-                wrap: word-wrap;
+                text: Strings.ui_security_heading;
+                font-size: 16px;
+                font-weight: 700;
+                color: #f0ead6;
+            }
+
+            // Scrolls, and gives its content an explicit width so the wrapping hints inside can
+            // measure themselves; the close button below stays put.
+            scroll := ScrollView {
+                vertical-stretch: 1;
+                viewport-width: self.visible-width;
+                viewport-height: content.preferred-height;
+
+                content := VerticalLayout {
+                    width: scroll.visible-width - Scroll.gutter;
+                    spacing: 14px;
+
+                    // ---- Master password ----
+                    Section {
+                        label: Strings.ui_security_change_password;
+                        hint: Strings.ui_security_password_hint;
+                        FieldLabel { text: Strings.ui_security_current_password; }
+                        LineEdit {
+                            input-type: InputType.password;
+                            text <=> root.current-pw;
+                        }
+                        FieldLabel { text: Strings.ui_security_new_password; }
+                        LineEdit {
+                            input-type: InputType.password;
+                            text <=> root.new-pw;
+                        }
+                        FieldLabel { text: Strings.ui_security_confirm_password; }
+                        LineEdit {
+                            input-type: InputType.password;
+                            text <=> root.confirm-pw;
+                            accepted => {
+                                if (root.can-change) { root.change-password(root.current-pw, root.new-pw); }
+                            }
+                        }
+                        if root.confirm-pw != "" && root.new-pw != root.confirm-pw: Text {
+                            text: Strings.ui_security_mismatch;
+                            font-size: 10px;
+                            color: #e79a9a;
+                        }
+                        HorizontalLayout {
+                            alignment: start;
+                            Button {
+                                text: Strings.ui_security_change_button;
+                                primary: true;
+                                enabled: root.can-change;
+                                clicked => { root.change-password(root.current-pw, root.new-pw); }
+                            }
+                }
+                if root.status != "" && root.status-on-password: Text {
+                    text: root.status;
+                    font-size: 11px;
+                    color: root.status-is-error ? #e79a9a : #a8d0a8;
+                    wrap: word-wrap;
+                }
+            }
+
+            // ---- Recovery code ----
+            Section {
+                label: Strings.ui_security_recovery;
+                hint: Strings.ui_security_recovery_hint;
+                Text {
+                    text: root.has-recovery
+                        ? Strings.ui_security_recovery_present
+                        : Strings.ui_security_recovery_absent;
+                    font-size: 11px;
+                    color: root.has-recovery ? #a8d0a8 : #e8d98a;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    alignment: start;
+                    Button {
+                        text: root.has-recovery
+                            ? Strings.ui_security_reissue_button
+                            : Strings.ui_security_issue_button;
+                        clicked => { root.issue-recovery(); }
+                    }
+                }
+                if root.status != "" && !root.status-on-password: Text {
+                    text: root.status;
+                    font-size: 11px;
+                    color: root.status-is-error ? #e79a9a : #a8d0a8;
+                    wrap: word-wrap;
+                }
+            }
+
+                    // The code itself, shown once. The window grows to make room for it —
+                    // see `show` in security.rs; a window sized for the two sections alone
+                    // left it under the fold, so the screen said a code had been issued and
+                    // then did not show it.
+                    if root.recovery-code != "": VerticalLayout {
+                        spacing: 6px;
+                        Rectangle {
+                            background: #3a362f;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: #e8d98a;
+                            VerticalLayout {
+                                padding: 12px;
+                                TextInput {
+                                    text: root.recovery-code;
+                                    read-only: true;
+                                    font-size: 15px;
+                                    font-family: "monospace";
+                                    color: #f7e98c;
+                                    wrap: word-wrap;
+                                    single-line: false;
+                                }
+                            }
+                        }
+                        Text {
+                            text: Strings.ui_security_code_warning;
+                            font-size: 10px;
+                            color: #e8d98a;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                }
             }
 
             HorizontalLayout {
-                alignment: start;
+                Rectangle { horizontal-stretch: 1; }
                 Button {
-                    text: root.has-recovery
-                        ? Strings.ui_security_reissue_button
-                        : Strings.ui_security_issue_button;
-                    clicked => { root.issue-recovery(); }
+                    text: Strings.ui_security_close;
+                    clicked => { root.close-requested(); }
                 }
-            }
-            if root.status != "" && !root.status-on-password: Text {
-                text: root.status;
-                font-size: 11px;
-                color: root.status-is-error ? #e79a9a : #a8d0a8;
-                wrap: word-wrap;
-            }
-        }
-
-                // The code itself, shown once. The window grows to make room for it —
-                // see `show` in security.rs; a window sized for the two sections alone
-                // left it under the fold, so the screen said a code had been issued and
-                // then did not show it.
-                if root.recovery-code != "": VerticalLayout {
-                    spacing: 6px;
-                    Rectangle {
-                        background: #3a362f;
-                        border-radius: 6px;
-                        border-width: 1px;
-                        border-color: #e8d98a;
-                        VerticalLayout {
-                            padding: 12px;
-                            TextInput {
-                                text: root.recovery-code;
-                                read-only: true;
-                                font-size: 15px;
-                                font-family: "monospace";
-                                color: #f7e98c;
-                                wrap: word-wrap;
-                                single-line: false;
-                            }
-                        }
-                    }
-                    Text {
-                        text: Strings.ui_security_code_warning;
-                        font-size: 10px;
-                        color: #e8d98a;
-                        wrap: word-wrap;
-                    }
-                }
-
-            }
-        }
-
-        HorizontalLayout {
-            Rectangle { horizontal-stretch: 1; }
-            Button {
-                text: Strings.ui_security_close;
-                clicked => { root.close-requested(); }
             }
         }
     }

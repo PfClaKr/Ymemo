@@ -98,295 +98,312 @@ export component SettingsWindow inherits Window {
     callback open-log();
     callback open-update();
 
-    VerticalLayout {
-        padding: 16px;
-        spacing: 12px;
-
-        Text {
-            text: Strings.ui_settings_title;
-            font-size: 16px;
-            font-weight: 700;
-            color: #f0ead6;
+    // Escape closes this window, the way it closes the folder-name box and puts a
+    // note down. A `FocusScope` around the whole of it rather than a handler on one
+    // control: Slint sends a key to the focused item first and then up through its
+    // ancestors, so this is reached whatever the user last clicked into.
+    keys := FocusScope {
+        // Nothing has the focus in a window that has just opened, so it takes it;
+        // anything clicked into takes it away and gets its keys first.
+        init => { self.focus(); }
+        key-pressed(ev) => {
+            if (ev.text == Key.Escape) {
+                root.close-requested();
+                return accept;
+            }
+            return reject;
         }
 
-        // Everything between the title and the buttons scrolls.
-        //
-        // Two things forced this. The settings are already taller than a laptop screen, and
-        // the buttons — Save among them — were the first thing to go off the bottom. And the
-        // wrapping hint under each label has no width to wrap against while the window is
-        // deciding how big to be, so each one measured itself one character per line: the
-        // window opened **3301px tall**, with everything from the colour swatches down past
-        // the bottom of the screen. Giving the content an explicit width (`visible-width`)
-        // is what lets those hints measure themselves properly.
-        scroll := ScrollView {
-            vertical-stretch: 1;
-            viewport-width: self.visible-width;
-            viewport-height: content.preferred-height;
+        VerticalLayout {
+            padding: 16px;
+            spacing: 12px;
 
-            content := VerticalLayout {
-                width: scroll.visible-width - Scroll.gutter;
-                spacing: 12px;
+            Text {
+                text: Strings.ui_settings_title;
+                font-size: 16px;
+                font-weight: 700;
+                color: #f0ead6;
+            }
 
-                // ---- Language ----
-                SettingRow {
-                    label: Strings.ui_settings_lang;
-                    hint: Strings.ui_settings_lang_hint;
-                    HorizontalLayout {
-                        TabButton {
-                            label: Strings.ui_settings_lang_auto;
-                            active: root.lang-sel == "auto";
-                            ink: #d8d2c2;
-                            clicked => { root.lang-sel = "auto"; }
-                        }
-                        // Language names are **not** translated: written in their own language,
-                        // they are findable even by someone stuck in a language they cannot read.
-                        TabButton {
-                            label: "한국어";
-                            active: root.lang-sel == "ko";
-                            ink: #d8d2c2;
-                            clicked => { root.lang-sel = "ko"; }
-                        }
-                        TabButton {
-                            label: "English";
-                            active: root.lang-sel == "en";
-                            ink: #d8d2c2;
-                            clicked => { root.lang-sel = "en"; }
-                        }
-                    }
-                }
+            // Everything between the title and the buttons scrolls.
+            //
+            // Two things forced this. The settings are already taller than a laptop screen, and
+            // the buttons — Save among them — were the first thing to go off the bottom. And the
+            // wrapping hint under each label has no width to wrap against while the window is
+            // deciding how big to be, so each one measured itself one character per line: the
+            // window opened **3301px tall**, with everything from the colour swatches down past
+            // the bottom of the screen. Giving the content an explicit width (`visible-width`)
+            // is what lets those hints measure themselves properly.
+            scroll := ScrollView {
+                vertical-stretch: 1;
+                viewport-width: self.visible-width;
+                viewport-height: content.preferred-height;
 
-                // ---- Locking ----
-                SettingRow {
-                    label: Strings.ui_settings_unlock_days;
-                    hint: Strings.ui_settings_unlock_days_hint;
-                    SpinBox {
-                        minimum: 0;
-                        maximum: 365;
-                        value <=> root.unlock-days;
-                    }
-                }
+                content := VerticalLayout {
+                    width: scroll.visible-width - Scroll.gutter;
+                    spacing: 12px;
 
-                SettingRow {
-                    label: Strings.ui_settings_idle_minutes;
-                    hint: Strings.ui_settings_idle_minutes_hint;
-                    SpinBox {
-                        minimum: 0;
-                        maximum: 1440;
-                        value <=> root.idle-minutes;
-                    }
-                }
-
-                // ---- New memo defaults ----
-                SettingRow {
-                    label: Strings.ui_settings_default_color;
-                    HorizontalLayout {
-                        spacing: 8px;
-                        alignment: start;
-                        for key in ["yellow", "pink", "green", "blue", "purple"]: Rectangle {
-                            width: 22px;
-                            height: 22px;
-                            border-radius: 11px;
-                            background: Palette.swatch(key);
-                            border-width: root.default-color == key ? 3px : 1px;
-                            border-color: root.default-color == key ? #ffffff : #00000040;
-                            TouchArea {
-                                clicked => { root.default-color = key; }
+                    // ---- Language ----
+                    SettingRow {
+                        label: Strings.ui_settings_lang;
+                        hint: Strings.ui_settings_lang_hint;
+                        HorizontalLayout {
+                            TabButton {
+                                label: Strings.ui_settings_lang_auto;
+                                active: root.lang-sel == "auto";
+                                ink: #d8d2c2;
+                                clicked => { root.lang-sel = "auto"; }
+                            }
+                            // Language names are **not** translated: written in their own language,
+                            // they are findable even by someone stuck in a language they cannot read.
+                            TabButton {
+                                label: "한국어";
+                                active: root.lang-sel == "ko";
+                                ink: #d8d2c2;
+                                clicked => { root.lang-sel = "ko"; }
+                            }
+                            TabButton {
+                                label: "English";
+                                active: root.lang-sel == "en";
+                                ink: #d8d2c2;
+                                clicked => { root.lang-sel = "en"; }
                             }
                         }
                     }
-                }
 
-                SettingRow {
-                    label: Strings.ui_settings_default_opacity;
-                    HorizontalLayout {
-                        spacing: 6px;
-                        Slider {
-                            horizontal-stretch: 1;
-                            minimum: 20; // matches the core's MIN_OPACITY
-                            maximum: 100;
-                            value: root.default-opacity;
-                            changed(v) => { root.default-opacity = Math.round(v); }
-                        }
-                        Text {
-                            text: root.default-opacity + "%";
-                            font-size: 11px;
-                            color: #ece7db;
-                            vertical-alignment: center;
-                            width: 40px;
-                            horizontal-alignment: right;
+                    // ---- Locking ----
+                    SettingRow {
+                        label: Strings.ui_settings_unlock_days;
+                        hint: Strings.ui_settings_unlock_days_hint;
+                        SpinBox {
+                            minimum: 0;
+                            maximum: 365;
+                            value <=> root.unlock-days;
                         }
                     }
-                }
 
-                // ---- Advanced ----
-                // The three timings live together because that is how they behave: the delay
-                // a user sees is the sending device's watch delay plus the receiving one's
-                // merge interval, and tuning either alone disappoints.
-                SectionHeader {
-                    label: Strings.ui_settings_advanced;
-                    hint: Strings.ui_settings_advanced_hint;
-                }
-                SettingRow {
-                    label: Strings.ui_settings_watch_delay;
-                    hint: Strings.ui_settings_watch_delay_hint;
-                    SpinBox {
-                        minimum: 1;
-                        maximum: 60;
-                        value <=> root.watch-delay-seconds;
+                    SettingRow {
+                        label: Strings.ui_settings_idle_minutes;
+                        hint: Strings.ui_settings_idle_minutes_hint;
+                        SpinBox {
+                            minimum: 0;
+                            maximum: 1440;
+                            value <=> root.idle-minutes;
+                        }
                     }
-                }
-                SettingRow {
-                    label: Strings.ui_settings_merge_seconds;
-                    hint: Strings.ui_settings_merge_seconds_hint;
-                    SpinBox {
-                        minimum: 3;
-                        maximum: 3600;
-                        value <=> root.merge-seconds;
-                    }
-                }
-                SettingRow {
-                    label: Strings.ui_settings_rescan;
-                    hint: Strings.ui_settings_rescan_hint;
-                    SpinBox {
-                        minimum: 60;
-                        maximum: 3600;
-                        value <=> root.rescan-seconds;
-                    }
-                }
-                SettingRow {
-                    label: Strings.ui_settings_keep_versions;
-                    hint: Strings.ui_settings_keep_versions_hint;
-                    SpinBox {
-                        minimum: 0;
-                        maximum: 365;
-                        value <=> root.keep-versions-days;
-                    }
-                }
 
-                // Last in Advanced because it is the row someone is sent to rather than one
-                // they go looking for: a button, not a value.
-                SettingRow {
-                    label: Strings.ui_settings_log;
-                    hint: Strings.ui_settings_log_hint;
-                    HorizontalLayout {
+                    // ---- New memo defaults ----
+                    SettingRow {
+                        label: Strings.ui_settings_default_color;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: start;
+                            for key in ["yellow", "pink", "green", "blue", "purple"]: Rectangle {
+                                width: 22px;
+                                height: 22px;
+                                border-radius: 11px;
+                                background: Palette.swatch(key);
+                                border-width: root.default-color == key ? 3px : 1px;
+                                border-color: root.default-color == key ? #ffffff : #00000040;
+                                TouchArea {
+                                    clicked => { root.default-color = key; }
+                                }
+                            }
+                        }
+                    }
+
+                    SettingRow {
+                        label: Strings.ui_settings_default_opacity;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Slider {
+                                horizontal-stretch: 1;
+                                minimum: 20; // matches the core's MIN_OPACITY
+                                maximum: 100;
+                                value: root.default-opacity;
+                                changed(v) => { root.default-opacity = Math.round(v); }
+                            }
+                            Text {
+                                text: root.default-opacity + "%";
+                                font-size: 11px;
+                                color: #ece7db;
+                                vertical-alignment: center;
+                                width: 40px;
+                                horizontal-alignment: right;
+                            }
+                        }
+                    }
+
+                    // ---- Advanced ----
+                    // The three timings live together because that is how they behave: the delay
+                    // a user sees is the sending device's watch delay plus the receiving one's
+                    // merge interval, and tuning either alone disappoints.
+                    SectionHeader {
+                        label: Strings.ui_settings_advanced;
+                        hint: Strings.ui_settings_advanced_hint;
+                    }
+                    SettingRow {
+                        label: Strings.ui_settings_watch_delay;
+                        hint: Strings.ui_settings_watch_delay_hint;
+                        SpinBox {
+                            minimum: 1;
+                            maximum: 60;
+                            value <=> root.watch-delay-seconds;
+                        }
+                    }
+                    SettingRow {
+                        label: Strings.ui_settings_merge_seconds;
+                        hint: Strings.ui_settings_merge_seconds_hint;
+                        SpinBox {
+                            minimum: 3;
+                            maximum: 3600;
+                            value <=> root.merge-seconds;
+                        }
+                    }
+                    SettingRow {
+                        label: Strings.ui_settings_rescan;
+                        hint: Strings.ui_settings_rescan_hint;
+                        SpinBox {
+                            minimum: 60;
+                            maximum: 3600;
+                            value <=> root.rescan-seconds;
+                        }
+                    }
+                    SettingRow {
+                        label: Strings.ui_settings_keep_versions;
+                        hint: Strings.ui_settings_keep_versions_hint;
+                        SpinBox {
+                            minimum: 0;
+                            maximum: 365;
+                            value <=> root.keep-versions-days;
+                        }
+                    }
+
+                    // Last in Advanced because it is the row someone is sent to rather than one
+                    // they go looking for: a button, not a value.
+                    SettingRow {
+                        label: Strings.ui_settings_log;
+                        hint: Strings.ui_settings_log_hint;
+                        HorizontalLayout {
+                            Button {
+                                text: Strings.ui_settings_log_open;
+                                clicked => { root.open-log(); }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                    }
+
+                    // ---- Start at login ----
+                    if root.autostart-supported: SettingRow {
+                        label: Strings.ui_settings_start_at_login;
+                        hint: Strings.ui_settings_start_at_login_hint;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            TabButton {
+                                label: Strings.ui_settings_update_on;
+                                active: root.start-at-login;
+                                ink: #d8d2c2;
+                                clicked => { root.start-at-login = true; }
+                            }
+                            TabButton {
+                                label: Strings.ui_settings_update_off;
+                                active: !root.start-at-login;
+                                ink: #d8d2c2;
+                                clicked => { root.start-at-login = false; }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                    }
+
+                    // ---- Updates ----
+                    SettingRow {
+                        label: Strings.ui_settings_update_check;
+                        hint: Strings.ui_settings_update_check_hint;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            TabButton {
+                                label: Strings.ui_settings_update_on;
+                                active: root.update-check;
+                                ink: #d8d2c2;
+                                clicked => { root.update-check = true; }
+                            }
+                            TabButton {
+                                label: Strings.ui_settings_update_off;
+                                active: !root.update-check;
+                                ink: #d8d2c2;
+                                clicked => { root.update-check = false; }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            Button {
+                                text: Strings.ui_settings_check_now;
+                                clicked => { root.check-update(); }
+                            }
+                        }
+                    }
+
+                    if root.update-status != "": Text {
+                        text: root.update-status;
+                        font-size: 11px;
+                        color: root.update-version != "" ? #e8d98a : #a8a294;
+                        wrap: word-wrap;
+                    }
+
+                    // The file the button is about to fetch. Naming it is the whole point of
+                    // picking one: the release page lists seven and this says which is yours.
+                    if root.update-file != "": Text {
+                        text: root.update-file;
+                        font-size: 10px;
+                        font-family: "monospace";
+                        color: #a8a294;
+                        wrap: word-wrap;
+                    }
+                    if root.update-version != "": HorizontalLayout {
+                        alignment: start;
                         Button {
-                            text: Strings.ui_settings_log_open;
-                            clicked => { root.open-log(); }
-                        }
-                        Rectangle { horizontal-stretch: 1; }
-                    }
-                }
-
-                // ---- Start at login ----
-                if root.autostart-supported: SettingRow {
-                    label: Strings.ui_settings_start_at_login;
-                    hint: Strings.ui_settings_start_at_login_hint;
-                    HorizontalLayout {
-                        spacing: 6px;
-                        TabButton {
-                            label: Strings.ui_settings_update_on;
-                            active: root.start-at-login;
-                            ink: #d8d2c2;
-                            clicked => { root.start-at-login = true; }
-                        }
-                        TabButton {
-                            label: Strings.ui_settings_update_off;
-                            active: !root.start-at-login;
-                            ink: #d8d2c2;
-                            clicked => { root.start-at-login = false; }
-                        }
-                        Rectangle { horizontal-stretch: 1; }
-                    }
-                }
-
-                // ---- Updates ----
-                SettingRow {
-                    label: Strings.ui_settings_update_check;
-                    hint: Strings.ui_settings_update_check_hint;
-                    HorizontalLayout {
-                        spacing: 6px;
-                        TabButton {
-                            label: Strings.ui_settings_update_on;
-                            active: root.update-check;
-                            ink: #d8d2c2;
-                            clicked => { root.update-check = true; }
-                        }
-                        TabButton {
-                            label: Strings.ui_settings_update_off;
-                            active: !root.update-check;
-                            ink: #d8d2c2;
-                            clicked => { root.update-check = false; }
-                        }
-                        Rectangle { horizontal-stretch: 1; }
-                        Button {
-                            text: Strings.ui_settings_check_now;
-                            clicked => { root.check-update(); }
+                            text: Strings.ui_update_open;
+                            primary: true;
+                            clicked => { root.open-update(); }
                         }
                     }
-                }
 
-                if root.update-status != "": Text {
-                    text: root.update-status;
-                    font-size: 11px;
-                    color: root.update-version != "" ? #e8d98a : #a8a294;
-                    wrap: word-wrap;
-                }
-
-                // The file the button is about to fetch. Naming it is the whole point of
-                // picking one: the release page lists seven and this says which is yours.
-                if root.update-file != "": Text {
-                    text: root.update-file;
-                    font-size: 10px;
-                    font-family: "monospace";
-                    color: #a8a294;
-                    wrap: word-wrap;
-                }
-                if root.update-version != "": HorizontalLayout {
-                    alignment: start;
-                    Button {
-                        text: Strings.ui_update_open;
-                        primary: true;
-                        clicked => { root.open-update(); }
+                    if root.status != "": Text {
+                        text: root.status;
+                        font-size: 11px;
+                        color: #a8d0a8;
+                        wrap: word-wrap;
                     }
+
                 }
+            }
 
-                if root.status != "": Text {
-                    text: root.status;
-                    font-size: 11px;
-                    color: #a8d0a8;
-                    wrap: word-wrap;
+            Text {
+                text: Strings.ui_settings_version + " " + root.app-version;
+                font-size: 11px;
+                color: #8a8375;
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+                Button {
+                    text: Strings.ui_settings_lock_now;
+                    enabled: root.unlocked;
+                    clicked => { root.lock-now(); }
                 }
-
-            }
-        }
-
-        Text {
-            text: Strings.ui_settings_version + " " + root.app-version;
-            font-size: 11px;
-            color: #8a8375;
-        }
-
-        HorizontalLayout {
-            spacing: 6px;
-            Button {
-                text: Strings.ui_settings_lock_now;
-                enabled: root.unlocked;
-                clicked => { root.lock-now(); }
-            }
-            Button {
-                text: Strings.ui_settings_security;
-                enabled: root.unlocked;
-                clicked => { root.open-security(); }
-            }
-            Rectangle { horizontal-stretch: 1; }
-            Button {
-                text: Strings.ui_settings_close;
-                clicked => { root.close-requested(); }
-            }
-            Button {
-                text: Strings.ui_settings_save;
-                primary: true;
-                clicked => { root.apply(); }
+                Button {
+                    text: Strings.ui_settings_security;
+                    enabled: root.unlocked;
+                    clicked => { root.open-security(); }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Button {
+                    text: Strings.ui_settings_close;
+                    clicked => { root.close-requested(); }
+                }
+                Button {
+                    text: Strings.ui_settings_save;
+                    primary: true;
+                    clicked => { root.apply(); }
+                }
             }
         }
     }

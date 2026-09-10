@@ -50,158 +50,175 @@ export component HistoryWindow inherits Window {
         ? root.revisions[root.selected]
         : { index: -1, when: "", device: "", kind: "", changed: "", heading: "", body: "", color: "", restorable: false };
 
-    VerticalLayout {
-        padding: 14px;
-        spacing: 10px;
-
-        Text {
-            text: Strings.ui_history_heading + " — " + root.subject;
-            font-size: 15px;
-            font-weight: 700;
-            color: #f0ead6;
-            overflow: elide;
+    // Escape closes this window, the way it closes the folder-name box and puts a
+    // note down. A `FocusScope` around the whole of it rather than a handler on one
+    // control: Slint sends a key to the focused item first and then up through its
+    // ancestors, so this is reached whatever the user last clicked into.
+    keys := FocusScope {
+        // Nothing has the focus in a window that has just opened, so it takes it;
+        // anything clicked into takes it away and gets its keys first.
+        init => { self.focus(); }
+        key-pressed(ev) => {
+            if (ev.text == Key.Escape) {
+                root.close-requested();
+                return accept;
+            }
+            return reject;
         }
 
-        if root.revisions.length == 0: Text {
-            text: Strings.ui_history_empty;
-            font-size: 12px;
-            color: #b0a99a;
-            wrap: word-wrap;
-        }
-
-        if root.revisions.length > 0: HorizontalLayout {
-            vertical-stretch: 1;
+        VerticalLayout {
+            padding: 14px;
             spacing: 10px;
 
-            // ---- The revisions themselves ----
-            ListView {
-                width: 235px;
-                for row[idx] in root.revisions: Rectangle {
-                    height: 52px;
-                    border-radius: 6px;
-                    background: root.selected == idx ? #ffffff26
-                              : row-ta.has-hover ? #ffffff12
-                              : transparent;
-                    row-ta := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.selected = idx; }
-                    }
-                    HorizontalLayout {
-                        padding: 7px;
-                        spacing: 7px;
-                        Rectangle {
-                            width: 4px;
-                            border-radius: 2px;
-                            background: row.kind == Strings.ui_history_deleted ? #e79a9a : #9ec5e8;
-                        }
-                        VerticalLayout {
-                            spacing: 2px;
-                            HorizontalLayout {
-                                spacing: 5px;
-                                Text {
-                                    text: row.when;
-                                    font-size: 11px;
-                                    font-weight: 700;
-                                    color: #ece7db;
-                                }
-                                Text {
-                                    text: row.kind;
-                                    font-size: 10px;
-                                    color: #a8a294;
-                                    vertical-alignment: center;
-                                }
-                            }
-                            Text {
-                                text: row.changed == "" ? row.device : row.changed;
-                                font-size: 10px;
-                                color: #8a8375;
-                                overflow: elide;
-                            }
-                        }
-                    }
-                }
+            Text {
+                text: Strings.ui_history_heading + " — " + root.subject;
+                font-size: 15px;
+                font-weight: 700;
+                color: #f0ead6;
+                overflow: elide;
             }
 
-            // ---- What that version looked like ----
-            VerticalLayout {
-                horizontal-stretch: 1;
-                spacing: 6px;
+            if root.revisions.length == 0: Text {
+                text: Strings.ui_history_empty;
+                font-size: 12px;
+                color: #b0a99a;
+                wrap: word-wrap;
+            }
 
-                if root.selected < 0: Text {
-                    text: Strings.ui_history_pick;
-                    font-size: 11px;
-                    color: #8a8375;
-                    wrap: word-wrap;
-                }
+            if root.revisions.length > 0: HorizontalLayout {
+                vertical-stretch: 1;
+                spacing: 10px;
 
-                if root.selected >= 0: HorizontalLayout {
-                    spacing: 6px;
-                    Rectangle {
-                        width: 12px;
-                        height: 12px;
-                        y: 3px;
+                // ---- The revisions themselves ----
+                ListView {
+                    width: 235px;
+                    for row[idx] in root.revisions: Rectangle {
+                        height: 52px;
                         border-radius: 6px;
-                        background: root.current.color == "pink" ? #ff9fc0
-                                  : root.current.color == "green" ? #8fd678
-                                  : root.current.color == "blue" ? #7db8ec
-                                  : root.current.color == "purple" ? #b98fe0
-                                  : #ffe15c;
+                        background: root.selected == idx ? #ffffff26
+                                  : row-ta.has-hover ? #ffffff12
+                                  : transparent;
+                        row-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.selected = idx; }
+                        }
+                        HorizontalLayout {
+                            padding: 7px;
+                            spacing: 7px;
+                            Rectangle {
+                                width: 4px;
+                                border-radius: 2px;
+                                background: row.kind == Strings.ui_history_deleted ? #e79a9a : #9ec5e8;
+                            }
+                            VerticalLayout {
+                                spacing: 2px;
+                                HorizontalLayout {
+                                    spacing: 5px;
+                                    Text {
+                                        text: row.when;
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        color: #ece7db;
+                                    }
+                                    Text {
+                                        text: row.kind;
+                                        font-size: 10px;
+                                        color: #a8a294;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                Text {
+                                    text: row.changed == "" ? row.device : row.changed;
+                                    font-size: 10px;
+                                    color: #8a8375;
+                                    overflow: elide;
+                                }
+                            }
+                        }
                     }
-                    Text {
-                        text: root.current.heading == "" ? Strings.ui_list_memo_untitled : root.current.heading;
-                        font-size: 13px;
-                        font-weight: 700;
-                        color: #f0ead6;
+                }
+
+                // ---- What that version looked like ----
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 6px;
+
+                    if root.selected < 0: Text {
+                        text: Strings.ui_history_pick;
+                        font-size: 11px;
+                        color: #8a8375;
+                        wrap: word-wrap;
+                    }
+
+                    if root.selected >= 0: HorizontalLayout {
+                        spacing: 6px;
+                        Rectangle {
+                            width: 12px;
+                            height: 12px;
+                            y: 3px;
+                            border-radius: 6px;
+                            background: root.current.color == "pink" ? #ff9fc0
+                                      : root.current.color == "green" ? #8fd678
+                                      : root.current.color == "blue" ? #7db8ec
+                                      : root.current.color == "purple" ? #b98fe0
+                                      : #ffe15c;
+                        }
+                        Text {
+                            text: root.current.heading == "" ? Strings.ui_list_memo_untitled : root.current.heading;
+                            font-size: 13px;
+                            font-weight: 700;
+                            color: #f0ead6;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
+                    }
+
+                    if root.selected >= 0: Text {
+                        text: root.current.device;
+                        font-size: 10px;
+                        color: #8a8375;
                         overflow: elide;
-                        horizontal-stretch: 1;
                     }
-                }
 
-                if root.selected >= 0: Text {
-                    text: root.current.device;
-                    font-size: 10px;
-                    color: #8a8375;
-                    overflow: elide;
-                }
-
-                if root.selected >= 0: Rectangle {
-                    vertical-stretch: 1;
-                    background: #262320;
-                    border-radius: 6px;
-                    ScrollView {
-                        VerticalLayout {
-                            padding: 8px;
-                            Text {
-                                text: root.current.body;
-                                font-size: 12px;
-                                color: #d8d2c2;
-                                wrap: word-wrap;
+                    if root.selected >= 0: Rectangle {
+                        vertical-stretch: 1;
+                        background: #262320;
+                        border-radius: 6px;
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 8px;
+                                Text {
+                                    text: root.current.body;
+                                    font-size: 12px;
+                                    color: #d8d2c2;
+                                    wrap: word-wrap;
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        if root.status != "": Text {
-            text: root.status;
-            font-size: 11px;
-            color: #a8d0a8;
-            wrap: word-wrap;
-        }
-
-        HorizontalLayout {
-            spacing: 6px;
-            Button {
-                text: Strings.ui_history_restore;
-                primary: true;
-                enabled: root.selected >= 0 && root.current.restorable;
-                clicked => { root.restore(root.current.index); }
+            if root.status != "": Text {
+                text: root.status;
+                font-size: 11px;
+                color: #a8d0a8;
+                wrap: word-wrap;
             }
-            Rectangle { horizontal-stretch: 1; }
-            Button {
-                text: Strings.ui_history_close;
-                clicked => { root.close-requested(); }
+
+            HorizontalLayout {
+                spacing: 6px;
+                Button {
+                    text: Strings.ui_history_restore;
+                    primary: true;
+                    enabled: root.selected >= 0 && root.current.restorable;
+                    clicked => { root.restore(root.current.index); }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Button {
+                    text: Strings.ui_history_close;
+                    clicked => { root.close-requested(); }
+                }
             }
         }
     }
