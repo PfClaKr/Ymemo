@@ -9,7 +9,7 @@
 
 import 'dart:async';
 import 'dart:io' show Directory, FileSystemEvent, Platform;
-import 'dart:math' show max;
+import 'dart:math' show max, min;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show listEquals;
@@ -1706,6 +1706,54 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   late String _color = widget.color;
   List<FfiAttachment> _photos = [];
 
+  /// What is known to be in the vault. Not `widget.title`/`widget.body`: those are what the
+  /// screen opened with, and opening room for a photo changes the stored note underneath it,
+  /// so comparing against them would call a real edit "nothing to save".
+  late String _savedTitle = widget.title;
+  late String _savedBody = widget.body;
+
+  /// The writing's own scroll, so a photo standing in it travels with the words when the note
+  /// is longer than the screen.
+  final ScrollController _bodyScrollCtl = ScrollController();
+
+  /// Writes the note back shortly after typing stops, but **only** while a photo is standing
+  /// in it. A photo in the writing is anchored to a line number, and `Vault::upsert` is what
+  /// moves that anchor when lines are added above it — so without a save the picture sits at
+  /// the line it was put on while the words slide past it, until the screen is left. The
+  /// desktop gets this from the debounce it already saves on; the phone otherwise only writes
+  /// on the way out, which is why this exists at all rather than being the same timer.
+  Timer? _followTimer;
+  double get _bodyScroll => _bodyScrollCtl.hasClients ? _bodyScrollCtl.offset : 0;
+
+  /// The style the body is actually set in, filled in on every build. Everything that has to
+  /// reason in lines measures with this rather than with a guess at the font.
+  TextStyle _bodyStyle = const TextStyle(fontSize: 14);
+
+  /// The first [n] lines of [text], with no trailing newline: exactly the words above a photo.
+  String _linesBefore(String text, int n) {
+    if (n <= 0) return '';
+    var seen = 0;
+    for (var i = 0; i < text.length; i++) {
+      if (text.codeUnitAt(i) == 0x0a) {
+        seen++;
+        if (seen == n) return text.substring(0, i);
+      }
+    }
+    return text;
+  }
+
+  /// How tall [prefix] is, laid out the way the field lays it out. This is the measurement
+  /// the whole arrangement rests on — a wrapped line is two lines on screen and one in the
+  /// text, so nothing here counts.
+  double _writingHeight(String prefix, double width) {
+    if (prefix.isEmpty) return 0;
+    final painter = TextPainter(
+      text: TextSpan(text: prefix, style: _bodyStyle),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: width);
+    return painter.height;
+  }
+
   /// Which photo shows its move/resize/detach handles. There is no hovering on a phone, so
   /// a photo has to be tapped before its controls appear; tapping the text puts them away.
   String? _selectedPhoto;
@@ -1748,6 +1796,23 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   @override
   void initState() {
     super.initState();
+    // A photo standing in the writing is drawn at a height measured from the top of the text,
+    // so it has to be redrawn when the text scrolls under it — otherwise it stays where it is
+    // while its words move away.
+    _bodyScrollCtl.addListener(() {
+      if (mounted && _photos.any((p) => p.mode == FfiPhotoMode.inWriting)) {
+        setState(() {});
+      }
+    });
+    _body.addListener(() {
+      if (!_photos.any((p) => p.mode == FfiPhotoMode.inWriting)) return;
+      _followTimer?.cancel();
+      _followTimer = Timer(const Duration(milliseconds: 700), () async {
+        if (!mounted) return;
+        await _save();
+        await _reloadPhotos();
+      });
+    });
     _reloadPhotos();
     // After the first frame, so the picker's sheet opens over the editor rather than over
     // whatever was still on screen while it was being built.
@@ -1759,6 +1824,64 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   Future<void> _reloadPhotos() async {
     final list = await attachmentList(memoId: widget.id);
     if (mounted) setState(() => _photos = list);
+  }
+
+  /// Moves a photo into the writing at the caret, or takes it back out.
+  ///
+  /// The memo is written **first**. The room is opened in whatever the core has stored, and
+  /// what is on screen is newer than that until the editor is left — so without this the gap
+  /// would be cut into an older version of the note and then overwritten by the newer one on
+  /// the way out, leaving a photo anchored to a line nobody made room for.
+  Future<void> _movePhoto(FfiAttachment photo, {required bool intoWriting}) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await memoUpsert(id: widget.id, title: _title.text, body: _body.text);
+      final body = intoWriting
+          ? await attachmentPlaceInWriting(
+              id: photo.id,
+              afterLine: _caretLine(),
+              rows: _rowsFor(photo),
+            )
+          : await attachmentTakeOutOfWriting(id: photo.id);
+      // The body under the editor just changed — blank lines were opened or closed in it.
+      // It is also exactly what the vault now holds, so nothing is pending on it.
+      if (mounted) _body.text = body;
+      _savedBody = body;
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
+    await _reloadPhotos();
+  }
+
+  /// Which line a picture goes on: **its own line, under whatever the caret sits after.**
+  ///
+  /// With the caret at the end of a line that is the line below it — somebody who has just
+  /// written a line and reached for a picture wants it under what they wrote. With the caret
+  /// at the start of one, which is where return leaves it, that is the line itself, so the
+  /// empty line just made becomes the room instead of a blank line above the room. The end of
+  /// the note when the caret has never been in it, which is where someone who has pointed at
+  /// nothing would expect a picture to land. Matches `line_for_caret` on the desktop.
+  int _caretLine() {
+    final text = _body.text;
+    final caret = _body.selection.baseOffset;
+    final at = (caret < 0 || caret > text.length) ? text.length : caret;
+    final breaks = '\n'.allMatches(text.substring(0, at)).length;
+    final atLineStart = at == 0 || text.codeUnitAt(at - 1) == 0x0a;
+    return atLineStart ? breaks : breaks + 1;
+  }
+
+  /// How many blank lines a photo needs to stand in, at this screen's line height. Rounded up:
+  /// a line of writing peeping out from under a picture reads as a bug where a sliver of blank
+  /// paper reads as spacing.
+  int _rowsFor(FfiAttachment photo) {
+    final line = _writingHeight('X', double.infinity);
+    final width = photo.widthEmMilli / 1000.0 * (_bodyStyle.fontSize ?? 14.0);
+    final ratio = (photo.widthPx > 0 && photo.heightPx > 0)
+        ? photo.heightPx / photo.widthPx
+        : 1.0;
+    if (line <= 0) return 1;
+    return max(1, (width * ratio / line).ceil());
   }
 
   /// Picks one photo from the gallery or camera.
@@ -1829,8 +1952,10 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
 
   @override
   void dispose() {
+    _followTimer?.cancel();
     _title.dispose();
     _body.dispose();
+    _bodyScrollCtl.dispose();
     super.dispose();
   }
 
@@ -1841,10 +1966,12 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   /// is typed in it with nothing said, so the caller stays put and shows why. The core's
   /// message says what went wrong; it is shown as it is.
   Future<bool> _save() async {
-    if (_title.text == widget.title && _body.text == widget.body) return true;
+    if (_title.text == _savedTitle && _body.text == _savedBody) return true;
     final messenger = ScaffoldMessenger.of(context);
     try {
       await memoUpsert(id: widget.id, title: _title.text, body: _body.text);
+      _savedTitle = _title.text;
+      _savedBody = _body.text;
       return true;
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('$e')));
@@ -1856,6 +1983,8 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   Widget build(BuildContext context) {
     final base = Theme.of(context);
     final ink = paletteInk(_color);
+    // What the body is really set in, for the measuring above.
+    _bodyStyle = base.textTheme.bodyLarge ?? const TextStyle(fontSize: 16);
     // Focus underlines, labels and the caret all come from `colorScheme.primary`, which is
     // the app's yellow accent — the one thing left on a blue or purple sticky that does not
     // belong to it. Swapped for the palette's own ink, for this screen only.
@@ -1940,8 +2069,14 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                 child: LayoutBuilder(
                   builder: (context, box) {
                     final baseFont = DefaultTextStyle.of(context).style.fontSize ?? 14.0;
-                    final floating = _photos.where((p) => !p.flow).toList();
-                    final flowing = _photos.where((p) => p.flow).toList();
+                    final floating = _photos
+                        .where((p) => p.mode == FfiPhotoMode.float)
+                        .toList();
+                    final flowing =
+                        _photos.where((p) => p.mode == FfiPhotoMode.flow).toList();
+                    final inWriting = _photos
+                        .where((p) => p.mode == FfiPhotoMode.inWriting)
+                        .toList();
                     // The writing, and under it the photos that asked not to be written
                     // over. A column rather than one surface, because that *is* the
                     // difference between the two modes: what is in this column cannot have
@@ -1958,7 +2093,13 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                                   Positioned.fill(
                                     child: TextField(
                                       controller: _body,
+                                      scrollController: _bodyScrollCtl,
+                                      style: _bodyStyle,
                                       decoration: InputDecoration(
+                                        // No padding of its own: a photo standing in the
+                                        // writing is placed at a height measured from the
+                                        // top of the text, so the text has to start there.
+                                        contentPadding: EdgeInsets.zero,
                                         hintText: widget.strings.bodyHint,
                                         // The hint is also the only place the app says what
                                         // ``` does, so it has room to say it.
@@ -1974,6 +2115,34 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                                           setState(() => _selectedPhoto = null),
                                     ),
                                   ),
+                                  // Standing **in** the writing: drawn at the height of the
+                                  // words above it, measured with the very style the field
+                                  // sets them in. Counting lines would be wrong — a line that
+                                  // wrapped is one line in the text and two on the screen —
+                                  // and the scroll offset keeps the picture with its words
+                                  // once the note is longer than the screen.
+                                  for (final photo in inWriting)
+                                    NotePhoto(
+                                      key: ValueKey(photo.id),
+                                      strings: widget.strings,
+                                      attachment: photo,
+                                      inWriting: true,
+                                      placeAt: _writingHeight(
+                                            _linesBefore(
+                                                _body.text, photo.anchorLine),
+                                            canvas.width,
+                                          ) -
+                                          _bodyScroll,
+                                      canvas: canvas,
+                                      baseFont: baseFont,
+                                      ink: ink,
+                                      selected: _selectedPhoto == photo.id,
+                                      onSelect: () =>
+                                          setState(() => _selectedPhoto = photo.id),
+                                      onChanged: _reloadPhotos,
+                                      onMove: (into) =>
+                                          _movePhoto(photo, intoWriting: into),
+                                    ),
                                   for (final photo in floating)
                                     NotePhoto(
                                       key: ValueKey(photo.id),
@@ -1986,14 +2155,25 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                                       onSelect: () =>
                                           setState(() => _selectedPhoto = photo.id),
                                       onChanged: _reloadPhotos,
+                                      onMove: (into) =>
+                                          _movePhoto(photo, intoWriting: into),
                                     ),
                                 ],
                               );
                             },
                           ),
                         ),
+                        // The band never takes more than half the note, and scrolls inside
+                        // what it is given. Without the cap it took its full height first and
+                        // the writing lived on the remainder — so with the keyboard up, which
+                        // is most of the time on a phone, a photo from a phone camera left no
+                        // room to type in at all. Reported, and the reason for the cap on a
+                        // floating photo in `NotePhoto` too.
                         if (flowing.isNotEmpty)
-                          SingleChildScrollView(
+                          ConstrainedBox(
+                            constraints:
+                                BoxConstraints(maxHeight: box.maxHeight * 0.5),
+                            child: SingleChildScrollView(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -2012,9 +2192,12 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                                     onSelect: () =>
                                         setState(() => _selectedPhoto = photo.id),
                                     onChanged: _reloadPhotos,
+                                    onMove: (into) =>
+                                        _movePhoto(photo, intoWriting: into),
                                   ),
                               ],
                             ),
+                          ),
                           ),
                       ],
                     );
@@ -2988,6 +3171,9 @@ class NotePhoto extends StatefulWidget {
     required this.onSelect,
     required this.onChanged,
     this.flow = false,
+    this.inWriting = false,
+    this.placeAt,
+    this.onMove,
   });
 
   final FfiStrings strings;
@@ -2995,6 +3181,17 @@ class NotePhoto extends StatefulWidget {
 
   /// Whether this one sits in the band under the writing rather than on top of it.
   final bool flow;
+
+  /// Whether this one stands **in** the writing, in room the memo makes for it, rather than
+  /// lying on it. Placed by [placeAt] — the measured height of the words above it — so it is
+  /// no more draggable than one in the flow: the writing is what puts it there.
+  final bool inWriting;
+  final double? placeAt;
+
+  /// Asked to move into the writing (true) or back out of it. The screen above does this, not
+  /// the photo: the room is opened at the caret and in the text the editor is holding, and
+  /// neither of those is anything a photo knows about.
+  final Future<void> Function(bool intoWriting)? onMove;
 
   /// Size of the note the photo lies on; positions are a fraction of it.
   final Size canvas;
@@ -3039,16 +3236,31 @@ class _NotePhotoState extends State<NotePhoto> {
     if (mounted) setState(() => _bytes = bytes);
   }
 
-  double get _w {
-    final stored = widget.attachment.widthEmMilli / 1000.0 * widget.baseFont;
-    return (stored + _dw).clamp(_minW, max(widget.canvas.width, _minW));
+  /// Whether the note decides where this photo goes, rather than the finger.
+  bool get _placed => widget.flow || widget.inWriting;
+
+  /// Proportions of the picture, for turning a width into a height.
+  double get _ratio {
+    final a = widget.attachment;
+    return (a.widthPx > 0 && a.heightPx > 0) ? a.heightPx / a.widthPx : 1.0;
   }
 
-  double get _h {
-    final a = widget.attachment;
-    final ratio = (a.widthPx > 0 && a.heightPx > 0) ? a.heightPx / a.widthPx : 1.0;
-    return _w * ratio;
+  double get _w {
+    final stored = widget.attachment.widthEmMilli / 1000.0 * widget.baseFont;
+    // Held to the note's width, and — for one lying **on** the writing — to three quarters of
+    // its height, the same cap the desktop sticky uses. A floating photo takes the touch, so
+    // a tall picture that covered the note end to end left nowhere to put the caret at all:
+    // with the keyboard up, the writing is a third of a phone screen and a photo from a phone
+    // camera is taller than it is wide. In the flow, or standing in the writing, there is
+    // nothing to cap — the picture has room of its own there and hides no line.
+    final widest = max(widget.canvas.width, _minW);
+    final tallest = widget.flow || widget.inWriting
+        ? widest
+        : max(widget.canvas.height * 0.75 / max(_ratio, 0.01), _minW);
+    return (stored + _dw).clamp(_minW, max(min(widest, tallest), _minW));
   }
+
+  double get _h => _w * _ratio;
 
   // Never fully off the note: a photo whose corner cannot be reached cannot be brought back.
   double get _x => (widget.attachment.xPermille / 1000.0 * widget.canvas.width + _dx)
@@ -3063,10 +3275,10 @@ class _NotePhotoState extends State<NotePhoto> {
       id: widget.attachment.id,
       // A photo in the flow is placed by the column, so the corner it would return to is
       // written back unchanged: only its width is the user's to set here.
-      xPermille: widget.flow
+      xPermille: _placed
           ? widget.attachment.xPermille
           : (_x / max(widget.canvas.width, 1) * 1000).round(),
-      yPermille: widget.flow
+      yPermille: _placed
           ? widget.attachment.yPermille
           : (_y / max(widget.canvas.height, 1) * 1000).round(),
       widthEmMilli: (_w / widget.baseFont * 1000).round(),
@@ -3089,14 +3301,14 @@ class _NotePhotoState extends State<NotePhoto> {
         GestureDetector(
           onTap: widget.onSelect,
           onPanStart: (_) => widget.onSelect(),
-          // Nowhere to drag one in the flow; the column decides where it goes.
-          onPanUpdate: widget.flow
+          // Nowhere to drag one the writing places; move the caret and place it again.
+          onPanUpdate: _placed
               ? null
               : (d) => setState(() {
                     _dx += d.delta.dx;
                     _dy += d.delta.dy;
                   }),
-          onPanEnd: widget.flow ? null : (_) => _commit(),
+          onPanEnd: _placed ? null : (_) => _commit(),
           child: Container(
             width: _w,
             height: _h,
@@ -3114,12 +3326,21 @@ class _NotePhotoState extends State<NotePhoto> {
         if (selected) ..._furniture(),
       ],
     );
-    // In the flow the column places it; on top of the writing it places itself. The padding
-    // is for the controls, which hang outside the frame.
+    // In the flow the column places it; standing in the writing, the writing does; on top of
+    // it, it places itself. The padding is for the controls, which hang outside the frame.
     if (widget.flow) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(0, 12, 12, 4),
         child: SizedBox(width: _w, height: _h, child: frame),
+      );
+    }
+    if (widget.inWriting) {
+      return Positioned(
+        left: 0,
+        top: widget.placeAt ?? 0,
+        width: _w,
+        height: _h,
+        child: frame,
       );
     }
     return Positioned(left: _x, top: _y, width: _w, height: _h, child: frame);
@@ -3180,21 +3401,15 @@ class _NotePhotoState extends State<NotePhoto> {
           right: _handle * 2 / 3,
           top: -_handle / 3,
           child: Semantics(
-            label: widget.flow
+            label: _placed
                 ? widget.strings.photoOverText
                 : widget.strings.photoUnderText,
             button: true,
             child: GestureDetector(
-              onTap: () async {
-                await attachmentSetFlow(
-                  id: widget.attachment.id,
-                  flow: !widget.flow,
-                );
-                await widget.onChanged();
-              },
+              onTap: () async => widget.onMove?.call(!_placed),
               child: _chip(
                 widget.ink,
-                widget.flow ? Icons.flip_to_front : Icons.vertical_align_bottom,
+                _placed ? Icons.flip_to_front : Icons.vertical_align_bottom,
               ),
             ),
           ),

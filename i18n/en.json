@@ -136,7 +136,7 @@
   "mobile.photo_save_failed": "The photo was not saved",
   "mobile.photo_saved": "Photo saved",
   "mobile.photo_size": "Display size",
-  "mobile.photo_under_text": "Move under the writing",
+  "mobile.photo_under_text": "Put into the writing, at the cursor",
   "mobile.recovery_absent": "No recovery code yet — issue one now.",
   "mobile.recovery_ack": "I have written it down",
   "mobile.recovery_code": "Recovery code",

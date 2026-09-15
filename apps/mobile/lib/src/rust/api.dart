@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_revocations`, `field_label`, `lan_lock`, `rejected_lock`, `remember_delete`, `sanitize`, `share_with_peer`, `sync_lock`, `with_sync`, `with_vault`
+// These functions are ignored because they are not marked as `pub`: `apply_revocations`, `body_of_attachment`, `field_label`, `lan_lock`, `rejected_lock`, `remember_delete`, `sanitize`, `share_with_peer`, `sync_lock`, `with_sync`, `with_vault`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `fmt`, `from`, `from`, `from`
 
 /// Sets the language of core error messages (`"ko"`, `"en"`, or a locale like `"ko-KR"`).
@@ -211,12 +211,26 @@ Future<void> attachmentSetLayout(
         yPermille: yPermille,
         widthEmMilli: widthEmMilli);
 
-/// Moves a photo between lying on the writing and having a band of its own under it.
+/// Puts a photo **into** the writing after `after_line` lines of it, opening `rows` blank
+/// lines to stand in.
 ///
-/// A fact about the memo, not about this device: a photo put in the flow here is out of the
-/// way of the writing on the desktop sticky too.
-Future<void> attachmentSetFlow({required String id, required bool flow}) =>
-    RustLib.instance.api.crateApiAttachmentSetFlow(id: id, flow: flow);
+/// A fact about the memo, not about this device: a photo put into the writing here is in the
+/// writing on the desktop sticky too, at the same words. The room is real blank lines in the
+/// body — see `Vault::place_attachment_in_writing`, which writes both halves together.
+/// Returns the memo's body **after** the room was opened, because that is what the editor on
+/// screen now has to be showing: the writing it is holding is a version of the note without
+/// the gap in it, and saving that back over the top would close the room again.
+Future<String> attachmentPlaceInWriting(
+        {required String id,
+        required PlatformInt64 afterLine,
+        required int rows}) =>
+    RustLib.instance.api.crateApiAttachmentPlaceInWriting(
+        id: id, afterLine: afterLine, rows: rows);
+
+/// Takes a photo back out of the writing, closing the room it stood in, and lays it on top.
+/// Returns the body without the room, for the same reason as above.
+Future<String> attachmentTakeOutOfWriting({required String id}) =>
+    RustLib.instance.api.crateApiAttachmentTakeOutOfWriting(id: id);
 
 /// Detaches a photo; the blob file stays (no GC).
 Future<void> attachmentRemove({required String id}) =>
@@ -494,9 +508,11 @@ class FfiAttachment {
   final PlatformInt64 xPermille;
   final PlatformInt64 yPermille;
 
-  /// Whether the photo takes a band of its own under the writing instead of lying on top
-  /// of it. False is what every photo was before there was a choice.
-  final bool flow;
+  /// How the photo sits against the writing.
+  final FfiPhotoMode mode;
+
+  /// For [`FfiPhotoMode::InWriting`]: how many lines of the body the photo stands after.
+  final PlatformInt64 anchorLine;
   final PlatformInt64 createdAt;
 
   const FfiAttachment({
@@ -510,7 +526,8 @@ class FfiAttachment {
     required this.widthEmMilli,
     required this.xPermille,
     required this.yPermille,
-    required this.flow,
+    required this.mode,
+    required this.anchorLine,
     required this.createdAt,
   });
 
@@ -526,7 +543,8 @@ class FfiAttachment {
       widthEmMilli.hashCode ^
       xPermille.hashCode ^
       yPermille.hashCode ^
-      flow.hashCode ^
+      mode.hashCode ^
+      anchorLine.hashCode ^
       createdAt.hashCode;
 
   @override
@@ -544,7 +562,8 @@ class FfiAttachment {
           widthEmMilli == other.widthEmMilli &&
           xPermille == other.xPermille &&
           yPermille == other.yPermille &&
-          flow == other.flow &&
+          mode == other.mode &&
+          anchorLine == other.anchorLine &&
           createdAt == other.createdAt;
 }
 
@@ -675,6 +694,23 @@ class FfiPendingDevice {
           id == other.id &&
           name == other.name &&
           verificationCode == other.verificationCode;
+}
+
+/// How a photo sits against the writing, as the UI needs to draw it.
+///
+/// An enum rather than the two booleans this used to be: there are three places a photo can
+/// be, and a pair of flags can say a fourth thing that does not exist.
+enum FfiPhotoMode {
+  /// Lying on the writing, at the corner it was left at.
+  float,
+
+  /// In a band of its own under the writing. Not offered any more, but still drawn: memos
+  /// have photos in it, and so do other devices.
+  flow,
+
+  /// Standing **in** the writing, in room the memo makes for it.
+  inWriting,
+  ;
 }
 
 /// A release newer than the running build.

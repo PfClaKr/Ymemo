@@ -674,10 +674,25 @@ fn attach_photo(memo_id: &str, pick: PhotoPick) {
     refresh_photos(&ctx, memo_id);
 }
 
-/// Which line byte offset `at` falls on: the number of line breaks before it.
-fn line_at_byte(body: &str, at: usize) -> i64 {
+/// Which line a picture goes on when the caret is at byte offset `at`.
+///
+/// Where the caret is, meaning: **on its own line, under whatever the caret sits after.** With
+/// the caret at the end of a line that is the line below — somebody who has just written a
+/// line and reached for a picture wants it under what they wrote, not above it. With the
+/// caret at the start of one — which is where pressing return leaves it — that is the line
+/// itself, so the empty line just made is the room rather than a blank line above the room.
+/// Both are how people arrive here and the two rules disagree, which is why this is not
+/// simply a count of line breaks.
+fn line_for_caret(body: &str, at: usize) -> i64 {
     let at = at.min(body.len());
-    body.as_bytes()[..at].iter().filter(|b| **b == b'\n').count() as i64
+    let bytes = body.as_bytes();
+    let breaks = bytes[..at].iter().filter(|b| **b == b'\n').count() as i64;
+    let at_line_start = at == 0 || bytes[at - 1] == b'\n';
+    if at_line_start {
+        breaks
+    } else {
+        breaks + 1
+    }
 }
 
 /// How many blank lines a photo needs to stand in, at this note's line height.
@@ -859,12 +874,18 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         window.on_set_photo_flow(move |photo_id, into_writing| {
             touch(&ctx);
             let Some(w) = weak.upgrade() else { return };
+            // What is on the note is newer than what is stored until the debounce fires, and
+            // the room is opened in what is **stored** — so without this the gap is cut into
+            // an older version of the writing and the pending save then closes it again,
+            // leaving the photo anchored to a line nobody made room for. A save with nothing
+            // to save costs nothing.
+            save_memo(&ctx, &id, w.get_memo_text().as_str());
             {
                 let mut guard = ctx.vault.borrow_mut();
                 let Some(v) = guard.as_mut() else { return };
                 let res = if into_writing {
                     let body = v.store().get(&id).ok().flatten().map(|m| m.body).unwrap_or_default();
-                    let after_line = line_at_byte(&body, w.get_caret_byte().max(0) as usize);
+                    let after_line = line_for_caret(&body, w.get_caret_byte().max(0) as usize);
                     let rows = rows_for_photo(v, photo_id.as_str(), w.get_body_line_height());
                     v.place_attachment_in_writing(photo_id.as_str(), after_line, rows)
                 } else {
@@ -1536,6 +1557,26 @@ pub(crate) fn nearest(cands: &[i32], v: i32, threshold: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
+
+    /// Where a picture lands for a given caret: under what the caret sits after.
+    #[test]
+    fn a_picture_goes_on_the_line_under_what_the_caret_sits_after() {
+        let body = "one\ntwo\nthree";
+        // Caret at the end of a line: the picture goes below that line.
+        assert_eq!(line_for_caret(body, 3), 1, "end of \"one\"");
+        assert_eq!(line_for_caret(body, 7), 2, "end of \"two\"");
+        // Mid-line counts as being on that line, so still below it.
+        assert_eq!(line_for_caret(body, 5), 2, "inside \"two\"");
+        // Caret at the start of a line — where return leaves it — is that line itself.
+        assert_eq!(line_for_caret(body, 0), 0, "very start");
+        assert_eq!(line_for_caret(body, 4), 1, "start of \"two\"");
+        assert_eq!(line_for_caret(body, 8), 2, "start of \"three\"");
+        // A caret past the end, or on a body that has never been in, lands at the end.
+        assert_eq!(line_for_caret(body, 999), 3);
+        assert_eq!(line_for_caret("", 0), 0);
+        // After a return at the end of the note: the empty line made is the room.
+        assert_eq!(line_for_caret("one\n", 4), 1);
+    }
     use super::*;
 
     const T: i32 = 12; // threshold

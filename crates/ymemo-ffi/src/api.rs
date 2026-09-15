@@ -98,15 +98,34 @@ pub struct FfiAttachment {
     /// Top-left corner on the note, in per-mille of the note area (0..=1000 across and down).
     pub x_permille: i64,
     pub y_permille: i64,
-    /// Whether the photo takes a band of its own under the writing instead of lying on top
-    /// of it. False is what every photo was before there was a choice.
-    pub flow: bool,
+    /// How the photo sits against the writing.
+    pub mode: FfiPhotoMode,
+    /// For [`FfiPhotoMode::InWriting`]: how many lines of the body the photo stands after.
+    pub anchor_line: i64,
     pub created_at: i64,
+}
+
+/// How a photo sits against the writing, as the UI needs to draw it.
+///
+/// An enum rather than the two booleans this used to be: there are three places a photo can
+/// be, and a pair of flags can say a fourth thing that does not exist.
+pub enum FfiPhotoMode {
+    /// Lying on the writing, at the corner it was left at.
+    Float,
+    /// In a band of its own under the writing. Not offered any more, but still drawn: memos
+    /// have photos in it, and so do other devices.
+    Flow,
+    /// Standing **in** the writing, in room the memo makes for it.
+    InWriting,
 }
 
 impl From<Attachment> for FfiAttachment {
     fn from(a: Attachment) -> Self {
-        let flow = a.mode() == ymemo_core::PhotoMode::Flow;
+        let mode = match a.mode() {
+            ymemo_core::PhotoMode::Flow => FfiPhotoMode::Flow,
+            ymemo_core::PhotoMode::Inline => FfiPhotoMode::InWriting,
+            ymemo_core::PhotoMode::Float => FfiPhotoMode::Float,
+        };
         Self {
             id: a.id,
             memo_id: a.memo_id,
@@ -118,7 +137,8 @@ impl From<Attachment> for FfiAttachment {
             width_em_milli: a.width_em_milli,
             x_permille: a.x_permille,
             y_permille: a.y_permille,
-            flow,
+            mode,
+            anchor_line: a.anchor_line,
             created_at: a.created_at,
         }
     }
@@ -885,17 +905,37 @@ pub fn attachment_set_layout(
     with_vault(|v| v.set_attachment_layout(&id, x_permille, y_permille, width_em_milli))
 }
 
-/// Moves a photo between lying on the writing and having a band of its own under it.
+/// Puts a photo **into** the writing after `after_line` lines of it, opening `rows` blank
+/// lines to stand in.
 ///
-/// A fact about the memo, not about this device: a photo put in the flow here is out of the
-/// way of the writing on the desktop sticky too.
-pub fn attachment_set_flow(id: String, flow: bool) -> Result<()> {
-    let mode = if flow {
-        ymemo_core::PhotoMode::Flow
-    } else {
-        ymemo_core::PhotoMode::Float
+/// A fact about the memo, not about this device: a photo put into the writing here is in the
+/// writing on the desktop sticky too, at the same words. The room is real blank lines in the
+/// body — see `Vault::place_attachment_in_writing`, which writes both halves together.
+/// Returns the memo's body **after** the room was opened, because that is what the editor on
+/// screen now has to be showing: the writing it is holding is a version of the note without
+/// the gap in it, and saving that back over the top would close the room again.
+pub fn attachment_place_in_writing(id: String, after_line: i64, rows: u32) -> Result<String> {
+    with_vault(|v| {
+        v.place_attachment_in_writing(&id, after_line, rows as usize)?;
+        body_of_attachment(v, &id)
+    })
+}
+
+/// Takes a photo back out of the writing, closing the room it stood in, and lays it on top.
+/// Returns the body without the room, for the same reason as above.
+pub fn attachment_take_out_of_writing(id: String) -> Result<String> {
+    with_vault(|v| {
+        v.take_attachment_out_of_writing(&id, ymemo_core::PhotoMode::Float)?;
+        body_of_attachment(v, &id)
+    })
+}
+
+/// The body of the memo a photo belongs to; empty when either has gone.
+fn body_of_attachment(v: &mut Vault, attachment_id: &str) -> Result<String> {
+    let Some(a) = v.store().get_attachment(attachment_id)? else {
+        return Ok(String::new());
     };
-    with_vault(|v| v.set_attachment_mode(&id, mode))
+    Ok(v.store().get(&a.memo_id)?.map(|m| m.body).unwrap_or_default())
 }
 
 /// Detaches a photo; the blob file stays (no GC).
