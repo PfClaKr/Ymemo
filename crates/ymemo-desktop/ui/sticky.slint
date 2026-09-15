@@ -45,6 +45,10 @@ export struct PhotoRow {
     height-px: length,
     x-frac: float,
     y-frac: float,
+    // For a photo standing **in** the writing: the words above it, which are measured to find
+    // where it goes. The text itself rather than a line number, because only the toolkit
+    // knows where a line ends up once it has wrapped.
+    prefix: string,
     // Not synced to this device yet, or undecodable.
     missing: bool,
 }
@@ -65,6 +69,11 @@ component PhotoItem inherits Rectangle {
     // layout, not by where it was dropped. It can still be resized — only the dragging goes,
     // because there is nowhere to drag it to.
     in property <bool> flow: false;
+    // Standing in the writing: the y is handed in (measured from the words above it) and the
+    // photo is no more draggable than one in the flow — the writing is what places it.
+    in property <bool> in-writing: false;
+    in property <length> place-y: 0px;
+    private property <bool> placed: root.flow || root.in-writing;
     // x and y as a fraction of the note, and the width in px.
     callback place(float, float, length);
     callback remove();
@@ -123,10 +132,11 @@ component PhotoItem inherits Rectangle {
 
     // Never fully off the note: a photo whose corner cannot be reached cannot be brought back.
     // In the flow there is nothing to clamp — the band around it decides where it goes.
-    x: root.flow ? 0px
+    x: root.placed ? 0px
         : Math.min(Math.max(root.photo.x-frac * root.canvas-w + root.dx, 0px),
             Math.max(root.canvas-w - root.w, 0px));
-    y: root.flow ? 0px
+    y: root.in-writing ? root.place-y
+        : root.flow ? 0px
         : Math.min(Math.max(root.photo.y-frac * root.canvas-h + root.dy, 0px),
             Math.max(root.canvas-h - root.h, 0px));
     width: root.w;
@@ -153,8 +163,8 @@ component PhotoItem inherits Rectangle {
         // and not where the pointer went. A photo in the flow keeps the place it would go
         // back to, so taking it out of the flow puts it where it was rather than in a corner.
         root.place(
-            root.flow ? root.photo.x-frac : root.x / Math.max(root.canvas-w, 1px),
-            root.flow ? root.photo.y-frac : root.y / Math.max(root.canvas-h, 1px),
+            root.placed ? root.photo.x-frac : root.x / Math.max(root.canvas-w, 1px),
+            root.placed ? root.photo.y-frac : root.y / Math.max(root.canvas-h, 1px),
             root.w);
         root.dx = 0px;
         root.dy = 0px;
@@ -193,9 +203,9 @@ component PhotoItem inherits Rectangle {
         width: 100%;
         height: 100%;
         mouse-cursor: root.on-grip ? MouseCursor.nwse-resize
-            : root.flow ? MouseCursor.default : MouseCursor.move;
+            : root.placed ? MouseCursor.default : MouseCursor.move;
         pointer-event(ev) => {
-            if (ev.kind == PointerEventKind.down && (root.on-grip || !root.flow)) {
+            if (ev.kind == PointerEventKind.down && (root.on-grip || !root.placed)) {
                 root.begin(self.absolute-position.x + self.mouse-x,
                            self.absolute-position.y + self.mouse-y,
                            root.on-grip);
@@ -252,10 +262,10 @@ component PhotoItem inherits Rectangle {
         enabled: root.active;
         accessible-role: button;
         // What pressing it does, like the glyph below — not what the photo is now.
-        accessible-label: root.flow
+        accessible-label: root.placed
             ? Strings.ui_sticky_photo_over_text
             : Strings.ui_sticky_photo_under_text;
-        clicked => { root.set-flow(!root.flow); }
+        clicked => { root.set-flow(!root.placed); }
     }
 
     // ---- Furniture, painted only while the photo is under the pointer so the picture is
@@ -308,7 +318,7 @@ component PhotoItem inherits Rectangle {
             y: (parent.height - self.height) / 2;
             width: 12px;
             height: 12px;
-            name: root.flow ? "photo-float" : "photo-flow";
+            name: root.placed ? "photo-float" : "photo-flow";
             stroke: #ffffff;
             stroke-width: 1.3px;
         }
@@ -386,6 +396,21 @@ component NotePad {
     in property <length> pad-bottom: 4px;
     in-out property <string> text <=> input.text;
     out property <bool> has-focus: input.has-focus;
+    // Where the caret is, as a byte offset into the text. A photo is put into the writing
+    // **at the caret**, which is the only place the user has actually pointed at, and a line
+    // number cannot be worked out from a pixel height once a line has wrapped.
+    //
+    // `cursor-position-byte-offset` is undocumented — Slint exposes it for its own tests —
+    // so it may go in a later version. It will go **loudly**: the .slint stops compiling,
+    // which is why it is preferred to guessing the line from the caret's y.
+    out property <int> caret-byte: input.cursor-position-byte-offset;
+    // What the writing is laid out in, for the code that decides how much room a picture
+    // needs and where in the note that room ended up.
+    out property <length> line-height: one-line.preferred-height;
+    out property <length> text-width: input.width;
+    out property <length> text-x: scroll.x;
+    out property <length> text-y: scroll.y;
+    out property <length> scroll-y: scroll.viewport-y;
     callback edited(string);
 
     public function focus-text() { input.focus(); }
@@ -396,6 +421,15 @@ component NotePad {
     forward-focus: input;
     horizontal-stretch: 1;
     vertical-stretch: 1;
+
+    // One line of this note's writing, drawn nowhere, so everything that has to reason in
+    // lines asks the toolkit rather than multiplying the font size by a guess.
+    one-line := Text {
+        visible: false;
+        text: "X";
+        font-size: root.font-size;
+        font-family: root.font-family;
+    }
 
     ContextMenuArea {
         Menu {
@@ -514,13 +548,20 @@ export component StickyWindow inherits Window {
     // completely different places — one lying on the writing, one in a band under it.
     in property <[PhotoRow]> photos: [];
     in property <[PhotoRow]> flow-photos: [];
+    // Photos standing **in** the writing, each drawn at the height of the words above it.
+    in property <[PhotoRow]> inline-photos: [];
     // The memo as it reads, for the moments nobody is writing in it. See `markdown.rs`.
     in property <[NoteBlock]> blocks: [];
     // A picture is being dragged over this note and would be taken if let go. Set from Rust
     // off winit's own events, since Slint has no drag-and-drop — see `wire_photo_drop`.
     in property <bool> photo-drop-target: false;
-    // A photo was asked to move between the two. True means into the flow.
+    // A photo was asked to move between lying on the writing and standing in it. True means
+    // into the writing, at the caret.
     callback set-photo-flow(string, bool);
+    // Read by Rust when a photo is put into the writing: where the caret is, and what a line
+    // of this note measures, which is how much room the picture needs.
+    out property <int> caret-byte: body.caret-byte;
+    out property <length> body-line-height: body.line-height;
     // A photo was asked to be written out to a file the user picks.
     callback save-photo(string);
     // True while a photo is being dragged or resized. Rust reads it before pushing a merged
@@ -909,7 +950,16 @@ export component StickyWindow inherits Window {
                         // not a page being browsed. ----
                         if !body.has-focus && root.blocks.length > 0: Rectangle {
                             VerticalLayout {
-                                padding: 2px;
+                                // Exactly where the field puts its text — `scroll`'s 7px and
+                                // 5px in `NotePad`. The read view is meant to be the same
+                                // words in the same place, and it was 5px left and 3px above
+                                // them: every note's writing jumped when it was clicked into,
+                                // measured. It also has to be true for a photo standing in
+                                // the writing, which is drawn at one height whether the note
+                                // is being read or written in.
+                                padding-left: 7px;
+                                padding-right: 7px;
+                                padding-top: 5px;
                                 padding-bottom: root.created-at == "" ? 2px : 14px;
                                 spacing: 4px;
                                 alignment: start;
@@ -1012,6 +1062,43 @@ export component StickyWindow inherits Window {
                                 save => { root.save-photo(photo.id); }
                             }
                         }
+                    }
+                }
+
+                // ---- Photos standing **in** the writing. ----
+                //
+                // The room they stand in is blank lines in the memo itself (see
+                // `place_attachment_in_writing`), so the writing above and below is one
+                // ordinary text box and everything about editing it is unchanged. All that
+                // is left is putting the picture over the right blank lines, and that is a
+                // measurement: `measure` is the words above it, set exactly as the field sets
+                // them, and its height is where the gap begins. Measured rather than counted,
+                // because a line that wrapped is two lines on screen and one in the text.
+                //
+                // `scroll-y` keeps it with the words when the note is scrolled; the note
+                // clips, so a picture scrolled past the top edge is cut off rather than
+                // drawn over the title.
+                for photo in root.inline-photos: Rectangle {
+                    measure := Text {
+                        visible: false;
+                        text: photo.prefix;
+                        width: body.text-width;
+                        wrap: word-wrap;
+                        font-size: 13px;
+                    }
+                    PhotoItem {
+                        photo: photo;
+                        in-writing: true;
+                        place-y: body-area.y + body.text-y + body.scroll-y
+                            + (photo.prefix == "" ? 0px : measure.preferred-height);
+                        canvas-w: body.text-width;
+                        canvas-h: body-area.height;
+                        color-key: root.sticky-color;
+                        place(fx, fy, w) => { root.place-photo(photo.id, fx, fy, w); }
+                        remove => { root.remove-photo(photo.id); }
+                        busy(b) => { root.photo-busy = b; }
+                        set-flow(f) => { root.set-photo-flow(photo.id, f); }
+                        save => { root.save-photo(photo.id); }
                     }
                 }
 

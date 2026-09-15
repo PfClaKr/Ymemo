@@ -143,6 +143,15 @@ pub struct Attachment {
     /// mode this build has never heard of — reads back as [`PhotoMode::Float`] instead of
     /// failing the whole memo. The same reason the colour is a palette *key*.
     pub mode: String,
+    /// For [`PhotoMode::Inline`]: how many lines of the body the photo sits **after**.
+    ///
+    /// A line count rather than a position, because that is what "in the middle of the
+    /// writing" actually means — write another paragraph above it and the picture is still
+    /// after the same words, wherever that has moved to. Everything else about a photo is a
+    /// fraction of the note, which is right for something lying *on* the writing and wrong
+    /// for something *in* it. Ignored in the other two modes, where it stays whatever it was
+    /// so that a photo taken out of the writing and put back lands where it was before.
+    pub anchor_line: i64,
     pub created_at: i64,
 }
 
@@ -157,19 +166,30 @@ pub enum PhotoMode {
     /// In the flow: the photo takes a band of its own under the writing, and no line of text
     /// is ever hidden behind it.
     Flow,
+    /// In the writing itself, after [`Attachment::anchor_line`] lines of it: the note is
+    /// written above the picture and carries on below it.
+    ///
+    /// The room it sits in is **blank lines in the body**, put there when the photo was
+    /// placed. That is what makes this work at all: a note is one text box and a text box
+    /// cannot have a hole in it, but it can have empty lines, and those move with the
+    /// writing the way anything typed does. It also means the gap is the user's to keep or
+    /// close — delete the blank lines and the picture is simply over the words again.
+    Inline,
 }
 
 /// The value stored for [`PhotoMode::Flow`]; `Float` stores the empty string, so a memo
 /// from before this existed needs no migration to keep looking the way it did.
 pub const PHOTO_MODE_FLOW: &str = "flow";
+/// The value stored for [`PhotoMode::Inline`].
+pub const PHOTO_MODE_INLINE: &str = "inline";
 
 impl PhotoMode {
     /// Reads a stored value. Anything unrecognised is [`Self::Float`].
     pub fn parse(stored: &str) -> Self {
-        if stored == PHOTO_MODE_FLOW {
-            Self::Flow
-        } else {
-            Self::Float
+        match stored {
+            PHOTO_MODE_FLOW => Self::Flow,
+            PHOTO_MODE_INLINE => Self::Inline,
+            _ => Self::Float,
         }
     }
 
@@ -178,6 +198,7 @@ impl PhotoMode {
         match self {
             Self::Float => "",
             Self::Flow => PHOTO_MODE_FLOW,
+            Self::Inline => PHOTO_MODE_INLINE,
         }
     }
 }
@@ -197,6 +218,7 @@ impl Attachment {
             x_permille: PLACE_ORIGIN_PERMILLE,
             y_permille: PLACE_ORIGIN_PERMILLE,
             mode: String::new(),
+            anchor_line: 0,
             created_at: now_millis(),
         }
     }
@@ -405,6 +427,7 @@ impl Store {
                 x_permille     INTEGER NOT NULL DEFAULT 40,
                 y_permille     INTEGER NOT NULL DEFAULT 40,
                 mode           TEXT NOT NULL DEFAULT '',
+                anchor_line    INTEGER NOT NULL DEFAULT 0,
                 created_at     INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS attachments_memo ON attachments(memo_id);
@@ -445,6 +468,11 @@ impl Store {
                 "attachments",
                 "mode",
                 "ALTER TABLE attachments ADD COLUMN mode TEXT NOT NULL DEFAULT ''",
+            ),
+            (
+                "attachments",
+                "anchor_line",
+                "ALTER TABLE attachments ADD COLUMN anchor_line INTEGER NOT NULL DEFAULT 0",
             ),
         ] {
             let exists = self
@@ -523,12 +551,12 @@ impl Store {
         self.conn.execute(
             "INSERT INTO attachments
                  (id, memo_id, hash, name, mime, width_px, height_px, width_em_milli,
-                  x_permille, y_permille, mode, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                  x_permille, y_permille, mode, anchor_line, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
              ON CONFLICT(id) DO UPDATE SET
                  memo_id = ?2, hash = ?3, name = ?4, mime = ?5,
                  width_px = ?6, height_px = ?7, width_em_milli = ?8,
-                 x_permille = ?9, y_permille = ?10, mode = ?11",
+                 x_permille = ?9, y_permille = ?10, mode = ?11, anchor_line = ?12",
             params![
                 a.id,
                 a.memo_id,
@@ -543,6 +571,7 @@ impl Store {
                 // Normalised, so an unknown mode from a newer version is stored back as the
                 // float it is being drawn as, rather than kept alive in this device's cache.
                 a.mode().as_stored(),
+                a.anchor_line.max(0),
                 a.created_at
             ],
         )?;
@@ -564,7 +593,7 @@ impl Store {
     pub fn attachments_of(&self, memo_id: &str) -> Result<Vec<Attachment>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, memo_id, hash, name, mime, width_px, height_px, width_em_milli,
-                    x_permille, y_permille, mode, created_at
+                    x_permille, y_permille, mode, anchor_line, created_at
              FROM attachments WHERE memo_id = ?1 ORDER BY created_at",
         )?;
         let rows = stmt.query_map([memo_id], row_to_attachment)?;
@@ -575,7 +604,7 @@ impl Store {
     pub fn get_attachment(&self, id: &str) -> Result<Option<Attachment>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, memo_id, hash, name, mime, width_px, height_px, width_em_milli,
-                    x_permille, y_permille, mode, created_at
+                    x_permille, y_permille, mode, anchor_line, created_at
              FROM attachments WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map([id], row_to_attachment)?;
@@ -776,7 +805,8 @@ fn row_to_attachment(row: &rusqlite::Row) -> rusqlite::Result<Attachment> {
         x_permille: row.get(8)?,
         y_permille: row.get(9)?,
         mode: row.get(10)?,
-        created_at: row.get(11)?,
+        anchor_line: row.get(11)?,
+        created_at: row.get(12)?,
     })
 }
 

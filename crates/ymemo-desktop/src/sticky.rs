@@ -166,6 +166,17 @@ pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) -> bool {
         return false;
     }
     refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
+    // A photo standing in the writing is drawn at the height of the words above it, and those
+    // words have just changed — `upsert` has already moved its anchor, but the window is
+    // holding the text it was given last time. Without this the picture stays where it was
+    // while the writing slides out from under it. Only the photos are pushed, never the text:
+    // the user is typing in it.
+    let models = split_photo_rows(v, id);
+    if let Some(entry) = ctx.stickies.borrow().get(id) {
+        if !entry.window.get_photo_busy() {
+            set_photo_models(&entry.window, models);
+        }
+    }
     // Reflect the new title in the title bar.
     if let Some(entry) = ctx.stickies.borrow().get(id) {
         set_title(&entry.window, &memo.title);
@@ -347,22 +358,74 @@ pub(crate) fn close_sticky(stickies: &Stickies, id: &str) {
 /// Photos are ciphertext inside the vault, so they are decrypted and decoded **in memory** —
 /// no plaintext ever reaches a temp file. A photo that has not synced yet, or that cannot be
 /// decoded, is marked `missing` so the UI can say so; an empty gap would read as data loss.
-pub(crate) fn split_photo_rows(v: &Vault, memo_id: &str) -> (Vec<PhotoRow>, Vec<PhotoRow>) {
+pub(crate) fn split_photo_rows(v: &Vault, memo_id: &str) -> PhotoModels {
     let list = match v.store().attachments_of(memo_id) {
         Ok(l) => l,
         Err(e) => {
             diag!("could not read the attachments: {e}");
-            return (Vec::new(), Vec::new());
+            return PhotoModels::default();
         }
     };
+    // The writing, for the photos standing in it: each one is drawn at the height of the
+    // lines above it, and only the toolkit can measure that, so the words go with the row.
+    let body = v.store().get(memo_id).ok().flatten().map(|m| m.body).unwrap_or_default();
 
-    let (flow, float): (Vec<_>, Vec<_>) = list
-        .into_iter()
-        .partition(|a| a.mode() == ymemo_core::PhotoMode::Flow);
-    (rows_of(v, float), rows_of(v, flow))
+    let mut float = Vec::new();
+    let mut flow = Vec::new();
+    let mut in_writing = Vec::new();
+    for a in list {
+        match a.mode() {
+            ymemo_core::PhotoMode::Flow => flow.push(a),
+            ymemo_core::PhotoMode::Inline => in_writing.push(a),
+            ymemo_core::PhotoMode::Float => float.push(a),
+        }
+    }
+    PhotoModels {
+        float: rows_of(v, float, ""),
+        flow: rows_of(v, flow, ""),
+        in_writing: in_writing
+            .into_iter()
+            .map(|a| {
+                let prefix = lines_before(&body, a.anchor_line.max(0) as usize).to_string();
+                rows_of(v, vec![a], &prefix).remove(0)
+            })
+            .collect(),
+    }
 }
 
-fn rows_of(v: &Vault, list: Vec<ymemo_core::Attachment>) -> Vec<PhotoRow> {
+/// The three places a photo can be, each ready to hand to the window.
+#[derive(Default)]
+pub(crate) struct PhotoModels {
+    /// Lying on the writing.
+    pub float: Vec<PhotoRow>,
+    /// In a band under it.
+    pub flow: Vec<PhotoRow>,
+    /// Standing in the writing itself.
+    pub in_writing: Vec<PhotoRow>,
+}
+
+/// The first `n` lines of `body`, with no trailing newline.
+///
+/// This is what gets measured to find where a photo in the writing sits, so it has to be
+/// exactly the text above it and nothing more — a stray newline here is a line of daylight
+/// between the picture and the words it was put after.
+pub(crate) fn lines_before(body: &str, n: usize) -> &str {
+    if n == 0 {
+        return "";
+    }
+    let mut seen = 0;
+    for (i, b) in body.bytes().enumerate() {
+        if b == b'\n' {
+            seen += 1;
+            if seen == n {
+                return &body[..i];
+            }
+        }
+    }
+    body
+}
+
+fn rows_of(v: &Vault, list: Vec<ymemo_core::Attachment>, prefix: &str) -> Vec<PhotoRow> {
     list.into_iter()
         .map(|a| {
             let (w, h) = a.display_size(BODY_FONT_PX);
@@ -381,6 +444,7 @@ fn rows_of(v: &Vault, list: Vec<ymemo_core::Attachment>) -> Vec<PhotoRow> {
                 // right now, and Slint reapplies these on every resize without asking again.
                 x_frac: ymemo_core::clamp_permille(a.x_permille) as f32 / 1000.0,
                 y_frac: ymemo_core::clamp_permille(a.y_permille) as f32 / 1000.0,
+                prefix: prefix.into(),
             }
         })
         .collect()
@@ -444,9 +508,10 @@ pub(crate) fn set_body_text(window: &StickyWindow, text: &str) {
 }
 
 /// Hands both photo models to a sticky window; the two always change together.
-pub(crate) fn set_photo_models(window: &StickyWindow, (float, flow): (Vec<PhotoRow>, Vec<PhotoRow>)) {
-    window.set_photos(slint::ModelRc::new(slint::VecModel::from(float)));
-    window.set_flow_photos(slint::ModelRc::new(slint::VecModel::from(flow)));
+pub(crate) fn set_photo_models(window: &StickyWindow, models: PhotoModels) {
+    window.set_photos(slint::ModelRc::new(slint::VecModel::from(models.float)));
+    window.set_flow_photos(slint::ModelRc::new(slint::VecModel::from(models.flow)));
+    window.set_inline_photos(slint::ModelRc::new(slint::VecModel::from(models.in_writing)));
 }
 
 /// A photo chosen by the worker thread. Only `Send` values, since it crosses to the event loop.
@@ -609,6 +674,25 @@ fn attach_photo(memo_id: &str, pick: PhotoPick) {
     refresh_photos(&ctx, memo_id);
 }
 
+/// Which line byte offset `at` falls on: the number of line breaks before it.
+fn line_at_byte(body: &str, at: usize) -> i64 {
+    let at = at.min(body.len());
+    body.as_bytes()[..at].iter().filter(|b| **b == b'\n').count() as i64
+}
+
+/// How many blank lines a photo needs to stand in, at this note's line height.
+///
+/// Rounded **up**, so the room is never shorter than the picture: a line of writing peeping
+/// out from under a photo reads as a bug, where a sliver of blank paper reads as spacing.
+fn rows_for_photo(v: &Vault, photo_id: &str, line_height: f32) -> usize {
+    let Ok(Some(a)) = v.store().get_attachment(photo_id) else { return 1 };
+    let (_, h) = a.display_size(BODY_FONT_PX);
+    if line_height <= 0.0 {
+        return 1;
+    }
+    ((h as f32 / line_height).ceil() as usize).max(1)
+}
+
 /// Lets a picture dragged from a file manager onto this note become an attachment.
 ///
 /// Slint has no drag-and-drop of its own and its winit backend throws these events away, so
@@ -762,23 +846,44 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         });
     }
 
-    // Move a photo between lying on the writing and having a band of its own under it.
+    // Move a photo between lying on the writing and standing **in** it.
+    //
+    // In goes to the caret — the one place the user has actually pointed at — and opens as
+    // many blank lines as the picture is tall. Out closes them again. Both halves are one
+    // call into the vault so the memo and the photo can never disagree about where the room
+    // is; see `place_attachment_in_writing`.
     {
         let ctx = ctx.clone();
         let id = memo.id.clone();
-        window.on_set_photo_flow(move |photo_id, flow| {
+        let weak = window.as_weak();
+        window.on_set_photo_flow(move |photo_id, into_writing| {
             touch(&ctx);
+            let Some(w) = weak.upgrade() else { return };
             {
                 let mut guard = ctx.vault.borrow_mut();
                 let Some(v) = guard.as_mut() else { return };
-                let mode = if flow {
-                    ymemo_core::PhotoMode::Flow
+                let res = if into_writing {
+                    let body = v.store().get(&id).ok().flatten().map(|m| m.body).unwrap_or_default();
+                    let after_line = line_at_byte(&body, w.get_caret_byte().max(0) as usize);
+                    let rows = rows_for_photo(v, photo_id.as_str(), w.get_body_line_height());
+                    v.place_attachment_in_writing(photo_id.as_str(), after_line, rows)
                 } else {
-                    ymemo_core::PhotoMode::Float
+                    v.take_attachment_out_of_writing(
+                        photo_id.as_str(),
+                        ymemo_core::PhotoMode::Float,
+                    )
                 };
-                if let Err(e) = v.set_attachment_mode(photo_id.as_str(), mode) {
+                if let Err(e) = res {
                     diag!("could not change how the photo sits: {e}");
                     crate::list::report_write_failure(&e);
+                }
+            }
+            // The body changed under the note, so the field has to be told; `refresh_photos`
+            // only carries the pictures.
+            {
+                let guard = ctx.vault.borrow();
+                if let Some(memo) = guard.as_ref().and_then(|v| v.store().get(&id).ok().flatten()) {
+                    set_body_text(&w, &sticky_text(&memo));
                 }
             }
             refresh_photos(&ctx, &id);

@@ -392,7 +392,7 @@
   "ui.sticky_photo_over_text": "Lay over the writing",
   "ui.sticky_photo_remove": "Remove photo",
   "ui.sticky_photo_save": "Save the photo",
-  "ui.sticky_photo_under_text": "Move under the writing",
+  "ui.sticky_photo_under_text": "Put into the writing, at the cursor",
   "ui.sticky_pick_photo": "Choose a photo to attach",
   "ui.sticky_pin": "Keep on top",
   "ui.sticky_select_all": "Select all",

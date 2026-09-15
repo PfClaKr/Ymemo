@@ -392,7 +392,7 @@
   "ui.sticky_photo_over_text": "글 위에 띄우기",
   "ui.sticky_photo_remove": "사진 떼기",
   "ui.sticky_photo_save": "사진 저장",
-  "ui.sticky_photo_under_text": "글 아래로 내리기",
+  "ui.sticky_photo_under_text": "커서 자리의 글 사이에 넣기",
   "ui.sticky_pick_photo": "붙일 사진 고르기",
   "ui.sticky_pin": "항상 위에 두기",
   "ui.sticky_select_all": "전체 선택",

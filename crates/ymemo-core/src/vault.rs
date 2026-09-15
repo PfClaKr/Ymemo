@@ -268,6 +268,14 @@ impl Vault {
 
     /// Inserts or updates a memo, writing only changed fields so merges stay field-level.
     pub fn upsert(&mut self, memo: &Memo) -> Result<()> {
+        // Before anything is written: a photo standing in the writing is anchored to a line
+        // number, and this is the one moment those line numbers can move. See
+        // `reanchor_attachments`.
+        if let Some(old) = self.store.get(&memo.id)? {
+            if old.body != memo.body {
+                self.reanchor_attachments(&memo.id, &old.body, &memo.body)?;
+            }
+        }
         let order_key = self.key_for_new(memo)?;
         let memos = self.memos_obj()?;
         let obj = match self.doc.get(&memos, &memo.id)? {
@@ -432,6 +440,7 @@ impl Vault {
         put_i64_if_changed(&mut self.doc, &obj, "x_permille", clamp_permille(a.x_permille))?;
         put_i64_if_changed(&mut self.doc, &obj, "y_permille", clamp_permille(a.y_permille))?;
         put_str_if_changed(&mut self.doc, &obj, "mode", a.mode().as_stored())?;
+        put_i64_if_changed(&mut self.doc, &obj, "anchor_line", a.anchor_line.max(0))?;
         put_i64_if_changed(&mut self.doc, &obj, "created_at", a.created_at)?;
 
         self.append_local_change()?;
@@ -475,6 +484,105 @@ impl Vault {
         };
         a.mode = mode.as_stored().to_string();
         self.upsert_attachment(&a)
+    }
+
+    /// Puts a photo **into** the writing after `after_line` lines of it, opening `rows` blank
+    /// lines to stand in.
+    ///
+    /// The room really is blank lines in the memo. A note is one text box and a text box
+    /// cannot have a hole in it — but it can have empty lines, and they behave the way the
+    /// user already expects everything in a note to behave: write a paragraph above and the
+    /// gap moves down with the rest, select across it, delete it if the picture is not wanted
+    /// there any more.
+    ///
+    /// Both halves happen together, here rather than in a UI, so the phone and the desktop
+    /// cannot disagree about what "in the writing" means — and so a photo can never end up
+    /// pointing at a line of a body that was never given room for it.
+    pub fn place_attachment_in_writing(
+        &mut self,
+        id: &str,
+        after_line: i64,
+        rows: usize,
+    ) -> Result<()> {
+        let Some(mut a) = self.store.get_attachment(id)? else {
+            bail!(t!("core.attachment_not_found", id = id));
+        };
+        let Some(mut memo) = self.store.get(&a.memo_id)? else {
+            bail!(t!("core.memo_not_found", id = a.memo_id));
+        };
+        // Moving one that is already in the writing: take its old room back first, or every
+        // move leaves a hole behind it.
+        if a.mode() == crate::PhotoMode::Inline {
+            memo.body = close_gap(&memo.body, a.anchor_line.max(0) as usize);
+        }
+        let after_line = after_line.clamp(0, line_count(&memo.body) as i64);
+        memo.body = open_gap(&memo.body, after_line as usize, rows);
+        a.mode = crate::PHOTO_MODE_INLINE.to_string();
+        a.anchor_line = after_line;
+        self.upsert_attachment(&a)?;
+        // After the attachment, so the re-anchoring that `upsert` does walks over a photo
+        // that already knows where it is going.
+        self.upsert(&memo)
+    }
+
+    /// Takes a photo back out of the writing and closes the room it was standing in.
+    pub fn take_attachment_out_of_writing(
+        &mut self,
+        id: &str,
+        mode: crate::PhotoMode,
+    ) -> Result<()> {
+        let Some(mut a) = self.store.get_attachment(id)? else {
+            bail!(t!("core.attachment_not_found", id = id));
+        };
+        if a.mode() == crate::PhotoMode::Inline {
+            if let Some(mut memo) = self.store.get(&a.memo_id)? {
+                memo.body = close_gap(&memo.body, a.anchor_line.max(0) as usize);
+                self.upsert(&memo)?;
+            }
+        }
+        a.mode = mode.as_stored().to_string();
+        self.upsert_attachment(&a)
+    }
+
+    /// Keeps every photo in a memo's writing pointing at the same words after an edit.
+    ///
+    /// A photo in the writing is drawn at the height of the lines above it, so if those lines
+    /// change in number and the anchor does not, the picture and the room left for it drift
+    /// apart — type a line at the top and the gap moves down while the photo stays. The edit
+    /// is compared end to end, the way [`splice_changed_span`] compares one: what is identical
+    /// at the front is untouched, so only a change that starts **above** a photo can move it,
+    /// and then only by however many lines it added or took away.
+    fn reanchor_attachments(&mut self, memo_id: &str, old: &str, new: &str) -> Result<()> {
+        if old == new {
+            return Ok(());
+        }
+        let head = old
+            .as_bytes()
+            .iter()
+            .zip(new.as_bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        // The line the change begins **on**, counted in line breaks rather than in lines:
+        // "one\ntw" is two lines but the change is on line 1, and treating it as line 2 left
+        // a photo anchored there standing still while a line was opened above it.
+        //
+        // Counted over the bytes, never over a slice: `head` is a byte count off a plain
+        // comparison and lands in the middle of a Korean syllable as easily as between two,
+        // and `&old[..head]` would panic there.
+        let first_touched =
+            old.as_bytes()[..head].iter().filter(|b| **b == b'\n').count() as i64;
+        let moved = line_count(new) as i64 - line_count(old) as i64;
+        if moved == 0 {
+            return Ok(());
+        }
+        for mut a in self.store.attachments_of(memo_id)? {
+            if a.mode() != crate::PhotoMode::Inline || a.anchor_line <= first_touched {
+                continue;
+            }
+            a.anchor_line = (a.anchor_line + moved).max(first_touched);
+            self.upsert_attachment(&a)?;
+        }
+        Ok(())
     }
 
     /// Detaches a photo. **The blob file stays** — no GC, other devices may still show it.
@@ -1030,6 +1138,7 @@ impl Vault {
                 // Missing, or a mode this version does not know, is the float every photo
                 // was before there was a choice.
                 mode: get_str_or(&self.doc, &obj, "mode", ""),
+                anchor_line: get_i64_or(&self.doc, &obj, "anchor_line", 0).max(0),
                 created_at: get_i64_or(&self.doc, &obj, "created_at", 0),
             };
             // No hash means an unusable record (old version or damage); skip it.
@@ -1272,6 +1381,67 @@ fn reencrypt_log(path: &Path, old_key: &MasterKey, new_key: &MasterKey) -> Resul
     }
     fs::rename(&tmp, path)?;
     Ok(())
+}
+
+/// How many lines `body` holds. An empty body is no lines; a trailing newline does not open
+/// one, so this counts the same way a person does.
+fn line_count(body: &str) -> usize {
+    if body.is_empty() {
+        return 0;
+    }
+    body.lines().count()
+}
+
+/// The byte offset where line `n` begins, or the end of `body` when there are fewer.
+fn line_offset(body: &str, n: usize) -> usize {
+    if n == 0 {
+        return 0;
+    }
+    let mut seen = 0;
+    for (i, b) in body.bytes().enumerate() {
+        if b == b'\n' {
+            seen += 1;
+            if seen == n {
+                return i + 1;
+            }
+        }
+    }
+    body.len()
+}
+
+/// Opens `rows` blank lines after `after_line` lines of `body`.
+fn open_gap(body: &str, after_line: usize, rows: usize) -> String {
+    let at = line_offset(body, after_line);
+    let mut out = String::with_capacity(body.len() + rows + 2);
+    out.push_str(&body[..at]);
+    // A gap at the very end of a note that does not end in one needs a newline of its own to
+    // sit after, or the first blank line is really the end of the last line of writing.
+    if at == body.len() && !body.is_empty() && !body.ends_with('\n') {
+        out.push('\n');
+    }
+    for _ in 0..rows {
+        out.push('\n');
+    }
+    out.push_str(&body[at..]);
+    out
+}
+
+/// Closes the run of blank lines that begins after `after_line` lines of `body`.
+///
+/// Only the blank ones, and only the run that starts right there: if the user has written in
+/// the room since, what they wrote stays and the picture simply has less of it.
+fn close_gap(body: &str, after_line: usize) -> String {
+    let at = line_offset(body, after_line);
+    let rest = &body[at..];
+    let kept: Vec<&str> = rest.split('\n').collect();
+    let blanks = kept.iter().take_while(|l| l.trim().is_empty()).count();
+    // `split` on a string that ends in a newline leaves a trailing empty piece which is not a
+    // line of its own; never eat that, or closing a gap at the end swallows the line break.
+    let blanks = blanks.min(kept.len().saturating_sub(1));
+    let mut out = String::with_capacity(body.len());
+    out.push_str(&body[..at]);
+    out.push_str(&kept[blanks..].join("\n"));
+    out
 }
 
 /// Writes a field the user **types** — a memo's title or body, a folder's name.
@@ -3002,6 +3172,139 @@ mod tests {
             assert_eq!(got, edited, "after editing {body:?}");
             body = edited;
         }
+    }
+
+    /// Opening and closing the room a photo stands in, on every shape of note.
+    #[test]
+    fn a_gap_opens_and_closes_where_it_was_asked_to() {
+        // In the middle.
+        assert_eq!(open_gap("a\nb\nc", 1, 2), "a\n\n\nb\nc");
+        assert_eq!(close_gap("a\n\n\nb\nc", 1), "a\nb\nc");
+        // At the very top.
+        assert_eq!(open_gap("a\nb", 0, 1), "\na\nb");
+        assert_eq!(close_gap("\na\nb", 0), "a\nb");
+        // At the end, where the body has no newline of its own to sit after.
+        assert_eq!(open_gap("a\nb", 2, 2), "a\nb\n\n\n");
+        assert_eq!(open_gap("a\nb\n", 2, 2), "a\nb\n\n\n");
+        // An empty note.
+        assert_eq!(open_gap("", 0, 2), "\n\n");
+        // Closing takes only the blank run, never the writing under it.
+        assert_eq!(close_gap("a\n\n\nb", 1), "a\nb");
+        assert_eq!(close_gap("a\nb\nc", 1), "a\nb\nc", "nothing blank there to take");
+        // Written in since: what was typed stays, the blank lines around it go.
+        assert_eq!(close_gap("a\n\nhello\n\nb", 1), "a\nhello\n\nb");
+        // Round trip is exact anywhere inside the writing.
+        let body = "one\ntwo\nthree";
+        for at in 0..3 {
+            assert_eq!(close_gap(&open_gap(body, at, 3), at), body, "at line {at}");
+        }
+        // Past the last line it is exact but for the line break the gap needed to sit after,
+        // which is left behind as an empty last line. Worth knowing rather than hiding: it is
+        // one keystroke to the user and the alternative is guessing which newlines were ours.
+        assert_eq!(close_gap(&open_gap(body, 3, 3), 3), "one\ntwo\nthree\n");
+    }
+
+    /// A photo standing in the writing stays next to the same words when the note is edited.
+    #[test]
+    fn a_photo_in_the_writing_moves_with_the_words_above_it() {
+        let dir = temp_dir();
+        let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let mut memo = Memo::new("list", "one\ntwo\nthree\n");
+        v.upsert(&memo).unwrap();
+        let a = v.attach(&memo.id, b"pretend-jpeg", "p.jpg", "image/jpeg", 4, 3).unwrap();
+
+        // Into the writing, after two lines.
+        v.place_attachment_in_writing(&a.id, 2, 3).unwrap();
+        let body = v.store().get(&memo.id).unwrap().unwrap().body;
+        assert_eq!(body, "one\ntwo\n\n\n\nthree\n", "three blank lines make the room");
+        assert_eq!(v.store().get_attachment(&a.id).unwrap().unwrap().anchor_line, 2);
+
+        // Writing a line **above** it moves the photo down with the words.
+        memo.body = format!("zero\n{body}");
+        v.upsert(&memo).unwrap();
+        assert_eq!(v.store().get_attachment(&a.id).unwrap().unwrap().anchor_line, 3);
+
+        // Writing **below** it leaves it alone.
+        let cur = v.store().get(&memo.id).unwrap().unwrap().body;
+        memo.body = format!("{cur}four\n");
+        v.upsert(&memo).unwrap();
+        assert_eq!(v.store().get_attachment(&a.id).unwrap().unwrap().anchor_line, 3);
+
+        // Taking a line away above it brings it back up.
+        let cur = v.store().get(&memo.id).unwrap().unwrap().body;
+        memo.body = cur.strip_prefix("zero\n").unwrap().to_string();
+        v.upsert(&memo).unwrap();
+        assert_eq!(v.store().get_attachment(&a.id).unwrap().unwrap().anchor_line, 2);
+
+        // And out again: the room closes behind it.
+        v.take_attachment_out_of_writing(&a.id, crate::PhotoMode::Float).unwrap();
+        assert_eq!(v.store().get(&memo.id).unwrap().unwrap().body, "one\ntwo\nthree\nfour\n");
+        assert_eq!(v.store().get_attachment(&a.id).unwrap().unwrap().mode(), crate::PhotoMode::Float);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// An edit that splits a line above a photo still counts as being above it.
+    ///
+    /// The off-by-one that hid here is the difference between counting lines and counting the
+    /// breaks between them: pressing return in the middle of a line above the picture left the
+    /// picture where it was while the writing moved down a line past it.
+    #[test]
+    fn opening_a_line_above_a_photo_moves_it_down() {
+        let dir = temp_dir();
+        let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let mut memo = Memo::new("list", "one\ntwo\nthree\n");
+        v.upsert(&memo).unwrap();
+        let a = v.attach(&memo.id, b"pretend-jpeg", "p.jpg", "image/jpeg", 4, 3).unwrap();
+        v.place_attachment_in_writing(&a.id, 2, 2).unwrap();
+        assert_eq!(v.store().get_attachment(&a.id).unwrap().unwrap().anchor_line, 2);
+
+        // Return pressed in the middle of "two", which is the line right above the picture.
+        let body = v.store().get(&memo.id).unwrap().unwrap().body;
+        memo.body = body.replacen("two", "tw\no", 1);
+        v.upsert(&memo).unwrap();
+        assert_eq!(v.store().get_attachment(&a.id).unwrap().unwrap().anchor_line, 3);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Korean above a photo must not panic the re-anchoring.
+    ///
+    /// The edit is compared byte by byte, and where two strings part company is as likely to
+    /// be inside a syllable as between two — slicing there is a panic, so nothing slices.
+    #[test]
+    fn an_edit_that_parts_inside_a_syllable_is_safe() {
+        let dir = temp_dir();
+        let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let mut memo = Memo::new("목록", "장보기\n우유\n계란\n");
+        v.upsert(&memo).unwrap();
+        let a = v.attach(&memo.id, b"pretend-jpeg", "p.jpg", "image/jpeg", 4, 3).unwrap();
+        v.place_attachment_in_writing(&a.id, 1, 2).unwrap();
+
+        // "장보기" -> "장바구니": the two part company inside the second syllable.
+        let body = v.store().get(&memo.id).unwrap().unwrap().body;
+        memo.body = body.replacen("장보기", "장바구니\n더", 1);
+        v.upsert(&memo).unwrap();
+        assert_eq!(v.store().get_attachment(&a.id).unwrap().unwrap().anchor_line, 2);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Moving a photo that is already in the writing must not leave its old room behind.
+    #[test]
+    fn moving_a_photo_within_the_writing_takes_its_room_with_it() {
+        let dir = temp_dir();
+        let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        let memo = Memo::new("list", "one\ntwo\nthree\n");
+        v.upsert(&memo).unwrap();
+        let a = v.attach(&memo.id, b"pretend-jpeg", "p.jpg", "image/jpeg", 4, 3).unwrap();
+
+        v.place_attachment_in_writing(&a.id, 1, 2).unwrap();
+        v.place_attachment_in_writing(&a.id, 2, 2).unwrap();
+        let body = v.store().get(&memo.id).unwrap().unwrap().body;
+        assert_eq!(body, "one\ntwo\n\n\nthree\n", "one room, not two");
+
+        fs::remove_dir_all(&dir).ok();
     }
 
     /// A label a build from the middle of this change wrote as a text object still reads, and
