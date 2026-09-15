@@ -516,6 +516,9 @@ export component StickyWindow inherits Window {
     in property <[PhotoRow]> flow-photos: [];
     // The memo as it reads, for the moments nobody is writing in it. See `markdown.rs`.
     in property <[NoteBlock]> blocks: [];
+    // A picture is being dragged over this note and would be taken if let go. Set from Rust
+    // off winit's own events, since Slint has no drag-and-drop — see `wire_photo_drop`.
+    in property <bool> photo-drop-target: false;
     // A photo was asked to move between the two. True means into the flow.
     callback set-photo-flow(string, bool);
     // A photo was asked to be written out to a file the user picks.
@@ -1026,6 +1029,23 @@ export component StickyWindow inherits Window {
                     busy(b) => { root.photo-busy = b; }
                     set-flow(f) => { root.set-photo-flow(photo.id, f); }
                     save => { root.save-photo(photo.id); }
+                }
+
+                // A picture held over the note, drawn last so it is over the writing and the
+                // photos already there — it has to be seen against whatever the note holds.
+                // No `TouchArea`: it is a light, not a target, and the writing underneath
+                // must keep answering the pointer.
+                drop-hint := Rectangle {
+                    x: 2px;
+                    y: 2px;
+                    width: parent.width - 4px;
+                    height: parent.height - 4px;
+                    border-width: 2px;
+                    border-radius: 4px;
+                    border-color: Palette.ink(root.sticky-color);
+                    background: Palette.ink(root.sticky-color).with-alpha(0.10);
+                    opacity: root.photo-drop-target ? 1.0 : 0.0;
+                    animate opacity { duration: 120ms; }
                 }
             }
         }

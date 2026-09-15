@@ -7,6 +7,7 @@
 use ymemo_core::diag;
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -488,7 +489,30 @@ fn pick_photo(title: &str) -> Option<PhotoPick> {
         .add_filter("image", &["png", "jpg", "jpeg"])
         .set_title(title)
         .pick_file()?; // cancelled
-    let bytes = match std::fs::read(&path) {
+    read_photo(&path)
+}
+
+/// The picture types a note takes, whether it arrives through the dialog or off a drag.
+///
+/// The dialog filters by these and a drop is checked against them, so what a note can hold
+/// is decided in one place rather than two that can drift.
+const PHOTO_EXTENSIONS: [&str; 3] = ["png", "jpg", "jpeg"];
+
+/// Whether a dropped file looks like a picture this app can read.
+///
+/// By name, not by content: the check happens the moment the file is dragged over the note,
+/// to say whether it will be taken, and opening every file the pointer passes over to find
+/// out would be both slow and a surprise.
+fn looks_like_a_photo(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .is_some_and(|e| PHOTO_EXTENSIONS.contains(&e.as_str()))
+}
+
+/// (Worker thread) Reads a picture off disk and measures it; `None` if it cannot be read.
+fn read_photo(path: &Path) -> Option<PhotoPick> {
+    let bytes = match std::fs::read(path) {
         Ok(b) => b,
         Err(e) => {
             diag!("could not read the photo: {e}");
@@ -506,6 +530,21 @@ fn pick_photo(title: &str) -> Option<PhotoPick> {
         _ => "",
     };
     Some(PhotoPick { bytes, name, mime, width, height })
+}
+
+/// Takes a file dragged onto a note, off the event loop.
+///
+/// Reading and decoding happen on a worker for the same reason the dialog does: a photo off a
+/// phone is tens of megabytes, and `image::load_from_memory` on the UI thread is a freeze of
+/// every window at once. Only the decoded result comes back.
+fn accept_dropped_photo(memo_id: String, path: PathBuf) {
+    if !looks_like_a_photo(&path) {
+        return; // a note holds pictures; anything else is quietly not for us
+    }
+    std::thread::spawn(move || {
+        let Some(pick) = read_photo(&path) else { return };
+        let _ = slint::invoke_from_event_loop(move || attach_photo(&memo_id, pick));
+    });
 }
 
 /// Writes a photo out to a file the user picks, on a worker thread.
@@ -568,6 +607,52 @@ fn attach_photo(memo_id: &str, pick: PhotoPick) {
         }
     }
     refresh_photos(&ctx, memo_id);
+}
+
+/// Lets a picture dragged from a file manager onto this note become an attachment.
+///
+/// Slint has no drag-and-drop of its own and its winit backend throws these events away, so
+/// the note asks winit directly through `on_winit_window_event`. Three events matter:
+/// `HoveredFile` and `HoveredFileCancelled` light the note up and put it out again, so the
+/// pointer has somewhere to aim, and `DroppedFile` is the one that actually attaches.
+///
+/// Dragging several files in delivers one `DroppedFile` each, which is why this takes them one
+/// at a time rather than collecting a list. The events **propagate** rather than being
+/// swallowed: nothing in Slint reads them, and stopping them here would only mean this had to
+/// be the place that noticed if that ever changed.
+///
+/// There is no pointer position on a `DroppedFile` — winit does not carry one — so the picture
+/// lands where the button would have put it rather than under the cursor.
+fn wire_photo_drop(window: &StickyWindow, memo_id: &str) {
+    use i_slint_backend_winit::winit::event::WindowEvent;
+    use i_slint_backend_winit::EventResult;
+
+    let id = memo_id.to_string();
+    let weak = window.as_weak();
+    window.window().on_winit_window_event(move |_win, event| {
+        match event {
+            WindowEvent::HoveredFile(path) => {
+                if looks_like_a_photo(path) {
+                    if let Some(w) = weak.upgrade() {
+                        w.set_photo_drop_target(true);
+                    }
+                }
+            }
+            WindowEvent::HoveredFileCancelled => {
+                if let Some(w) = weak.upgrade() {
+                    w.set_photo_drop_target(false);
+                }
+            }
+            WindowEvent::DroppedFile(path) => {
+                if let Some(w) = weak.upgrade() {
+                    w.set_photo_drop_target(false);
+                }
+                accept_dropped_photo(id.clone(), path.clone());
+            }
+            _ => {}
+        }
+        EventResult::Propagate
+    });
 }
 
 /// Opens a memo's sticky, or raises it when already open.
@@ -1004,7 +1089,11 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         let settings = ctx.settings.borrow();
         (settings.memo_window(&memo.id), settings.memo_folded(&memo.id))
     };
+    // Dropping a picture on a note puts it in the note. Registered after the window is on
+    // screen, because until then there is no winit window to hang the filter on and this is
+    // quietly a no-op.
     present_sticky(ctx, &window);
+    wire_photo_drop(&window, &memo.id);
     if let Some(geometry) = saved_geometry {
         restore_geometry(&window, geometry);
         // What it should go back to when it is unfolded; the geometry above is always the
