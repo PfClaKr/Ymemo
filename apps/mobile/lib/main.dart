@@ -3313,6 +3313,12 @@ class _NotePhotoState extends State<NotePhoto> {
             width: _w,
             height: _h,
             decoration: BoxDecoration(
+              // White behind the picture, nothing behind the placeholder. A picture with
+              // transparency in it was showing the note's own colour through its clear parts,
+              // which reads as the picture being stained rather than as paper showing through;
+              // white is what "nothing here" means everywhere else a picture is shown. The
+              // placeholder is not a picture and stays part of the note.
+              color: _missing ? null : Colors.white,
               borderRadius: BorderRadius.circular(6),
               border: Border.all(
                 color: selected ? widget.ink : widget.ink.withValues(alpha: 0.35),

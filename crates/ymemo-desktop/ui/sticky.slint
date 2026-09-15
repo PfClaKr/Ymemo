@@ -176,7 +176,14 @@ component PhotoItem inherits Rectangle {
     border-color: root.active
         ? Palette.ink(root.color-key)
         : Palette.ink(root.color-key).with-alpha(0.35);
-    background: Palette.bar(root.color-key);
+    // White behind the picture, the note's own tint behind the placeholder.
+    //
+    // A picture with transparency in it — a logo, a sticker, a screenshot with rounded
+    // corners — was showing the *sticky's colour* through its clear parts, which reads as the
+    // picture being stained yellow or pink rather than as paper showing through. White is what
+    // "nothing here" means everywhere else a picture is shown. The placeholder is not a
+    // picture, so it keeps the note's tint and stays part of the note.
+    background: root.photo.missing ? Palette.bar(root.color-key) : #ffffff;
     clip: true;
 
     if !root.photo.missing: Image {
