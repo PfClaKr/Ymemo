@@ -17,6 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use ymemo_core::crypto::KEY_LEN;
 
+use crate::screens::Screen;
 use ymemo_core::fsutil::{write_atomic, write_atomic_private};
 use ymemo_i18n::Lang;
 
@@ -144,6 +145,11 @@ pub struct Settings {
     /// The memo list's own geometry, same shape. Absent until the window has been moved or
     /// resized once.
     pub list_window: Option<[i32; 4]>,
+    /// The screen each sticky was on when its geometry was last taken, by memo id. A position
+    /// alone means nothing once the monitors are rearranged — see `crate::screens`.
+    pub memo_screens: HashMap<String, Screen>,
+    /// The same for the list window.
+    pub list_screen: Option<Screen>,
 }
 
 impl Default for Settings {
@@ -167,6 +173,8 @@ impl Default for Settings {
             open_memos: Vec::new(),
             memo_windows: HashMap::new(),
             list_window: None,
+            memo_screens: HashMap::new(),
+            list_screen: None,
         }
     }
 }
@@ -242,6 +250,12 @@ impl Settings {
                 self.list_window = None;
             }
         }
+        // A screen means nothing without the geometry it was taken with.
+        let windows = &self.memo_windows;
+        self.memo_screens.retain(|id, _| windows.contains_key(id));
+        if self.list_window.is_none() {
+            self.list_screen = None;
+        }
     }
 
     /// Where this memo's sticky was last seen, if anywhere.
@@ -264,7 +278,31 @@ impl Settings {
 
     /// Forgets one memo's window, for a memo that no longer exists.
     pub fn forget_memo_window(&mut self, id: &str) -> bool {
+        self.memo_screens.remove(id);
         self.memo_windows.remove(id).is_some()
+    }
+
+    /// The screen this memo's sticky was last seen on.
+    pub fn memo_screen(&self, id: &str) -> Option<Screen> {
+        self.memo_screens.get(id).cloned()
+    }
+
+    /// Records the screen a memo's sticky is on. Returns whether that changed anything.
+    pub fn set_memo_screen(&mut self, id: &str, screen: Screen) -> bool {
+        if self.memo_screens.get(id) == Some(&screen) {
+            return false;
+        }
+        self.memo_screens.insert(id.to_string(), screen);
+        true
+    }
+
+    /// Records the screen the list window is on. Returns whether that changed anything.
+    pub fn set_list_screen(&mut self, screen: Screen) -> bool {
+        if self.list_screen.as_ref() == Some(&screen) {
+            return false;
+        }
+        self.list_screen = Some(screen);
+        true
     }
 
     /// Records the list window's geometry. Returns whether anything changed.
@@ -521,6 +559,8 @@ mod tests {
                 ("sizeonly".to_string(), [POS_UNKNOWN, POS_UNKNOWN, 300, 200]),
             ]),
             list_window: Some([0, 0, 10, 10]),
+            memo_screens: HashMap::new(),
+            list_screen: None,
         };
         s.sanitize();
         assert_eq!(s.pinned_memos, vec!["a".to_string(), "b".to_string()]);
@@ -578,6 +618,23 @@ mod tests {
         assert!(s.set_memo_open("m1", false));
         assert_eq!(s.open_memos(), ["m2".to_string()]);
         assert!(!s.set_memo_open("m1", false));
+    }
+
+    /// A remembered screen goes with the geometry it was taken with: forgetting a window
+    /// forgets it, and one left without a geometry is dropped on load.
+    #[test]
+    fn a_screen_lives_and_dies_with_its_geometry() {
+        let screen = Screen { name: "eDP-1".into(), rect: [0, 0, 1920, 1080] };
+        let mut s = Settings::default();
+        s.set_memo_window("m1", [10, 10, 220, 150]);
+        assert!(s.set_memo_screen("m1", screen.clone()));
+        assert!(!s.set_memo_screen("m1", screen.clone()), "unchanged is not a change");
+        s.forget_memo_window("m1");
+        assert_eq!(s.memo_screen("m1"), None);
+
+        s.memo_screens.insert("orphan".into(), screen);
+        s.sanitize();
+        assert!(s.memo_screens.is_empty());
     }
 
     /// Activating a note makes it the top of the desk the next start puts back.

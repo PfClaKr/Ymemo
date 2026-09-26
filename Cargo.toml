@@ -38,8 +38,9 @@ ksni = { version = "0.3", default-features = false, features = ["blocking", "asy
 tray-icon = { version = "0.24", default-features = false }
 # Keeping the sticky windows out of the taskbar on X11 (`_NET_WM_STATE_SKIP_TASKBAR`), which
 # winit exposes no API for. Already in the tree — winit's own X11 backend is built on it — so
-# this only makes an existing crate reachable from our code.
-x11rb = "0.13"
+# this only makes an existing crate reachable from our code. `randr` for listing the monitors
+# ourselves: winit caches that list and, measured under Xvfb, never noticed it change.
+x11rb = { version = "0.13", features = ["randr"] }
 
 # Storage and data
 rusqlite = { version = "0.32", features = ["bundled"] } # compiled from source, no system libsqlite3

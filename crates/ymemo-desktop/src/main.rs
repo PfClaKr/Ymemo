@@ -45,6 +45,7 @@ mod list;
 mod lock;
 mod markdown;
 mod pairing;
+mod screens;
 mod security;
 mod settings;
 mod state;
@@ -1030,6 +1031,7 @@ fn main() -> Result<()> {
         let list_weak = list.as_weak();
         geometry_timer.start(TimerMode::Repeated, GEOMETRY_INTERVAL, move || {
             if let Some(list) = list_weak.upgrade() {
+                sticky::rescue_offscreen(&ctx, &list);
                 sticky::remember_geometry(&ctx, &list);
             }
         });

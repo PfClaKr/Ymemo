@@ -235,10 +235,13 @@ pub(crate) fn apply_opened_vault(
 pub(crate) fn show_desk(ctx: &Ctx, list_weak: &slint::Weak<ListWindow>) {
     ctx.quiet_start.set(false);
     if let Some(list) = list_weak.upgrade() {
-        let saved = ctx.settings.borrow().list_window;
+        let (saved, screen) = {
+            let settings = ctx.settings.borrow();
+            (settings.list_window, settings.list_screen.clone())
+        };
         present(&list);
         match saved {
-            Some(geometry) => crate::window::restore_geometry(&list, geometry),
+            Some(geometry) => crate::window::restore_geometry(&list, geometry, screen),
             // First run: a Window whose root is a layout takes that layout's natural size and
             // ignores `preferred-height`, so without this the list opened at its own minimum —
             // six rows tall on any screen — and stayed there.

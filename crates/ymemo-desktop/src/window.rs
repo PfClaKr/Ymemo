@@ -96,7 +96,15 @@ fn with_window<T: ComponentHandle + 'static>(
 ///
 /// A `POS_UNKNOWN` position means the platform would not say where the window was (native
 /// Wayland); the size is still worth restoring, and the compositor places the window.
-pub(crate) fn restore_geometry<T: ComponentHandle + 'static>(component: &T, geometry: [i32; 4]) {
+///
+/// **Where it goes is decided against the screens attached now** (`screens::place`), with
+/// `screen` — the one it was on when the geometry was taken — to say which of them it
+/// belongs to. The same numbers are a different place after a laptop moves desks.
+pub(crate) fn restore_geometry<T: ComponentHandle + 'static>(
+    component: &T,
+    geometry: [i32; 4],
+    screen: Option<crate::screens::Screen>,
+) {
     use i_slint_backend_winit::winit::dpi::PhysicalPosition;
 
     component
@@ -106,7 +114,16 @@ pub(crate) fn restore_geometry<T: ComponentHandle + 'static>(component: &T, geom
         return;
     }
     with_window(component, move |window| {
-        window.set_outer_position(PhysicalPosition::new(geometry[0], geometry[1]));
+        let (screens, primary) = crate::screens::current(window);
+        let (x, y) = crate::screens::place(geometry, screen.as_ref(), &screens, primary);
+        if (x, y) != (geometry[0], geometry[1]) {
+            diag!(
+                "a window's screen is not where it was; placed at ({x},{y}) instead of ({},{})",
+                geometry[0],
+                geometry[1]
+            );
+        }
+        window.set_outer_position(PhysicalPosition::new(x, y));
     });
 }
 
@@ -168,6 +185,19 @@ pub(crate) fn keep_above<T: ComponentHandle + 'static>(component: &T) {
         #[cfg(not(target_os = "linux"))]
         let _ = window;
     });
+}
+
+/// The monitors, straight from RandR on X11; `None` elsewhere (and on Wayland, where the
+/// caller falls back to winit).
+pub(crate) fn x11_screens(
+    window: &i_slint_backend_winit::winit::window::Window,
+) -> Option<(Vec<crate::screens::Screen>, Option<usize>)> {
+    #[cfg(target_os = "linux")]
+    if x11_id(window).is_some() {
+        return x11::screens();
+    }
+    let _ = window;
+    None
 }
 
 /// The X11 window id, or `None` under native Wayland, where the handle is a Wayland surface
@@ -368,6 +398,47 @@ mod x11 {
                 ymemo_core::diag!("could not keep the window on top: {e}");
             }
         });
+    }
+
+    /// The monitors as RandR reports them **now**: one per lit CRTC, named after its first
+    /// output, with the primary marked. Asked fresh each time — see `crate::screens::current`.
+    pub(super) fn screens() -> Option<(Vec<crate::screens::Screen>, Option<usize>)> {
+        use x11rb::protocol::randr::ConnectionExt as _;
+        let mut out = None;
+        with_wm(|wm| {
+            let run = || -> anyhow::Result<(Vec<crate::screens::Screen>, Option<usize>)> {
+                let res = wm.conn.randr_get_screen_resources_current(wm.root)?.reply()?;
+                let primary = wm.conn.randr_get_output_primary(wm.root)?.reply()?.output;
+                let mut screens = Vec::new();
+                let mut at = None;
+                for crtc in res.crtcs {
+                    let info = wm.conn.randr_get_crtc_info(crtc, res.config_timestamp)?.reply()?;
+                    let Some(&output) = info.outputs.first() else { continue };
+                    if info.mode == 0 || info.width == 0 {
+                        continue; // not lit
+                    }
+                    let name = wm
+                        .conn
+                        .randr_get_output_info(output, res.config_timestamp)?
+                        .reply()
+                        .map(|o| String::from_utf8_lossy(&o.name).into_owned())
+                        .unwrap_or_default();
+                    if info.outputs.contains(&primary) {
+                        at = Some(screens.len());
+                    }
+                    screens.push(crate::screens::Screen {
+                        name,
+                        rect: [info.x.into(), info.y.into(), info.width.into(), info.height.into()],
+                    });
+                }
+                Ok((screens, at))
+            };
+            match run() {
+                Ok(s) => out = Some(s),
+                Err(e) => ymemo_core::diag!("could not list the screens: {e}"),
+            }
+        });
+        out
     }
 
     pub(super) fn restack_top(xid: u32) {

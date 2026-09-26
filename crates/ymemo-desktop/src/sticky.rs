@@ -5,7 +5,7 @@
 //! (native Wayland) it silently does nothing.
 
 use ymemo_core::diag;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -1252,9 +1252,9 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     // Back where it was left, if this note has been on the desk before. Applied after the
     // window is on screen: a size set on a window that has not been shown is what the
     // backends disagree about, and the position needs a real window underneath it.
-    let (saved_geometry, folded) = {
+    let (saved_geometry, saved_screen, folded) = {
         let settings = ctx.settings.borrow();
-        (settings.memo_window(&memo.id), settings.memo_folded(&memo.id))
+        (settings.memo_window(&memo.id), settings.memo_screen(&memo.id), settings.memo_folded(&memo.id))
     };
     // Dropping a picture on a note puts it in the note. Registered after the window is on
     // screen, because until then there is no winit window to hang the filter on and this is
@@ -1263,7 +1263,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     let last_active = Rc::new(Cell::new(next_stamp()));
     wire_window_events(ctx, &window, &memo.id, last_active.clone());
     if let Some(geometry) = saved_geometry {
-        restore_geometry(&window, geometry);
+        restore_geometry(&window, geometry, saved_screen);
         // What it should go back to when it is unfolded; the geometry above is always the
         // note's expanded size, folded or not.
         expanded_height.set(geometry[3] as f32 / window.window().scale_factor());
@@ -1474,9 +1474,82 @@ pub(crate) fn remember_one(ctx: &Ctx, id: &str, window: &slint::Window) {
         .get(id)
         .is_some_and(|e| e.window.get_collapsed());
     let geometry = geometry_to_remember(ctx, id, window, collapsed);
-    let changed = ctx.settings.borrow_mut().set_memo_window(id, geometry);
-    if changed {
+    if ctx.settings.borrow_mut().set_memo_window(id, geometry) {
+        if let Some((screens, _)) = window.with_winit_window(crate::screens::current) {
+            if let Some(s) = crate::screens::screen_of(geometry, &screens) {
+                ctx.settings.borrow_mut().set_memo_screen(id, s.clone());
+            }
+        }
         ctx.settings.borrow().save(&ctx.dir);
+    }
+}
+
+/// The screens, asked through whichever of our windows has a winit window to ask with: the
+/// list's when it has been shown, otherwise any note's — a quiet start shows only notes.
+fn screens_via(
+    ctx: &Ctx,
+    list: &crate::ListWindow,
+) -> Option<(Vec<crate::screens::Screen>, Option<usize>)> {
+    list.window().with_winit_window(crate::screens::current).or_else(|| {
+        ctx.stickies
+            .borrow()
+            .values()
+            .find_map(|e| e.window.window().with_winit_window(crate::screens::current))
+    })
+}
+
+thread_local! {
+    /// The screens as the last geometry tick saw them; see [`rescue_offscreen`].
+    static LAST_SCREENS: RefCell<Option<Vec<crate::screens::Screen>>> = const { RefCell::new(None) };
+}
+
+/// Brings back any window a change of monitors has left off every screen, while the app is
+/// running — a laptop unplugged from its dock, a screen switched off.
+///
+/// Windows moves top-level windows off a screen that goes away; an X11 window manager may
+/// not, and a sticky left in the space where a monitor used to be has no taskbar button to
+/// reach it by. So on every geometry tick the screens are compared with the last ones, and
+/// only when they differ is each open window checked — and only a window nothing of whose
+/// title bar is on a screen is moved, with the screen it was remembered on deciding where.
+/// **Called before** [`remember_geometry`], which would otherwise record the stranded place
+/// and the screen it no longer has.
+pub(crate) fn rescue_offscreen(ctx: &Ctx, list: &crate::ListWindow) {
+    use crate::screens::{place, reachable};
+
+    let Some((screens, primary)) = screens_via(ctx, list) else { return };
+    let changed = LAST_SCREENS.with(|last| {
+        let mut last = last.borrow_mut();
+        let changed = last.as_ref().is_some_and(|l| *l != screens);
+        *last = Some(screens.clone());
+        changed
+    });
+    if !changed || screens.is_empty() {
+        return;
+    }
+    diag!("the screens changed: {} attached", screens.len());
+    let mut windows: Vec<(Option<String>, slint::Weak<StickyWindow>)> = Vec::new();
+    for (id, e) in ctx.stickies.borrow().iter() {
+        if e.window.window().is_visible() {
+            windows.push((Some(id.clone()), e.window.as_weak()));
+        }
+    }
+    let move_if_stranded = |window: &slint::Window, was: Option<crate::screens::Screen>| {
+        let g = window_geometry(window);
+        if g[0] == POS_UNKNOWN || reachable(g, &screens) {
+            return;
+        }
+        let (x, y) = place(g, was.as_ref(), &screens, primary);
+        diag!("a window was left off every screen at ({},{}); moved to ({x},{y})", g[0], g[1]);
+        window.set_position(slint::PhysicalPosition::new(x, y));
+    };
+    for (id, weak) in windows {
+        let Some(w) = weak.upgrade() else { continue };
+        let was = id.and_then(|id| ctx.settings.borrow().memo_screen(&id));
+        move_if_stranded(w.window(), was);
+    }
+    if list.window().is_visible() {
+        let was = ctx.settings.borrow().list_screen.clone();
+        move_if_stranded(list.window(), was);
     }
 }
 
@@ -1498,12 +1571,36 @@ pub(crate) fn remember_geometry(ctx: &Ctx, list: &crate::ListWindow) {
             .collect()
     };
     {
+        // Asked for only when something moved: the screens do not change on their own, and
+        // this runs every two seconds for as long as the app is up.
+        let mut screens: Option<Vec<crate::screens::Screen>> = None;
+        let mut screens_now = || {
+            screens
+                .get_or_insert_with(|| screens_via(ctx, list).map(|(s, _)| s).unwrap_or_default())
+                .clone()
+        };
         let mut settings = ctx.settings.borrow_mut();
+        // A window with no screen on record yet gets one even when it has not moved: a
+        // desk arranged before screens were remembered would otherwise wait for its first
+        // drag, and a new primary monitor before then would still scatter it.
         for (id, geometry) in &seen {
-            changed |= settings.set_memo_window(id, *geometry);
+            let moved = settings.set_memo_window(id, *geometry);
+            if moved || settings.memo_screen(id).is_none() {
+                if let Some(s) = crate::screens::screen_of(*geometry, &screens_now()) {
+                    changed |= settings.set_memo_screen(id, s.clone());
+                }
+            }
+            changed |= moved;
         }
         if list.window().is_visible() {
-            changed |= settings.set_list_window(window_geometry(list.window()));
+            let geometry = window_geometry(list.window());
+            let moved = settings.set_list_window(geometry);
+            if moved || settings.list_screen.is_none() {
+                if let Some(s) = crate::screens::screen_of(geometry, &screens_now()) {
+                    changed |= settings.set_list_screen(s.clone());
+                }
+            }
+            changed |= moved;
         }
     }
     if changed {
