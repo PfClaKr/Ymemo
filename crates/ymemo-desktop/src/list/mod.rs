@@ -1,6 +1,8 @@
 //! Model for the memo list window: flattens the group tree into rows and applies dragged
 //! rows back to the core.
 
+pub(crate) mod actions;
+
 use ymemo_core::diag;
 use std::collections::{HashMap, HashSet};
 
@@ -133,8 +135,8 @@ pub(crate) fn move_row(ctx: &Ctx, src: i32, dst: i32) {
         return;
     };
 
-    let mut guard = ctx.vault.borrow_mut();
-    let Some(v) = guard.as_mut() else { return };
+    let Some(mut guard) = ctx.vault_mut() else { return };
+    let v = &mut *guard;
 
     // Derive the new parent from the drop target; out of range means top level.
     let target_parent = match usize::try_from(dst).ok().and_then(|i| rows.row_data(i)) {
@@ -207,8 +209,8 @@ pub(crate) fn reorder_row(ctx: &Ctx, src: i32, gap: i32) {
         return;
     }
 
-    let mut guard = ctx.vault.borrow_mut();
-    let Some(v) = guard.as_mut() else { return };
+    let Some(mut guard) = ctx.vault_mut() else { return };
+    let v = &mut *guard;
     let count = rows.row_count() as i32;
     let gap = gap.clamp(0, count);
 
@@ -284,8 +286,8 @@ pub(crate) fn push_group_rows(
 /// Recolours a row from the list window. Folders and memos both carry a palette key, and
 /// both are synced, so one entry point covers them.
 pub(crate) fn set_row_color(ctx: &Ctx, id: &str, is_group: bool, color: &str) {
-    let mut guard = ctx.vault.borrow_mut();
-    let Some(v) = guard.as_mut() else { return };
+    let Some(mut guard) = ctx.vault_mut() else { return };
+    let v = &mut *guard;
 
     let result = if is_group {
         match v.store().get_group(id) {
@@ -321,8 +323,8 @@ pub(crate) fn set_row_color(ctx: &Ctx, id: &str, is_group: bool, color: &str) {
 /// through its own, and reaching through `Ctx` while one is still live is what used to kill
 /// the app (see `sync::start_merge_timer`).
 pub(crate) fn refresh_after_restore(ctx: &Ctx, entity: ymemo_core::history::Entity, id: &str) {
-    let guard = ctx.vault.borrow();
-    let Some(v) = guard.as_ref() else { return };
+    let Some(guard) = ctx.vault_ref() else { return };
+    let v = &*guard;
     refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
 
     if entity == ymemo_core::history::Entity::Memo {

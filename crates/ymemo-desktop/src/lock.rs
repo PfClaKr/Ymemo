@@ -1,75 +1,24 @@
 //! Lock and unlock flow, plus applying language and settings across every window.
 
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
-use std::time::Duration;
-
 use anyhow::{Context, Result};
 use slint::{ComponentHandle, SharedString};
+use std::cell::{Cell, RefCell};
+use std::path::Path;
+use std::rc::Rc;
+use std::time::Duration;
+use ymemo_core::crypto::MasterKey;
 use ymemo_core::sync::Syncthing;
 use ymemo_core::vault::Vault;
+use ymemo_core::{diag, Store};
 use ymemo_i18n::t;
 
 use crate::list::refresh_list;
-use crate::settings;
-use crate::state::Ctx;
+use crate::session;
+use crate::state::{Ctx, Ui};
 use crate::sticky::flush_dirty;
 use crate::sync::SYNC_FOLDER_ID;
 use crate::window::present;
-use crate::{
-    apply_strings, ApproveWindow, HistoryWindow, ListWindow, LockWindow, SecurityWindow,
-    SettingsWindow, Strings,
-};
-
-/// Fills the settings window's inputs from the current settings.
-pub(crate) fn fill_settings_window(ctx: &Ctx, win: &SettingsWindow) {
-    // The workspace version equals the release tag; release.yml checks that.
-    win.set_app_version(SharedString::from(env!("CARGO_PKG_VERSION")));
-    let s = ctx.settings.borrow();
-    win.set_lang_sel(SharedString::from(s.lang.clone()));
-    win.set_unlock_days(s.unlock_days);
-    win.set_idle_minutes(s.idle_lock_minutes);
-    win.set_default_color(SharedString::from(s.default_color.clone()));
-    win.set_default_opacity(s.default_opacity);
-    win.set_merge_seconds(s.merge_seconds);
-    win.set_watch_delay_seconds(s.watch_delay_seconds);
-    win.set_rescan_seconds(s.rescan_seconds);
-    win.set_keep_versions_days(s.keep_versions_days);
-    win.set_update_check(s.update_check);
-    // Not from `settings.json`: the desktop's own autostart entry is the record, so this is
-    // read back from it each time the window opens — including after a failed write, which is
-    // how the toggle stays honest about what actually happened.
-    win.set_autostart_supported(crate::autostart::supported());
-    win.set_start_at_login(crate::autostart::enabled());
-}
-
-/// Applies the language to **every** window.
-///
-/// The Slint `Strings` global is per component instance, so changing one window leaves the
-/// rest in the old language. Open stickies are walked here; later ones are filled by
-/// `open_sticky` on creation.
-pub(crate) fn apply_lang(
-    ctx: &Ctx,
-    lock: &LockWindow,
-    list: &ListWindow,
-    settings_win: &SettingsWindow,
-    security_win: &SecurityWindow,
-    history_win: &HistoryWindow,
-    approve_win: &ApproveWindow,
-) {
-    // Switch the catalog first; every later t!/apply_strings reads it, core and tray
-    // included, so nothing else needs notifying.
-    ymemo_i18n::set_lang(ctx.settings.borrow().effective_lang());
-    apply_strings(&lock.global::<Strings>());
-    apply_strings(&list.global::<Strings>());
-    apply_strings(&settings_win.global::<Strings>());
-    apply_strings(&security_win.global::<Strings>());
-    apply_strings(&history_win.global::<Strings>());
-    apply_strings(&approve_win.global::<Strings>());
-    for entry in ctx.stickies.borrow().values() {
-        apply_strings(&entry.window.global::<Strings>());
-    }
-}
+use crate::{ListWindow, LockWindow};
 
 /// Leaves a stay-unlocked session behind after a password unlock.
 ///
@@ -77,7 +26,7 @@ pub(crate) fn apply_lang(
 /// use, so "the password is checked every N days" actually holds. Zero days stores nothing.
 pub(crate) fn start_unlock_session(ctx: &Ctx, vault: &Vault) {
     let days = ctx.settings.borrow().unlock_days;
-    settings::save_session(&ctx.dir, &vault.key_bytes(), days);
+    session::save_session(&ctx.dir, &vault.key_bytes(), days);
 }
 
 /// Drops the pending undo and takes the offer off the list.
@@ -107,13 +56,16 @@ pub(crate) fn lock_now(ctx: &Ctx, lock: &LockWindow, list: &ListWindow, unlocked
     // Defer dropping the window handles to the next event-loop turn (as in close_sticky).
     {
         let stickies = ctx.stickies.clone();
-        slint::Timer::single_shot(Duration::ZERO, move || stickies.borrow_mut().clear());
+        slint::Timer::single_shot(Duration::ZERO, move || {
+            stickies.borrow_mut().clear();
+            crate::sticky::forget_all_photos();
+        });
     }
 
     *ctx.vault.borrow_mut() = None;
     ctx.model.set_vec(Vec::new());
     unlocked.set(false);
-    settings::clear_session(&ctx.dir);
+    session::clear_session(&ctx.dir);
     // A pending undo holds the removed memo's title and body. A locked vault leaves no memo
     // text behind it, and the offer must not outlive the session either: unlocking used to
     // find the bar still there, ready to write a memo from before the lock back — into
@@ -146,7 +98,7 @@ pub(crate) fn reset_vault(ctx: &Ctx, syncthing: &Rc<RefCell<Option<Syncthing>>>)
     // The cache is a plaintext copy of everything in the vault, so it goes with it — and so
     // do the sidecars WAL mode keeps beside it, or a reset hands the memos back.
     ymemo_core::Store::delete_file(ctx.dir.join("ymemo.db"))?;
-    settings::clear_session(&ctx.dir);
+    session::clear_session(&ctx.dir);
 
     *ctx.vault.borrow_mut() = None;
     ctx.model.set_vec(Vec::new());
@@ -171,8 +123,8 @@ fn reopen_desk(ctx: &Ctx) {
     let mut gone = Vec::new();
     for id in &wanted {
         let memo = {
-            let guard = ctx.vault.borrow();
-            let Some(v) = guard.as_ref() else { return };
+            let Some(guard) = ctx.vault_ref() else { return };
+            let v = &*guard;
             match v.store().get(id) {
                 Ok(Some(m)) => m,
                 _ => {
@@ -235,16 +187,274 @@ pub(crate) fn apply_opened_vault(
 pub(crate) fn show_desk(ctx: &Ctx, list_weak: &slint::Weak<ListWindow>) {
     ctx.quiet_start.set(false);
     if let Some(list) = list_weak.upgrade() {
-        let saved = ctx.settings.borrow().list_window;
+        let (saved, screen) = {
+            let settings = ctx.settings.borrow();
+            (settings.list_window, settings.list_screen.clone())
+        };
         present(&list);
         match saved {
-            Some(geometry) => crate::window::restore_geometry(&list, geometry),
+            Some(geometry) => crate::window::restore_geometry(&list, geometry, screen),
             // First run: a Window whose root is a layout takes that layout's natural size and
             // ignores `preferred-height`, so without this the list opened at its own minimum —
             // six rows tall on any screen — and stayed there.
             None => list.window().set_size(slint::LogicalSize::new(340.0, 460.0)),
         }
     }
-    // After the list, so the notes land in front of it rather than behind it.
+    // After the list, so the notes land in front of it rather than behind it — which the
+    // order of these calls alone does not achieve; see `stack_desk`.
     reopen_desk(ctx);
+    let ids = ctx.settings.borrow().open_memos().to_vec();
+    crate::sticky::stack_desk(ctx, Some(list_weak.clone()), &ids);
+}
+
+/// Wires the lock window: unlocking, creating a vault, and the two ways back from a forgotten password.
+pub(crate) fn wire(
+    ctx: &Ctx,
+    ui: &Ui,
+    unlocked: &Rc<Cell<bool>>,
+    syncthing: &Rc<RefCell<Option<Syncthing>>>,
+    pending_vault: &Rc<RefCell<Option<Vault>>>,
+    created_here: &Rc<Cell<bool>>,
+) {
+    wire_unlock(ctx, ui, unlocked);
+    wire_create_vault(ctx, ui, unlocked, syncthing, pending_vault, created_here);
+    wire_resize(ui);
+    wire_recovery_ack(ctx, ui, unlocked, pending_vault);
+    wire_recover(ctx, ui, unlocked);
+    wire_reset(ctx, ui, syncthing);
+}
+
+/// Open: derive the key from vault.json's salt; a diverged key heals inside open.
+/// **Never fall back to create** — that is what made keys diverge in the first place.
+fn wire_unlock(ctx: &Ctx, ui: &Ui, unlocked: &Rc<Cell<bool>>) {
+    let lock = &ui.lock;
+    let list = &ui.list;
+    let ctx = ctx.clone();
+    let lock_weak = lock.as_weak();
+    let list_weak = list.as_weak();
+    let unlocked = unlocked.clone();
+    let dir = ctx.dir.clone();
+    // Open: derive the key from vault.json's salt; a diverged key heals inside open.
+    // **Never fall back to create** — that is what made keys diverge in the first place.
+    lock.on_unlock(move |password| {
+        let lock = lock_weak.unwrap();
+        if password.is_empty() {
+            lock.set_lock_message(t!("msg.enter_password").into());
+            return;
+        }
+        let store = match Store::open(dir.join("ymemo.db")) {
+            Ok(s) => s,
+            Err(e) => {
+                lock.set_lock_message(SharedString::from(t!("msg.cache_open_failed", error = e)));
+                return;
+            }
+        };
+        // Argon2id blocks the UI for a few hundred ms, but only on the lock screen.
+        match Vault::open(dir.join("vault"), password.as_bytes(), store) {
+            Ok(v) => {
+                start_unlock_session(&ctx, &v);
+                apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked);
+            }
+            Err(e) => lock.set_lock_message(SharedString::from(format!("{e}"))),
+        }
+    });
+}
+
+/// Create: only on a device starting fresh. The salt is generated exactly here.
+fn wire_create_vault(
+    ctx: &Ctx,
+    ui: &Ui,
+    unlocked: &Rc<Cell<bool>>,
+    syncthing: &Rc<RefCell<Option<Syncthing>>>,
+    pending_vault: &Rc<RefCell<Option<Vault>>>,
+    created_here: &Rc<Cell<bool>>,
+) {
+    let lock = &ui.lock;
+    let list = &ui.list;
+    let ctx = ctx.clone();
+    let lock_weak = lock.as_weak();
+    let list_weak = list.as_weak();
+    let unlocked = unlocked.clone();
+    let dir = ctx.dir.clone();
+    let syncthing = syncthing.clone();
+    let pending_vault = pending_vault.clone();
+    let created_here = created_here.clone();
+    // Create: only on a device starting fresh. The salt is generated exactly here.
+    lock.on_create_vault(move |password| {
+        let lock = lock_weak.unwrap();
+        if password.is_empty() {
+            lock.set_lock_message(t!("msg.enter_new_password").into());
+            return;
+        }
+        let store = match Store::open(dir.join("ymemo.db")) {
+            Ok(s) => s,
+            Err(e) => {
+                lock.set_lock_message(SharedString::from(t!("msg.cache_open_failed", error = e)));
+                return;
+            }
+        };
+        match Vault::open_or_create(dir.join("vault"), password.as_bytes(), store) {
+            Ok(v) => {
+                created_here.set(true);
+                // Register the folder here as well as at startup: a reset removes it
+                // deliberately, and this is the first vault that follows one.
+                if let Some(st) = syncthing.borrow().as_ref() {
+                    if let Err(e) =
+                        st.ensure_folder(SYNC_FOLDER_ID, "Ymemo Vault", &dir.join("vault"))
+                    {
+                        diag!("could not register the shared folder: {e}");
+                    }
+                }
+                start_unlock_session(&ctx, &v);
+                // Show the recovery code before anything else; the vault waits in
+                // `pending_vault` until the user confirms they have written it down.
+                match v.issue_recovery_code() {
+                    Ok(code) => {
+                        lock.set_lock_message(SharedString::new());
+                        lock.set_new_recovery_code(SharedString::from(code));
+                        *pending_vault.borrow_mut() = Some(v);
+                    }
+                    // A vault without a recovery code still works, so this never blocks
+                    // the user out of the app they just set up.
+                    Err(e) => {
+                        diag!("could not issue a recovery code: {e}");
+                        lock.set_vault_exists(true);
+                        apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked);
+                    }
+                }
+            }
+            Err(e) => lock.set_lock_message(SharedString::from(format!("{e}"))),
+        }
+    });
+}
+
+/// Size the window to whichever panel is on it.
+/// Every panel here has its own size and `lock.slint` knows them all; this only applies
+/// what it asks for.
+fn wire_resize(ui: &Ui) {
+    let lock = &ui.lock;
+    let weak = lock.as_weak();
+    lock.on_resize(move |w, h| {
+        if let Some(win) = weak.upgrade() {
+            win.window().set_size(slint::LogicalSize::new(w, h));
+        }
+    });
+}
+
+/// Recovery code written down: open the vault that was waiting for it.
+fn wire_recovery_ack(
+    ctx: &Ctx,
+    ui: &Ui,
+    unlocked: &Rc<Cell<bool>>,
+    pending_vault: &Rc<RefCell<Option<Vault>>>,
+) {
+    let lock = &ui.lock;
+    let list = &ui.list;
+    let ctx = ctx.clone();
+    let lock_weak = lock.as_weak();
+    let list_weak = list.as_weak();
+    let unlocked = unlocked.clone();
+    let pending_vault = pending_vault.clone();
+    lock.on_recovery_ack(move || {
+        let Some(v) = pending_vault.borrow_mut().take() else { return };
+        let lock = lock_weak.unwrap();
+        lock.set_new_recovery_code(SharedString::new());
+        lock.set_vault_exists(true);
+        lock.set_has_recovery(true);
+        apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked);
+    });
+}
+
+/// Forgotten password: the recovery code sets a new one.
+fn wire_recover(ctx: &Ctx, ui: &Ui, unlocked: &Rc<Cell<bool>>) {
+    let lock = &ui.lock;
+    let list = &ui.list;
+    let ctx = ctx.clone();
+    let lock_weak = lock.as_weak();
+    let list_weak = list.as_weak();
+    let unlocked = unlocked.clone();
+    let dir = ctx.dir.clone();
+    lock.on_recover(move |code, new_password| {
+        let lock = lock_weak.unwrap();
+        let vault_dir = dir.join("vault");
+        // Only the header is rewritten, so a wrong code costs one Argon2id run and
+        // leaves the vault exactly as it was.
+        if let Err(e) = ymemo_core::vault::reset_password_with_recovery(
+            &vault_dir,
+            &code,
+            new_password.as_bytes(),
+        ) {
+            lock.set_lock_message(SharedString::from(format!("{e}")));
+            return;
+        }
+        let store = match Store::open(dir.join("ymemo.db")) {
+            Ok(s) => s,
+            Err(e) => {
+                lock.set_lock_message(SharedString::from(t!("msg.cache_open_failed", error = e)));
+                return;
+            }
+        };
+        match Vault::open(&vault_dir, new_password.as_bytes(), store) {
+            Ok(v) => {
+                start_unlock_session(&ctx, &v);
+                lock.invoke_leave_recovery();
+                lock.set_lock_message(SharedString::new());
+                apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked);
+            }
+            Err(e) => lock.set_lock_message(SharedString::from(format!("{e}"))),
+        }
+    });
+}
+
+/// Forgotten password, no recovery code: wipe and start over.
+fn wire_reset(ctx: &Ctx, ui: &Ui, syncthing: &Rc<RefCell<Option<Syncthing>>>) {
+    let lock = &ui.lock;
+    let ctx = ctx.clone();
+    let lock_weak = lock.as_weak();
+    let syncthing = syncthing.clone();
+    lock.on_reset_vault(move || {
+        let lock = lock_weak.unwrap();
+        match reset_vault(&ctx, &syncthing) {
+            Ok(()) => {
+                lock.invoke_leave_recovery();
+                lock.invoke_clear_password();
+                lock.set_vault_exists(false);
+                lock.set_has_recovery(false);
+                lock.set_lock_message(SharedString::from(t!("msg.reset_done")));
+            }
+            Err(e) => {
+                lock.set_lock_message(SharedString::from(t!("msg.reset_failed", error = e)))
+            }
+        }
+    });
+}
+
+/// Stay unlocked: a valid session key skips the password prompt. Returns whether it did.
+///
+/// On any failure (wrong key, damaged cache, diverged key) the session is dropped and the
+/// lock screen comes up.
+pub(crate) fn unlock_from_session(
+    ctx: &Ctx,
+    ui: &Ui,
+    unlocked: &Rc<Cell<bool>>,
+    vault_dir: &Path,
+) -> bool {
+    let dir = ctx.dir.as_path();
+    session::load_session(dir).is_some_and(|key_bytes| {
+        let opened = MasterKey::from_bytes(&key_bytes).and_then(|key| {
+            let store = Store::open(dir.join("ymemo.db"))?;
+            Vault::open_with_key(vault_dir, key, store)
+        });
+        match opened {
+            Ok(v) => {
+                apply_opened_vault(v, ctx, &ui.lock, &ui.list.as_weak(), unlocked);
+                true
+            }
+            Err(e) => {
+                diag!("could not unlock from the session, asking for the password: {e}");
+                session::clear_session(dir);
+                false
+            }
+        }
+    })
 }

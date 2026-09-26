@@ -4,17 +4,16 @@
 //! Nothing here caches them: a history is read when the window opens and again after a
 //! restore, because a restore is itself a new revision.
 
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
-
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use ymemo_core::history::{Entity, Revision, RevisionKind};
 use ymemo_i18n::t;
 
 use crate::state::{touch, Ctx};
 use crate::sticky::format_created_at;
 use crate::window::present;
-use crate::{HistoryWindow, RevisionRow};
+use crate::{HistoryWindow, ListWindow, RevisionRow};
 
 /// What the open history window is showing. `None` while it is closed.
 pub(crate) type Subject = Rc<RefCell<Option<(Entity, String)>>>;
@@ -41,8 +40,8 @@ pub(crate) fn wire(ctx: &Ctx, win: &HistoryWindow, subject: &Subject) {
             // Re-read rather than trusting a list that may be a restore old; the index is
             // into the core's own ordering, so it has to come from the same source.
             let restored = {
-                let mut guard = ctx.vault.borrow_mut();
-                let Some(v) = guard.as_mut() else { return };
+                let Some(mut guard) = ctx.vault_mut() else { return };
+                let v = &mut *guard;
                 match v.history(entity, &id) {
                     Ok(revisions) => match revisions.get(index as usize) {
                         Some(rev) => v.restore(entity, &id, rev),
@@ -71,6 +70,19 @@ pub(crate) fn wire(ctx: &Ctx, win: &HistoryWindow, subject: &Subject) {
     }
 }
 
+/// The list's history button: past versions of the memo or folder a row stands for.
+pub(crate) fn wire_list(ctx: &Ctx, list: &ListWindow, win: &HistoryWindow, subject: &Subject) {
+    let ctx = ctx.clone();
+    let win = win.as_weak();
+    let subject = subject.clone();
+    list.on_show_history(move |id, is_group| {
+        touch(&ctx);
+        let Some(w) = win.upgrade() else { return };
+        let entity = if is_group { Entity::Group } else { Entity::Memo };
+        show(&ctx, &w, &subject, entity, &id);
+    });
+}
+
 /// Opens the window on one memo or folder.
 pub(crate) fn show(ctx: &Ctx, win: &HistoryWindow, subject: &Subject, entity: Entity, id: &str) {
     *subject.borrow_mut() = Some((entity, id.to_string()));
@@ -84,8 +96,8 @@ pub(crate) fn show(ctx: &Ctx, win: &HistoryWindow, subject: &Subject, entity: En
 fn refresh(ctx: &Ctx, win: &HistoryWindow, entity: Entity, id: &str) {
     // Mutable because reading a memo's past reads the document, and `AutoCommit` settles any
     // pending edit before it hands over its changes.
-    let mut guard = ctx.vault.borrow_mut();
-    let Some(v) = guard.as_mut() else { return };
+    let Some(mut guard) = ctx.vault_mut() else { return };
+    let v = &mut *guard;
 
     let name = match entity {
         Entity::Memo => v.store().get(id).ok().flatten().map(|m| m.title),

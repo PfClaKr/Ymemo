@@ -96,7 +96,15 @@ fn with_window<T: ComponentHandle + 'static>(
 ///
 /// A `POS_UNKNOWN` position means the platform would not say where the window was (native
 /// Wayland); the size is still worth restoring, and the compositor places the window.
-pub(crate) fn restore_geometry<T: ComponentHandle + 'static>(component: &T, geometry: [i32; 4]) {
+///
+/// **Where it goes is decided against the screens attached now** (`screens::place`), with
+/// `screen` — the one it was on when the geometry was taken — to say which of them it
+/// belongs to. The same numbers are a different place after a laptop moves desks.
+pub(crate) fn restore_geometry<T: ComponentHandle + 'static>(
+    component: &T,
+    geometry: [i32; 4],
+    screen: Option<crate::screens::Screen>,
+) {
     use i_slint_backend_winit::winit::dpi::PhysicalPosition;
 
     component
@@ -106,7 +114,16 @@ pub(crate) fn restore_geometry<T: ComponentHandle + 'static>(component: &T, geom
         return;
     }
     with_window(component, move |window| {
-        window.set_outer_position(PhysicalPosition::new(geometry[0], geometry[1]));
+        let (screens, primary) = crate::screens::current(window);
+        let (x, y) = crate::screens::place(geometry, screen.as_ref(), &screens, primary);
+        if (x, y) != (geometry[0], geometry[1]) {
+            diag!(
+                "a window's screen is not where it was; placed at ({x},{y}) instead of ({},{})",
+                geometry[0],
+                geometry[1]
+            );
+        }
+        window.set_outer_position(PhysicalPosition::new(x, y));
     });
 }
 
@@ -142,24 +159,57 @@ pub(crate) fn skip_taskbar<T: ComponentHandle + 'static>(component: &T) {
             window.set_skip_taskbar(true);
         }
         #[cfg(target_os = "linux")]
-        {
-            use i_slint_backend_winit::winit::raw_window_handle::{
-                HasWindowHandle, RawWindowHandle,
-            };
-            // None under native Wayland, where the handle is a Wayland surface and there is
-            // nothing to ask for.
-            let xid = window.window_handle().ok().and_then(|h| match h.as_raw() {
-                RawWindowHandle::Xlib(h) => Some(h.window as u32),
-                RawWindowHandle::Xcb(h) => Some(h.window.get()),
-                _ => None,
-            });
-            if let Some(xid) = xid {
-                x11::skip_taskbar(xid);
-            }
+        if let Some(xid) = x11_id(window) {
+            x11::skip_taskbar(xid);
         }
         #[cfg(not(any(windows, target_os = "linux")))]
         let _ = window;
     });
+}
+
+/// Makes a window that was **created** always-on-top actually be on top, on X11.
+///
+/// Slint builds a window hidden and maps it later, and winit asks for the level only once, at
+/// creation, as a client message — which EWMH reserves for *mapped* windows, so the window
+/// manager drops it. A pinned note that was opened pinned (every one put back after a restart,
+/// and every pinned one opened from the list) came up as an ordinary window, under whatever
+/// was focused next; toggling the pin by hand worked because by then the note was mapped.
+/// Measured under openbox: `_NET_WM_STATE` empty on a restored pinned note, `ABOVE` after a
+/// click on its pin. Windows and Wayland are left to winit.
+pub(crate) fn keep_above<T: ComponentHandle + 'static>(component: &T) {
+    with_window(component, |window| {
+        #[cfg(target_os = "linux")]
+        if let Some(xid) = x11_id(window) {
+            x11::keep_above(xid);
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = window;
+    });
+}
+
+/// The monitors, straight from RandR on X11; `None` elsewhere (and on Wayland, where the
+/// caller falls back to winit).
+pub(crate) fn x11_screens(
+    window: &i_slint_backend_winit::winit::window::Window,
+) -> Option<(Vec<crate::screens::Screen>, Option<usize>)> {
+    #[cfg(target_os = "linux")]
+    if x11_id(window).is_some() {
+        return x11::screens();
+    }
+    let _ = window;
+    None
+}
+
+/// The X11 window id, or `None` under native Wayland, where the handle is a Wayland surface
+/// and there is nothing to ask for.
+#[cfg(target_os = "linux")]
+fn x11_id(window: &i_slint_backend_winit::winit::window::Window) -> Option<u32> {
+    use i_slint_backend_winit::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    window.window_handle().ok().and_then(|h| match h.as_raw() {
+        RawWindowHandle::Xlib(h) => Some(h.window as u32),
+        RawWindowHandle::Xcb(h) => Some(h.window.get()),
+        _ => None,
+    })
 }
 
 /// Re-applies [`skip_taskbar`] after the window level has been changed.
@@ -193,152 +243,26 @@ pub(crate) fn raise<T: ComponentHandle + 'static>(component: &T) {
     with_window(component, |window| window.focus_window());
 }
 
-/// The Windows half of [`skip_taskbar`] that winit has no API for.
-#[cfg(windows)]
-mod windows_impl {
-    use i_slint_backend_winit::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use i_slint_backend_winit::winit::window::Window;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
-    };
-
-    /// Marks a window as a tool window, which is the shell's own idea of "not an application":
-    /// no taskbar button, and no place in Alt+Tab either — the same statement.
-    ///
-    /// **Both halves are needed.** The shell's rule is that a window gets a button if it has
-    /// `WS_EX_APPWINDOW`, *or* it is top-level and unowned without `WS_EX_TOOLWINDOW` — so
-    /// `WS_EX_APPWINDOW` wins over the tool-window style, and winit puts it on every window it
-    /// creates. Adding one flag without clearing the other leaves the button exactly where it
-    /// was, which is measurable: the sticky came back reading `exstyle=0x00040190`, tool window
-    /// and app window at once.
-    ///
-    /// Safe to call on a window already in this state — the read-modify-write leaves it as it
-    /// was, and every `present` comes back through here.
-    pub(super) fn tool_window(window: &Window) {
-        let Ok(handle) = window.window_handle() else { return };
-        let RawWindowHandle::Win32(win32) = handle.as_raw() else { return };
-        let hwnd = win32.hwnd.get() as *mut core::ffi::c_void;
-        // SAFETY: the handle comes from the winit window we are holding, so it is live for
-        // the length of this call, and GWL_EXSTYLE is an isize on every supported target.
-        unsafe {
-            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            let wanted = (style | WS_EX_TOOLWINDOW as isize) & !(WS_EX_APPWINDOW as isize);
-            if wanted != style {
-                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, wanted);
-            }
-        }
-    }
-}
-
-/// The X11 half of [`skip_taskbar`].
+/// Puts a window on top of the others in its layer **without focusing it** — a pinned note
+/// stays among the pinned ones. winit has no such call: `focus_window` raises by activating,
+/// and putting the desk back must not take the caret from whatever the user turned to.
 ///
-/// The connection is opened once and kept for the life of the process: raising a deskful of
-/// notes re-applies the hint to each of them, and a fresh connect and three `InternAtom`
-/// round trips per note is a visible pause for something the user asked to be instant.
-#[cfg(target_os = "linux")]
-mod x11 {
-    use std::cell::RefCell;
-
-    use x11rb::connection::Connection;
-    use x11rb::protocol::xproto::{
-        AtomEnum, ClientMessageEvent, ConnectionExt, EventMask, PropMode, Window,
-    };
-    use x11rb::rust_connection::RustConnection;
-    // `change_property32` is on this second extension trait, not on the xproto one.
-    use x11rb::wrapper::ConnectionExt as _;
-
-    /// `_NET_WM_STATE_ADD`, and "the request comes from a normal application", per EWMH.
-    const STATE_ADD: u32 = 1;
-    const SOURCE_APPLICATION: u32 = 1;
-
-    struct Wm {
-        conn: RustConnection,
-        root: Window,
-        state: u32,
-        skip_taskbar: u32,
-        skip_pager: u32,
+/// X11 asks with a `ConfigureWindow` restack, which the window manager receives as a request
+/// and may refuse; Windows is `SetWindowPos(HWND_TOP, SWP_NOACTIVATE)`. Nothing on Wayland,
+/// where a client does not get a say in stacking at all.
+pub(crate) fn restack_top(window: &i_slint_backend_winit::winit::window::Window) {
+    #[cfg(windows)]
+    windows_impl::bring_to_top(window);
+    #[cfg(target_os = "linux")]
+    if let Some(xid) = x11_id(window) {
+        x11::restack_top(xid);
     }
-
-    thread_local! {
-        // Outer Option: not tried yet. Inner: tried and failed, so it is not tried again on
-        // every window — a machine with no X server will not grow one mid-run.
-        static WM: RefCell<Option<Option<Wm>>> = const { RefCell::new(None) };
-    }
-
-    fn open() -> Option<Wm> {
-        let run = || -> anyhow::Result<Wm> {
-            let (conn, screen) = x11rb::connect(None)?;
-            let root = conn.setup().roots[screen].root;
-            let atom = |name: &str| -> anyhow::Result<u32> {
-                Ok(conn.intern_atom(false, name.as_bytes())?.reply()?.atom)
-            };
-            let state = atom("_NET_WM_STATE")?;
-            let skip_taskbar = atom("_NET_WM_STATE_SKIP_TASKBAR")?;
-            let skip_pager = atom("_NET_WM_STATE_SKIP_PAGER")?;
-            Ok(Wm { conn, root, state, skip_taskbar, skip_pager })
-        };
-        match run() {
-            Ok(wm) => Some(wm),
-            Err(e) => {
-                ymemo_core::diag!("no X11 connection for the taskbar hint: {e}");
-                None
-            }
-        }
-    }
-
-    pub(super) fn skip_taskbar(xid: u32) {
-        WM.with(|cell| {
-            let mut slot = cell.borrow_mut();
-            let wm = slot.get_or_insert_with(open);
-            let Some(wm) = wm.as_ref() else { return };
-            // Checked rather than merely flushed: the round trips are a local socket, and
-            // without them a rejected hint is a note that silently keeps its taskbar button.
-            if let Err(e) = apply(wm, xid) {
-                ymemo_core::diag!("could not hide the window from the taskbar: {e}");
-            }
-        });
-    }
-
-    /// Asks for the two states **both** ways EWMH defines, because which one works depends on
-    /// something we cannot see here.
-    ///
-    /// The spec is explicit: a *mapped* window's state is changed by a client message to the
-    /// root window, and an *unmapped* one by writing `_NET_WM_STATE` directly — the window
-    /// manager owns the property from the map onwards. Slint's `show()` only queues the map
-    /// request, so by the time this runs the window is one or the other and there is no way
-    /// to ask which. Doing both costs one round trip and is right either way.
-    fn apply(wm: &Wm, xid: u32) -> anyhow::Result<()> {
-        // Read-modify-write, never a plain overwrite: winit puts `_NET_WM_STATE_ABOVE` in
-        // this same property for a pinned note, and replacing the list would unpin it.
-        let current = wm
-            .conn
-            .get_property(false, xid, wm.state, AtomEnum::ATOM, 0, 64)?
-            .reply()?;
-        let mut states: Vec<u32> = current.value32().map(|v| v.collect()).unwrap_or_default();
-        for atom in [wm.skip_taskbar, wm.skip_pager] {
-            if !states.contains(&atom) {
-                states.push(atom);
-            }
-        }
-        wm.conn
-            .change_property32(PropMode::REPLACE, xid, wm.state, AtomEnum::ATOM, &states)?
-            .check()?;
-
-        // One message carries two states; _NET_WM_STATE takes exactly that many.
-        let ev = ClientMessageEvent::new(
-            32,
-            xid,
-            wm.state,
-            [STATE_ADD, wm.skip_taskbar, wm.skip_pager, SOURCE_APPLICATION, 0],
-        );
-        wm.conn
-            .send_event(
-                false,
-                wm.root,
-                EventMask::SUBSTRUCTURE_NOTIFY | EventMask::SUBSTRUCTURE_REDIRECT,
-                ev,
-            )?
-            .check()?;
-        Ok(())
-    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    let _ = window;
 }
+
+#[cfg(windows)]
+mod windows_impl;
+
+#[cfg(target_os = "linux")]
+mod x11;

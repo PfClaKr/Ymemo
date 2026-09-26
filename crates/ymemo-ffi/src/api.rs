@@ -9,7 +9,6 @@
 
 use std::collections::HashSet;
 use std::path::Path;
-use std::sync::Mutex;
 
 use anyhow::{anyhow, Result};
 use ymemo_core::{
@@ -21,31 +20,12 @@ use ymemo_core::{
     Attachment, Group, Memo, Store,
 };
 use ymemo_core::diag;
+
+use crate::globals::{
+    lan_lock, rejected_lock, relock, remember_delete, sync_lock, vault_lock, with_sync, with_vault,
+    LAST_DELETE,
+};
 use ymemo_i18n::t;
-
-/// The open vault; one per app process.
-static VAULT: Mutex<Option<Vault>> = Mutex::new(None);
-
-/// The last thing a delete removed, for as long as the UI is offering to put it back.
-///
-/// One slot, like the desktop's: what this stands in for is a confirmation dialog, and the
-/// question a confirmation answers is only ever about the delete that just happened. It is
-/// cleared by [`vault_close`], so a locked vault leaves nothing here — the value holds a
-/// memo's text, and that must not outlive the session that could read it.
-static LAST_DELETE: Mutex<Option<ymemo_core::vault::Deleted>> = Mutex::new(None);
-
-/// Records what a delete removed, so [`memo_undelete`] can offer it back.
-fn remember_delete(removed: Option<ymemo_core::vault::Deleted>) {
-    if let Ok(mut slot) = LAST_DELETE.lock() {
-        *slot = removed;
-    }
-}
-
-fn with_vault<T>(f: impl FnOnce(&mut Vault) -> Result<T>) -> Result<T> {
-    let mut guard = VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))?;
-    let vault = guard.as_mut().ok_or_else(|| anyhow!(t!("core.vault_not_open")))?;
-    f(vault)
-}
 
 /// A memo as handed to Dart; same fields as the core `Memo`.
 pub struct FfiMemo {
@@ -98,15 +78,34 @@ pub struct FfiAttachment {
     /// Top-left corner on the note, in per-mille of the note area (0..=1000 across and down).
     pub x_permille: i64,
     pub y_permille: i64,
-    /// Whether the photo takes a band of its own under the writing instead of lying on top
-    /// of it. False is what every photo was before there was a choice.
-    pub flow: bool,
+    /// How the photo sits against the writing.
+    pub mode: FfiPhotoMode,
+    /// For [`FfiPhotoMode::InWriting`]: how many lines of the body the photo stands after.
+    pub anchor_line: i64,
     pub created_at: i64,
+}
+
+/// How a photo sits against the writing, as the UI needs to draw it.
+///
+/// An enum rather than the two booleans this used to be: there are three places a photo can
+/// be, and a pair of flags can say a fourth thing that does not exist.
+pub enum FfiPhotoMode {
+    /// Lying on the writing, at the corner it was left at.
+    Float,
+    /// In a band of its own under the writing. Not offered any more, but still drawn: memos
+    /// have photos in it, and so do other devices.
+    Flow,
+    /// Standing **in** the writing, in room the memo makes for it.
+    InWriting,
 }
 
 impl From<Attachment> for FfiAttachment {
     fn from(a: Attachment) -> Self {
-        let flow = a.mode() == ymemo_core::PhotoMode::Flow;
+        let mode = match a.mode() {
+            ymemo_core::PhotoMode::Flow => FfiPhotoMode::Flow,
+            ymemo_core::PhotoMode::Inline => FfiPhotoMode::InWriting,
+            ymemo_core::PhotoMode::Float => FfiPhotoMode::Float,
+        };
         Self {
             id: a.id,
             memo_id: a.memo_id,
@@ -118,7 +117,8 @@ impl From<Attachment> for FfiAttachment {
             width_em_milli: a.width_em_milli,
             x_permille: a.x_permille,
             y_permille: a.y_permille,
-            flow,
+            mode,
+            anchor_line: a.anchor_line,
             created_at: a.created_at,
         }
     }
@@ -155,11 +155,6 @@ impl From<Group> for FfiGroup {
 pub fn set_language(code: String) {
     let lang = ymemo_i18n::Lang::parse(&code).unwrap_or_else(ymemo_i18n::system_lang);
     ymemo_i18n::set_lang(lang);
-}
-
-/// Language code currently used for core messages.
-pub fn language() -> String {
-    ymemo_i18n::lang().code().to_string()
 }
 
 /// The mobile UI strings in the current language; Dart fetches these once at startup.
@@ -243,7 +238,6 @@ pub struct FfiStrings {
     pub move_to: String,
     pub history: String,
     pub history_empty: String,
-    pub history_pick: String,
     pub history_restore: String,
     pub history_restored: String,
     pub new_group: String,
@@ -306,7 +300,6 @@ pub struct FfiStrings {
     pub recovery_ack: String,
     pub recovery_code: String,
     pub recovery_hint: String,
-    pub recovery_issued: String,
     pub recovery_present: String,
     pub recovery_prompt: String,
     pub recovery_warning: String,
@@ -409,7 +402,6 @@ pub fn mobile_strings() -> FfiStrings {
         move_to: t!("mobile.move_to"),
         history: t!("mobile.history"),
         history_empty: t!("mobile.history_empty"),
-        history_pick: t!("mobile.history_pick"),
         history_restore: t!("mobile.history_restore"),
         history_restored: t!("mobile.history_restored"),
         new_group: t!("mobile.new_group"),
@@ -469,7 +461,6 @@ pub fn mobile_strings() -> FfiStrings {
         recovery_ack: t!("mobile.recovery_ack"),
         recovery_code: t!("mobile.recovery_code"),
         recovery_hint: t!("mobile.recovery_hint"),
-        recovery_issued: t!("msg.recovery_issued"),
         recovery_present: t!("mobile.recovery_present"),
         recovery_prompt: t!("mobile.recovery_prompt"),
         recovery_warning: t!("mobile.recovery_warning"),
@@ -500,7 +491,7 @@ pub fn mobile_strings() -> FfiStrings {
 pub fn vault_open(vault_dir: String, cache_db_path: String, password: String) -> Result<()> {
     let store = Store::open(&cache_db_path)?;
     let vault = Vault::open_or_create(&vault_dir, password.as_bytes(), store)?;
-    *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = Some(vault);
+    *vault_lock() = Some(vault);
     Ok(())
 }
 
@@ -523,7 +514,7 @@ pub fn vault_set_name(name: String) -> Result<String> {
 
 /// Closes the vault (log out).
 pub fn vault_close() -> Result<()> {
-    *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = None;
+    *vault_lock() = None;
     // A pending undo holds a memo's title and body in memory. A closed vault must leave no
     // memo text behind it, and an undo offered across a lock would put a memo back into a
     // vault the user has just shut.
@@ -589,7 +580,7 @@ pub fn vault_reset(vault_dir: String, cache_db_path: String) -> Result<()> {
     // Scoped so the sync lock is released before the vault lock is taken; the two are
     // reached from different Dart threads and one consistent order is what keeps that safe.
     {
-        let guard = sync_lock()?;
+        let guard = sync_lock();
         if let Some(st) = guard.as_ref() {
             // Wrapped so the message says *nothing was deleted*: a bare REST error here
             // reads like the wipe half-happened, which is the one thing it never does.
@@ -602,7 +593,7 @@ pub fn vault_reset(vault_dir: String, cache_db_path: String) -> Result<()> {
     // The cache is a plaintext copy of everything the vault held, so it goes with it — and so
     // do the sidecars WAL mode keeps beside it, or a reset hands the memos back.
     Store::delete_file(&cache_db_path)?;
-    *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = None;
+    *vault_lock() = None;
     Ok(())
 }
 
@@ -680,16 +671,11 @@ pub fn memo_delete(id: String) -> Result<()> {
 /// ordinary edit on top of it — so two devices acting on the same deletion merge instead of
 /// fighting over it. See `Vault::undelete`.
 pub fn memo_undelete() -> Result<bool> {
-    let Some(deleted) = LAST_DELETE.lock().ok().and_then(|mut slot| slot.take()) else {
+    let Some(deleted) = relock(&LAST_DELETE).take() else {
         return Ok(false);
     };
     with_vault(|v| v.undelete(&deleted))?;
     Ok(true)
-}
-
-/// Whether a delete is still waiting to be taken back.
-pub fn memo_can_undelete() -> bool {
-    LAST_DELETE.lock().map(|slot| slot.is_some()).unwrap_or(false)
 }
 
 /// One past version of a memo, as the phone's history screen shows it.
@@ -801,19 +787,6 @@ pub fn memo_set_color(id: String, color: String) -> Result<()> {
     })
 }
 
-/// Sets the opacity in percent; the core clamps out-of-range values.
-pub fn memo_set_opacity(id: String, opacity: i64) -> Result<()> {
-    with_vault(|v| {
-        let mut memo = v
-            .store()
-            .get(&id)?
-            .ok_or_else(|| anyhow!(t!("core.memo_not_found", id = id)))?;
-        memo.opacity = opacity;
-        memo.updated_at = now_millis();
-        v.upsert(&memo)
-    })
-}
-
 /// Moves a memo into a group; an empty `group_id` moves it to the top level.
 pub fn memo_set_group(id: String, group_id: String) -> Result<()> {
     with_vault(|v| {
@@ -866,11 +839,6 @@ pub fn attachment_has_blob(hash: String) -> Result<bool> {
     with_vault(|v| Ok(v.has_blob(&hash)))
 }
 
-/// Sets the display width in 1/1000 em; other devices see the same proportion.
-pub fn attachment_set_width(id: String, width_em_milli: i64) -> Result<()> {
-    with_vault(|v| v.set_attachment_width(&id, width_em_milli))
-}
-
 /// Sets where the photo sits on the note and how wide it is, in one write.
 ///
 /// The position is a fraction of the note (per-mille) rather than pixels, so a photo dropped
@@ -885,17 +853,37 @@ pub fn attachment_set_layout(
     with_vault(|v| v.set_attachment_layout(&id, x_permille, y_permille, width_em_milli))
 }
 
-/// Moves a photo between lying on the writing and having a band of its own under it.
+/// Puts a photo **into** the writing after `after_line` lines of it, opening `rows` blank
+/// lines to stand in.
 ///
-/// A fact about the memo, not about this device: a photo put in the flow here is out of the
-/// way of the writing on the desktop sticky too.
-pub fn attachment_set_flow(id: String, flow: bool) -> Result<()> {
-    let mode = if flow {
-        ymemo_core::PhotoMode::Flow
-    } else {
-        ymemo_core::PhotoMode::Float
+/// A fact about the memo, not about this device: a photo put into the writing here is in the
+/// writing on the desktop sticky too, at the same words. The room is real blank lines in the
+/// body — see `Vault::place_attachment_in_writing`, which writes both halves together.
+/// Returns the memo's body **after** the room was opened, because that is what the editor on
+/// screen now has to be showing: the writing it is holding is a version of the note without
+/// the gap in it, and saving that back over the top would close the room again.
+pub fn attachment_place_in_writing(id: String, after_line: i64, rows: u32) -> Result<String> {
+    with_vault(|v| {
+        v.place_attachment_in_writing(&id, after_line, rows as usize)?;
+        body_of_attachment(v, &id)
+    })
+}
+
+/// Takes a photo back out of the writing, closing the room it stood in, and lays it on top.
+/// Returns the body without the room, for the same reason as above.
+pub fn attachment_take_out_of_writing(id: String) -> Result<String> {
+    with_vault(|v| {
+        v.take_attachment_out_of_writing(&id, ymemo_core::PhotoMode::Float)?;
+        body_of_attachment(v, &id)
+    })
+}
+
+/// The body of the memo a photo belongs to; empty when either has gone.
+fn body_of_attachment(v: &mut Vault, attachment_id: &str) -> Result<String> {
+    let Some(a) = v.store().get_attachment(attachment_id)? else {
+        return Ok(String::new());
     };
-    with_vault(|v| v.set_attachment_mode(&id, mode))
+    Ok(v.store().get(&a.memo_id)?.map(|m| m.body).unwrap_or_default())
 }
 
 /// Detaches a photo; the blob file stays (no GC).
@@ -1006,23 +994,6 @@ pub fn group_set_color(id: String, color: String) -> Result<()> {
     })
 }
 
-/// Moves a group under another; moving it into its own subtree is rejected.
-pub fn group_move(id: String, parent_id: String) -> Result<()> {
-    with_vault(|v| {
-        let groups = v.store().list_groups()?;
-        if !parent_id.is_empty() && ymemo_core::is_descendant(&groups, &parent_id, &id) {
-            return Err(anyhow!(t!("core.group_cycle")));
-        }
-        let mut group = v
-            .store()
-            .get_group(&id)?
-            .ok_or_else(|| anyhow!(t!("core.group_not_found", id = id)))?;
-        group.parent_id = parent_id;
-        group.updated_at = now_millis();
-        v.upsert_group(&group)
-    })
-}
-
 /// Deletes a group; its memos and subgroups move up instead of being deleted.
 pub fn group_delete(id: String) -> Result<()> {
     let removed = with_vault(|v| v.delete_group(&id))?;
@@ -1044,9 +1015,9 @@ pub fn sync_rebuild() -> Result<()> {
 /// Best effort and silent: it runs after every merge, the daemon may be down, and a failure
 /// here is not something the person reading their memos can act on.
 fn apply_revocations() {
-    let Ok(sync_guard) = sync_lock() else { return };
+    let sync_guard = sync_lock();
     let Some(st) = sync_guard.as_ref() else { return };
-    let Ok(vault_guard) = VAULT.lock() else { return };
+    let vault_guard = vault_lock();
     let Some(v) = vault_guard.as_ref() else { return };
 
     match v.is_revoked_here() {
@@ -1088,19 +1059,6 @@ fn apply_revocations() {
 // open. (If the process is killed outright, `PR_SET_PDEATHSIG` in the core takes the daemon
 // with it, so nothing is left running.)
 
-/// The running daemon, one per app process, like [`VAULT`].
-static SYNC: Mutex<Option<Syncthing>> = Mutex::new(None);
-
-fn sync_lock() -> Result<std::sync::MutexGuard<'static, Option<Syncthing>>> {
-    SYNC.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))
-}
-
-fn with_sync<T>(f: impl FnOnce(&Syncthing) -> Result<T>) -> Result<T> {
-    let guard = sync_lock()?;
-    let st = guard.as_ref().ok_or_else(|| anyhow!(t!("core.sync_not_running")))?;
-    f(st)
-}
-
 /// Another device sharing this vault.
 pub struct FfiSharedDevice {
     /// Syncthing device id — also what unpairing takes.
@@ -1116,7 +1074,7 @@ pub struct FfiSharedDevice {
 /// the device key and can take a few seconds; flutter_rust_bridge runs this off the UI thread
 /// on its own.
 pub fn sync_start(binary_path: String, home_dir: String, vault_dir: String) -> Result<String> {
-    let mut guard = sync_lock()?;
+    let mut guard = sync_lock();
 
     // Holding a handle is not the same as having a daemon: Android kills backgrounded child
     // processes under memory pressure, and nothing tells us when it does. Ask the daemon
@@ -1148,7 +1106,7 @@ pub fn sync_start(binary_path: String, home_dir: String, vault_dir: String) -> R
 /// again once it is up. See `Syncthing::set_my_name` for why the name has to be in place
 /// before a peer first connects.
 pub fn sync_set_device_name(name: String) -> Result<()> {
-    let guard = sync_lock()?;
+    let guard = sync_lock();
     let Some(st) = guard.as_ref() else { return Ok(()) };
     st.set_my_name(&name)
 }
@@ -1160,7 +1118,7 @@ pub fn sync_set_device_name(name: String) -> Result<()> {
 /// until the app was next restarted. Doing nothing when the daemon is down is correct: the
 /// next `sync_start` registers it anyway.
 pub fn sync_ensure_folder(vault_dir: String) -> Result<()> {
-    let guard = sync_lock()?;
+    let guard = sync_lock();
     let Some(st) = guard.as_ref() else { return Ok(()) };
     st.ensure_folder(VAULT_FOLDER_ID, "Ymemo Vault", Path::new(&vault_dir))?;
     st.ensure_introducers(VAULT_FOLDER_ID)
@@ -1174,7 +1132,7 @@ pub fn sync_ensure_folder(vault_dir: String) -> Result<()> {
 ///
 /// Doing nothing while the daemon is down is correct; Dart calls this again once it is up.
 pub fn sync_set_timing(watch_delay_seconds: i32, rescan_seconds: i32) -> Result<()> {
-    let guard = sync_lock()?;
+    let guard = sync_lock();
     let Some(st) = guard.as_ref() else { return Ok(()) };
     st.set_folder_timing(VAULT_FOLDER_ID, watch_delay_seconds, rescan_seconds)
 }
@@ -1184,7 +1142,7 @@ pub fn sync_set_timing(watch_delay_seconds: i32, rescan_seconds: i32) -> Result<
 /// Kept apart from [`sync_set_timing`] because the two are different questions — how fast
 /// syncing is versus how much disk it may keep — and a phone is where the second one bites.
 pub fn sync_set_versioning(keep_days: i32) -> Result<()> {
-    let guard = sync_lock()?;
+    let guard = sync_lock();
     let Some(st) = guard.as_ref() else { return Ok(()) };
     st.set_folder_versioning(VAULT_FOLDER_ID, keep_days)
 }
@@ -1195,7 +1153,7 @@ pub fn sync_set_versioning(keep_days: i32) -> Result<()> {
 /// still be paired over mobile data and starts catching up the moment the phone is back on
 /// an unmetered network.
 pub fn sync_set_paused(paused: bool) -> Result<()> {
-    let guard = sync_lock()?;
+    let guard = sync_lock();
     let Some(st) = guard.as_ref() else { return Ok(()) };
     st.set_folder_paused(VAULT_FOLDER_ID, paused)
 }
@@ -1203,18 +1161,8 @@ pub fn sync_set_paused(paused: bool) -> Result<()> {
 /// Stops the daemon. Safe to call when it is not running.
 pub fn sync_stop() -> Result<()> {
     // Dropping it shuts the daemon down over REST, then kills it if it will not go.
-    *sync_lock()? = None;
+    *sync_lock() = None;
     Ok(())
-}
-
-/// Whether the daemon is up. Cheap: it does not talk to it.
-pub fn sync_running() -> bool {
-    sync_lock().map(|g| g.is_some()).unwrap_or(false)
-}
-
-/// This device's pairing code (`YMEMO1:<device-id>`), for the other device to scan or type.
-pub fn sync_pairing_code() -> Result<String> {
-    with_sync(|st| Ok(PairingCode::new(&st.device_id()?).encode()))
 }
 
 /// Pairs with a scanned or typed code: registers the peer and shares the vault with it.
@@ -1267,19 +1215,6 @@ pub fn sync_unpair(device_id: String) -> Result<()> {
 // device, which is what turns up in `sync_pending_devices`. Allowing one is the same
 // `share_folder_with` the scan side already did, in the other direction.
 
-/// Requests refused during this run of the app.
-///
-/// Syncthing does not remember a refusal — the caller keeps retrying and is filed again —
-/// so the answer is kept here instead. Deliberately in memory and deliberately **not** in
-/// the `Syncthing` handle: mobile stops the daemon every time the app is backgrounded, and
-/// a refusal that expired on the walk back to the app would be no refusal at all. Starting
-/// the app again clears it, so a mis-tapped "reject" is never permanent.
-static REJECTED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
-
-fn rejected_lock() -> Result<std::sync::MutexGuard<'static, Option<HashSet<String>>>> {
-    REJECTED.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))
-}
-
 /// A device asking to be let in.
 pub struct FfiPendingDevice {
     /// Syncthing device id; the handle for approving or rejecting.
@@ -1294,7 +1229,7 @@ pub struct FfiPendingDevice {
 
 /// Requests waiting for an answer, oldest first, minus the ones already rejected.
 pub fn sync_pending_devices() -> Result<Vec<FfiPendingDevice>> {
-    let rejected = rejected_lock()?.clone().unwrap_or_default();
+    let rejected = rejected_lock().clone().unwrap_or_default();
     with_sync(|st| {
         let my_id = st.device_id()?;
         Ok(st
@@ -1316,7 +1251,7 @@ pub fn sync_pending_devices() -> Result<Vec<FfiPendingDevice>> {
 /// nothing to clear afterwards.
 pub fn sync_approve_device(device_id: String) -> Result<()> {
     // An id that was rejected and then approved must not stay filtered out of the list.
-    if let Some(set) = rejected_lock()?.as_mut() {
+    if let Some(set) = rejected_lock().as_mut() {
         set.remove(&device_id);
     }
     with_sync(|st| st.share_folder_with(VAULT_FOLDER_ID, &device_id))?;
@@ -1328,7 +1263,7 @@ pub fn sync_approve_device(device_id: String) -> Result<()> {
 
 /// Turns a device away and stops asking about it for the rest of this run.
 pub fn sync_reject_device(device_id: String) -> Result<()> {
-    rejected_lock()?.get_or_insert_with(HashSet::new).insert(device_id.clone());
+    rejected_lock().get_or_insert_with(HashSet::new).insert(device_id.clone());
     // Best effort: the local answer is what actually silences the prompt, and a daemon that
     // has already gone away has no list to clear.
     let _ = with_sync(|st| st.dismiss_pending_device(&device_id));
@@ -1357,13 +1292,6 @@ pub fn sync_verification_code(peer_device_id: String) -> Result<String> {
 // "pairing mode", and on a phone it also keeps a UDP socket and a wifi multicast lock from
 // sitting there all day.
 
-/// The pairing-mode listener, alive only while the screen is open.
-static LAN: Mutex<Option<lan_pair::PairListener>> = Mutex::new(None);
-
-fn lan_lock() -> Result<std::sync::MutexGuard<'static, Option<lan_pair::PairListener>>> {
-    LAN.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))
-}
-
 /// Registers a peer learnt over LAN with the running daemon.
 ///
 /// Kept separate so the LAN lock is never held while the sync lock is taken — the two are
@@ -1377,7 +1305,7 @@ fn share_with_peer(peer_id: &str) -> Result<()> {
 /// purpose is to hand over its device id.
 pub fn lan_start() -> Result<String> {
     let device_id = with_sync(|st| st.device_id())?;
-    let mut guard = lan_lock()?;
+    let mut guard = lan_lock();
     if guard.is_none() {
         *guard = Some(lan_pair::PairListener::start(device_id)?);
     }
@@ -1386,12 +1314,12 @@ pub fn lan_start() -> Result<String> {
 
 /// The code currently on offer. It rotates every minute, so the screen re-reads it.
 pub fn lan_code() -> Result<Option<String>> {
-    Ok(lan_lock()?.as_ref().map(|l| l.code()))
+    Ok(lan_lock().as_ref().map(|l| l.code()))
 }
 
 /// Leaves pairing mode: the socket closes and the code stops being answered.
 pub fn lan_stop() -> Result<()> {
-    *lan_lock()? = None;
+    *lan_lock() = None;
     Ok(())
 }
 
@@ -1399,7 +1327,7 @@ pub fn lan_stop() -> Result<()> {
 /// each. Returns their ids, for the screen to report. Poll it while pairing mode is on.
 pub fn lan_poll_paired() -> Result<Vec<String>> {
     let peers: Vec<String> = {
-        let guard = lan_lock()?;
+        let guard = lan_lock();
         let Some(listener) = guard.as_ref() else { return Ok(Vec::new()) };
         std::iter::from_fn(|| listener.next_paired_peer()).collect()
     };
@@ -1426,6 +1354,7 @@ pub fn lan_join(code: String, timeout_secs: u64) -> Result<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     /// The vault is process-global, so tests that open one would clobber each other in
     /// parallel; they take this lock instead. A poisoned lock is reused as-is, since it only
@@ -1523,9 +1452,6 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].width_em_milli, ymemo_core::DEFAULT_WIDTH_EM_MILLI);
 
-        attachment_set_width(a.id.clone(), 6_000).unwrap();
-        assert_eq!(attachment_list(memo_id.clone()).unwrap()[0].width_em_milli, 6_000);
-
         // Moving and resizing at once is one call, and comes back on the next list.
         attachment_set_layout(a.id.clone(), 250, 750, 12_000).unwrap();
         let placed = &attachment_list(memo_id.clone()).unwrap()[0];
@@ -1548,12 +1474,12 @@ mod tests {
     fn rejecting_works_without_a_running_daemon() {
         let id = format!("TESTDEV-{}", uuid_like());
         sync_reject_device(id.clone()).unwrap();
-        assert!(rejected_lock().unwrap().as_ref().is_some_and(|s| s.contains(&id)));
+        assert!(rejected_lock().as_ref().is_some_and(|s| s.contains(&id)));
 
         // Approving the same device has to lift the refusal, or a change of mind would leave
         // it filtered out of the list forever.
         let _ = sync_approve_device(id.clone());
-        assert!(!rejected_lock().unwrap().as_ref().is_some_and(|s| s.contains(&id)));
+        assert!(!rejected_lock().as_ref().is_some_and(|s| s.contains(&id)));
     }
 
     fn uuid_like() -> String {
@@ -1682,7 +1608,7 @@ pub fn settings_load(path: String) -> FfiSettings {
 pub fn settings_save(path: String, settings: FfiSettings) -> Result<FfiSettings> {
     let mut settings = settings;
     settings.sanitize();
-    std::fs::write(&path, serde_json::to_vec_pretty(&settings)?)?;
+    ymemo_core::fsutil::write_atomic(std::path::Path::new(&path), &serde_json::to_vec_pretty(&settings)?)?;
     Ok(settings)
 }
 
@@ -1714,7 +1640,7 @@ pub fn vault_open_with_key(vault_dir: String, cache_db_path: String, key: Vec<u8
         .map_err(|_| anyhow!(t!("core.session_key_bad")))?;
     let store = Store::open(&cache_db_path)?;
     let vault = Vault::open_with_key(&vault_dir, ymemo_core::crypto::MasterKey::from_bytes(&bytes)?, store)?;
-    *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = Some(vault);
+    *vault_lock() = Some(vault);
     Ok(())
 }
 

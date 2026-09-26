@@ -64,9 +64,9 @@ export component SecurityWindow inherits Window {
     callback close-requested();
 
     // Cleared by Rust after a successful change, so the passwords do not linger on screen.
-    in-out property <string> current-pw;
-    in-out property <string> new-pw;
-    in-out property <string> confirm-pw;
+    property <string> current-pw;
+    property <string> new-pw;
+    property <string> confirm-pw;
     public function clear-passwords() {
         root.current-pw = "";
         root.new-pw = "";

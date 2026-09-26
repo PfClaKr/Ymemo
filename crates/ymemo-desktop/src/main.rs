@@ -13,22 +13,12 @@
 //! Closing every window leaves the app in the tray (`run_event_loop_until_quit`); only the
 //! tray menu quits.
 
-
-use ymemo_core::diag;
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use slint::{ComponentHandle, ModelRc, SharedString, TimerMode, VecModel};
-use ymemo_core::{
-    crypto::MasterKey, history::Entity, lan_pair, now_millis, pairing::PairingCode,
-    sync::Syncthing, vault::Vault, Store,
-};
-
-use settings::Settings;
-use ymemo_i18n::t;
+use slint::{ComponentHandle, ModelRc};
+use ymemo_core::{diag, sync::Syncthing, vault::Vault};
 
 slint::include_modules!();
 
@@ -45,164 +35,29 @@ mod list;
 mod lock;
 mod markdown;
 mod pairing;
+mod screens;
 mod security;
+mod session;
 mod settings;
+mod settings_window;
+mod startup;
 mod state;
 mod sticky;
 mod sync;
+mod timers;
 mod tray;
 mod update;
 mod window;
 
-use icon::set_window_icon;
-use list::{move_row, refresh_list};
-use lock::{
-    apply_lang, apply_opened_vault, fill_settings_window, lock_now, reset_vault,
-    start_unlock_session,
-};
-use pairing::qr_image;
-use state::{touch, AppUi, Ctx, APP};
-use sticky::{close_sticky, new_memo, open_sticky, snap_tick, GEOMETRY_INTERVAL, SNAP_INTERVAL};
-use sync::{start_merge_timer, start_syncthing, SYNC_FOLDER_ID};
-
+use state::{AppUi, Ctx, Ui, APP};
+use sync::{start_merge_timer, start_syncthing};
 use window::present;
 
-/// How often idleness is checked; fine-grained enough against a setting in minutes.
-const IDLE_CHECK_INTERVAL: Duration = Duration::from_secs(20);
-
-/// How long a delete can be taken back for.
-///
-/// Long enough to notice the wrong row went, short enough that the bar is not still offering
-/// to undo something the user has since forgotten doing. The memo is really gone from the
-/// document the whole time — this is an offer to write it back, not a pending deletion — so
-/// nothing about the timing risks the vault or the other devices.
-const UNDO_WINDOW: Duration = Duration::from_secs(30);
-
-
-/// Picks the Slint renderer; call once before creating any window.
-///
-/// The default renderer (femtovg) needs OpenGL 2.0+, but Windows machines often have no GPU
-/// driver or only legacy GL 1.1 under a VM or RDP, where even `glCreateShader` is missing.
-/// So Windows defaults to the CPU renderer, which is plenty for this UI. Override with
-/// `YMEMO_RENDERER=femtovg|software|skia`. Linux and macOS keep the default.
-/// Whether the kernel is offering a device that GL could be accelerated on.
-///
-/// Always true off Linux, where the question is asked differently and answered above.
-fn has_render_device() -> bool {
-    if !cfg!(target_os = "linux") {
-        return true;
-    }
-    // An empty `/dev/dri` counts as none: the directory outlives the driver that filled it.
-    std::fs::read_dir("/dev/dri").is_ok_and(|mut entries| entries.any(|e| e.is_ok()))
-}
-
-fn select_renderer() {
-    let name = match std::env::var("YMEMO_RENDERER") {
-        Ok(n) if !n.is_empty() => n,
-        _ if cfg!(windows) => "software".to_string(),
-        // Linux with no rendering device: Mesa has nothing to fall back to but `swrast`,
-        // and that is not a renderer this app survives. Measured on a machine with no
-        // `/dev/dri` — a VM, a container, an X session forwarded from elsewhere: the fourth
-        // sticky window aborts the process with `malloc(): unsorted double linked list
-        // corrupted`, inside `swrast_dri.so`, under the `glTexSubImage2D` that femtovg uses
-        // to add a glyph to its atlas. Nothing above it can catch that. Slint's own software
-        // renderer draws the same UI without a GL context at all, which is the route Windows
-        // already takes for the same reason.
-        //
-        // Only the plain absence of a device is taken as the signal. A box that has one and
-        // still lands on llvmpipe keeps the default, and `YMEMO_RENDERER=femtovg` overrides
-        // either way.
-        _ if !has_render_device() => "software".to_string(),
-        _ => return, // keep the default where GL works
-    };
-    match i_slint_backend_winit::Backend::builder()
-        .with_renderer_name(name.as_str())
-        .build()
-    {
-        Ok(backend) => {
-            if let Err(e) = slint::platform::set_platform(Box::new(backend)) {
-                diag!("could not select renderer '{name}', continuing with the default: {e:?}");
-            }
-        }
-        Err(e) => diag!("could not build the '{name}' backend, continuing with the default: {e}"),
-    }
-}
-
-/// Platform data directory, e.g. ~/.local/share/ymemo on Linux, %APPDATA%\ymemo\Ymemo\data
-/// on Windows — or whatever `YMEMO_DATA_DIR` names.
-///
-/// Only the path; nothing is created. `--quit` and `--purge` run before the directory should
-/// exist, and creating it on the way to deleting it is how `--purge` used to report success
-/// on a machine that had nothing left to delete.
-///
-/// The override exists because on Windows the default is not a path but a known folder id,
-/// so there is otherwise no way to run a build against anything but the one real vault on
-/// the machine. It also gives a portable install somewhere to put its data.
-fn data_dir() -> std::path::PathBuf {
-    if let Some(dir) = std::env::var_os("YMEMO_DATA_DIR").filter(|v| !v.is_empty()) {
-        return std::path::PathBuf::from(dir);
-    }
-    match directories::ProjectDirs::from("dev", "ymemo", "Ymemo") {
-        Some(dirs) => dirs.data_dir().to_path_buf(),
-        // Last resort for a machine with no home directory at all.
-        None => std::path::PathBuf::from("."),
-    }
-}
-
-/// Deletes this device's data directory: vault, cache, session, settings and the sync
-/// daemon's own configuration.
-///
-/// The running instance is stopped first, and not only because it holds the cache open:
-/// Syncthing propagates deletions, so removing the vault while the daemon still carries it
-/// would empty the memos on every paired device too. If the app will not quit, nothing is
-/// deleted. Copies on other devices are never touched.
-fn purge(dir: &std::path::Path) -> Result<()> {
-    // Never act on data_dir()'s fallback: deleting the working directory is not something to
-    // do on one's own initiative.
-    if dir == std::path::Path::new(".") {
-        anyhow::bail!("no data directory to delete on this platform");
-    }
-    // Before asking anything to quit: the lock file the check needs lives in this very
-    // directory, so an absent one can hold neither data nor a running instance.
-    if !dir.exists() {
-        println!("nothing to delete: {}", dir.display());
-        return Ok(());
-    }
-    // Returns true when the lock is free, so a machine with nothing running passes too.
-    if !instance::quit_running(dir) {
-        anyhow::bail!("Ymemo is still running; close it and try again");
-    }
-    std::fs::remove_dir_all(dir)?;
-    println!("deleted {}", dir.display());
-    Ok(())
-}
-
 fn main() -> Result<()> {
-    // Magnetic snapping needs to read and set window coordinates, which native Wayland
-    // forbids; with XWayland available, drop WAYLAND_DISPLAY so winit takes X11.
-    // YMEMO_FORCE_WAYLAND=1 keeps Wayland and loses snapping.
-    if std::env::var_os("YMEMO_FORCE_WAYLAND").is_none() && std::env::var_os("DISPLAY").is_some() {
-        std::env::remove_var("WAYLAND_DISPLAY");
-    }
-
-    let dir = data_dir();
-
-    // `ymemo --quit` is not a session, it is a message: tell a running instance to save and
-    // exit, wait for it, and return. Installers and package scripts use it to get the app and
-    // its sync daemon out of the way without killing them (see packaging/).
-    if std::env::args().skip(1).any(|a| a == "--quit") {
-        return if instance::quit_running(&dir) {
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("Ymemo did not quit within the timeout"))
-        };
-    }
-
-    // `ymemo --purge` deletes everything this device stores and exits. It is what the
-    // Windows uninstaller offers on the way out, and the only way to do the same on Linux,
-    // where a package may not touch a user's home directory.
-    if std::env::args().skip(1).any(|a| a == "--purge") {
-        return purge(&dir);
+    startup::prefer_x11();
+    let dir = startup::data_dir();
+    if let Some(result) = startup::run_command(&dir) {
+        return result;
     }
 
     // Only one instance per user: a second one would run a second sync daemon over the same
@@ -214,12 +69,8 @@ fn main() -> Result<()> {
     // From here on, everything that reports a failure also reaches <data_dir>/ymemo.log. A
     // release build has `windows_subsystem = "windows"` and so no console at all, which is
     // exactly the platform a bug report is most likely to come from.
-    diag::init(&dir);
-    diag!(
-        "--- ymemo {} starting on {} ---",
-        env!("CARGO_PKG_VERSION"),
-        std::env::consts::OS
-    );
+    ymemo_core::diag::init(&dir);
+    diag!("--- ymemo {} starting on {} ---", env!("CARGO_PKG_VERSION"), std::env::consts::OS);
 
     let Some(_instance) = instance::acquire(&dir) else {
         instance::send_show(&dir); // hand the running one the foreground instead
@@ -228,821 +79,100 @@ fn main() -> Result<()> {
     };
     instance::serve(&dir);
 
-    select_renderer();
+    startup::select_renderer();
 
-    let lock = LockWindow::new()?;
-    let list = ListWindow::new()?;
+    // The settings, security, history and approval windows are built once and only shown or
+    // hidden; rebuilding them would reset their position every time. The approval window has
+    // to be able to appear while every other window is closed, since the app otherwise lives
+    // in the tray.
+    let ui = Ui {
+        lock: LockWindow::new()?,
+        list: ListWindow::new()?,
+        settings: SettingsWindow::new()?,
+        security: SecurityWindow::new()?,
+        history: HistoryWindow::new()?,
+        approve: ApproveWindow::new()?,
+    };
 
     // Syncthing starts before unlocking (it needs no key), so a new device can pair first,
     // receive vault.json and the logs, and only then be asked for the password.
     let vault_dir = dir.join("vault");
     let _ = std::fs::create_dir_all(&vault_dir);
     let st = start_syncthing(&dir, &vault_dir);
-    let mut my_device_id: Option<String> = None;
-    if let Some(st) = &st {
-        match st.device_id() {
-            Ok(id) => {
-                let code = PairingCode::new(&id).encode();
-                if let Some(img) = qr_image(&code) {
-                    lock.set_qr_image(img);
-                }
-                if let Some(img) = qr_image(&code) {
-                    list.set_qr_image(img);
-                }
-                lock.set_my_pairing_code(SharedString::from(code.clone()));
-                list.set_my_pairing_code(SharedString::from(code));
-                lock.set_sync_available(true);
-                list.set_sync_available(true);
-                my_device_id = Some(id);
-            }
-            Err(e) => diag!("could not read the device id: {e}"),
-        }
-    }
+    let my_device_id = st.as_ref().and_then(|st| pairing::show_own_code(st, &ui.lock, &ui.list));
     // Dropping this on exit shuts the daemon down.
     let syncthing: Rc<RefCell<Option<Syncthing>>> = Rc::new(RefCell::new(st));
+    let lan = pairing::start_lan(my_device_id.as_ref());
 
-    // LAN pairing listener: swaps device ids over a 6-digit code, only once our own id is
-    // known, since that is what it answers with.
-    let lan = my_device_id
-        .as_ref()
-        .and_then(|id| match lan_pair::PairListener::start(id.clone()) {
-            Ok(l) => Some(Rc::new(l)),
-            Err(e) => {
-                diag!("LAN pairing unavailable, continuing without it: {e}");
-                None
-            }
-        });
-
-    let mut loaded = Settings::load(&dir);
-    loaded.sanitize();
-    // `ensure_folder` above only configures a folder it had to create, so on every run after
-    // the first this is what carries the user's timings to the daemon.
-    if let Some(st) = syncthing.borrow().as_ref() {
-        if let Err(e) =
-            st.set_folder_timing(SYNC_FOLDER_ID, loaded.watch_delay_seconds, loaded.rescan_seconds)
-        {
-            diag!("could not apply the sync timing: {e}");
-        }
-        // A safety net under the logs, not the memo history — see the core's docs.
-        if let Err(e) = st.set_folder_versioning(SYNC_FOLDER_ID, loaded.keep_versions_days) {
-            diag!("could not apply the version retention: {e}");
-        }
-    }
-    let ctx = Ctx {
-        vault: Rc::new(RefCell::new(None)),
-        model: Rc::new(VecModel::from(Vec::<ListRow>::new())),
-        stickies: Rc::new(RefCell::new(HashMap::new())),
-        collapsed: Rc::new(RefCell::new(HashSet::new())),
-        query: Rc::new(RefCell::new(String::new())),
-        undo: Rc::new(RefCell::new(None)),
-        undo_timer: Rc::new(slint::Timer::default()),
-        syncthing: syncthing.clone(),
-        dir: Rc::new(dir.clone()),
-        settings: Rc::new(RefCell::new(loaded)),
-        last_activity: Rc::new(Cell::new(Instant::now())),
-        // Answered below, once the tray has had its go.
-        has_tray: Rc::new(Cell::new(false)),
-        quiet_start: Rc::new(Cell::new(autostart::launched_hidden())),
-    };
-    list.set_rows(ModelRc::from(ctx.model.clone()));
+    let ctx = Ctx::new(dir.clone(), startup::load_settings(&dir, &syncthing), syncthing.clone());
+    ui.list.set_rows(ModelRc::from(ctx.model.clone()));
     let unlocked = Rc::new(Cell::new(false));
 
-    // The settings and security windows are built once and only shown or hidden; rebuilding
-    // them would reset their position every time.
-    let settings_win = SettingsWindow::new()?;
-    let security_win = SecurityWindow::new()?;
-    let history_win = HistoryWindow::new()?;
-    // Built up front and only shown when a request arrives: it has to be able to appear
-    // while every other window is closed, since the app otherwise lives in the tray.
-    let approve_win = ApproveWindow::new()?;
-    apply_lang(&ctx, &lock, &list, &settings_win, &security_win, &history_win, &approve_win);
-    security::wire(&ctx, &settings_win, &security_win);
+    settings_window::apply_lang(
+        &ctx,
+        &ui.lock,
+        &ui.list,
+        &ui.settings,
+        &ui.security,
+        &ui.history,
+        &ui.approve,
+    );
+    security::wire(&ctx, &ui.settings, &ui.security);
 
-    // ---- Past versions of a memo or folder. ----
+    // Past versions of a memo or folder.
     let history_subject: history::Subject = Rc::new(RefCell::new(None));
-    history::wire(&ctx, &history_win, &history_subject);
-    {
-        let ctx = ctx.clone();
-        let win = history_win.as_weak();
-        let subject = history_subject.clone();
-        list.on_show_history(move |id, is_group| {
-            touch(&ctx);
-            let Some(w) = win.upgrade() else { return };
-            let entity = if is_group { Entity::Group } else { Entity::Memo };
-            history::show(&ctx, &w, &subject, entity, &id);
-        });
-    }
+    history::wire(&ctx, &ui.history, &history_subject);
+    history::wire_list(&ctx, &ui.list, &ui.history, &history_subject);
 
     // First run? A vault.json means an existing vault (unlock); without one this is a new
     // device (create, or link to an existing one). Without the distinction a new device
     // would create a vault with its own salt before pairing delivers vault.json, and the
     // keys would diverge.
     let vault_exists = vault_dir.join("vault.json").exists();
-    lock.set_vault_exists(vault_exists);
-    lock.set_has_recovery(ymemo_core::vault::recovery_code_exists(&vault_dir));
+    ui.lock.set_vault_exists(vault_exists);
+    ui.lock.set_has_recovery(ymemo_core::vault::recovery_code_exists(&vault_dir));
 
     // A vault created on this device waits here while its recovery code is on screen: it is
     // opened only once the user confirms they wrote the code down.
     let pending_vault: Rc<RefCell<Option<Vault>>> = Rc::new(RefCell::new(None));
-
-    // ---- Stay unlocked: a valid session key skips the password prompt. ----
-    // On any failure (wrong key, damaged cache, diverged key) the session is dropped and the
-    // lock screen comes up.
-    let auto_unlocked = vault_exists
-        && settings::load_session(&dir).is_some_and(|key_bytes| {
-            let opened = MasterKey::from_bytes(&key_bytes)
-                .and_then(|key| {
-                    let store = Store::open(dir.join("ymemo.db"))?;
-                    Vault::open_with_key(vault_dir.clone(), key, store)
-                });
-            match opened {
-                Ok(v) => {
-                    apply_opened_vault(v, &ctx, &lock, &list.as_weak(), &unlocked);
-                    true
-                }
-                Err(e) => {
-                    diag!("could not unlock from the session, asking for the password: {e}");
-                    settings::clear_session(&dir);
-                    false
-                }
-            }
-        });
-
+    let auto_unlocked = vault_exists && lock::unlock_from_session(&ctx, &ui, &unlocked, &vault_dir);
     // Whether the vault on disk was made on this device. The watcher in `pairing` uses it to
     // tell a header that arrived over sync from one this device just wrote itself.
     let created_here: Rc<Cell<bool>> = Rc::new(Cell::new(false));
 
-    // ---- Lock window: open an existing vault, or create one. ----
-    {
-        let ctx = ctx.clone();
-        let lock_weak = lock.as_weak();
-        let list_weak = list.as_weak();
-        let unlocked = unlocked.clone();
-        let dir = dir.clone();
-        // Open: derive the key from vault.json's salt; a diverged key heals inside open.
-        // **Never fall back to create** — that is what made keys diverge in the first place.
-        lock.on_unlock(move |password| {
-            let lock = lock_weak.unwrap();
-            if password.is_empty() {
-                lock.set_lock_message(t!("msg.enter_password").into());
-                return;
-            }
-            let store = match Store::open(dir.join("ymemo.db")) {
-                Ok(s) => s,
-                Err(e) => {
-                    lock.set_lock_message(SharedString::from(t!("msg.cache_open_failed", error = e)));
-                    return;
-                }
-            };
-            // Argon2id blocks the UI for a few hundred ms, but only on the lock screen.
-            match Vault::open(dir.join("vault"), password.as_bytes(), store) {
-                Ok(v) => {
-                    start_unlock_session(&ctx, &v);
-                    apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked);
-                }
-                Err(e) => lock.set_lock_message(SharedString::from(format!("{e}"))),
-            }
-        });
-    }
-    {
-        let ctx = ctx.clone();
-        let lock_weak = lock.as_weak();
-        let list_weak = list.as_weak();
-        let unlocked = unlocked.clone();
-        let dir = dir.clone();
-        let syncthing = syncthing.clone();
-        let pending_vault = pending_vault.clone();
-        let created_here = created_here.clone();
-        // Create: only on a device starting fresh. The salt is generated exactly here.
-        lock.on_create_vault(move |password| {
-            let lock = lock_weak.unwrap();
-            if password.is_empty() {
-                lock.set_lock_message(t!("msg.enter_new_password").into());
-                return;
-            }
-            let store = match Store::open(dir.join("ymemo.db")) {
-                Ok(s) => s,
-                Err(e) => {
-                    lock.set_lock_message(SharedString::from(t!("msg.cache_open_failed", error = e)));
-                    return;
-                }
-            };
-            match Vault::open_or_create(dir.join("vault"), password.as_bytes(), store) {
-                Ok(v) => {
-                    created_here.set(true);
-                    // Register the folder here as well as at startup: a reset removes it
-                    // deliberately, and this is the first vault that follows one.
-                    if let Some(st) = syncthing.borrow().as_ref() {
-                        if let Err(e) =
-                            st.ensure_folder(SYNC_FOLDER_ID, "Ymemo Vault", &dir.join("vault"))
-                        {
-                            diag!("could not register the shared folder: {e}");
-                        }
-                    }
-                    start_unlock_session(&ctx, &v);
-                    // Show the recovery code before anything else; the vault waits in
-                    // `pending_vault` until the user confirms they have written it down.
-                    match v.issue_recovery_code() {
-                        Ok(code) => {
-                            lock.set_lock_message(SharedString::new());
-                            lock.set_new_recovery_code(SharedString::from(code));
-                            *pending_vault.borrow_mut() = Some(v);
-                        }
-                        // A vault without a recovery code still works, so this never blocks
-                        // the user out of the app they just set up.
-                        Err(e) => {
-                            diag!("could not issue a recovery code: {e}");
-                            lock.set_vault_exists(true);
-                            apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked);
-                        }
-                    }
-                }
-                Err(e) => lock.set_lock_message(SharedString::from(format!("{e}"))),
-            }
-        });
-    }
+    lock::wire(&ctx, &ui, &unlocked, &syncthing, &pending_vault, &created_here);
+    list::actions::wire(&ctx, &ui, &unlocked);
 
-    // ---- Size the window to whichever panel is on it. ----
-    // Every panel here has its own size and `lock.slint` knows them all; this only applies
-    // what it asks for.
-    {
-        let weak = lock.as_weak();
-        lock.on_resize(move |w, h| {
-            if let Some(win) = weak.upgrade() {
-                win.window().set_size(slint::LogicalSize::new(w, h));
-            }
-        });
-    }
-
-    // ---- Recovery code written down: open the vault that was waiting for it. ----
-    {
-        let ctx = ctx.clone();
-        let lock_weak = lock.as_weak();
-        let list_weak = list.as_weak();
-        let unlocked = unlocked.clone();
-        let pending_vault = pending_vault.clone();
-        lock.on_recovery_ack(move || {
-            let Some(v) = pending_vault.borrow_mut().take() else { return };
-            let lock = lock_weak.unwrap();
-            lock.set_new_recovery_code(SharedString::new());
-            lock.set_vault_exists(true);
-            lock.set_has_recovery(true);
-            apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked);
-        });
-    }
-
-    // ---- Forgotten password: the recovery code sets a new one. ----
-    {
-        let ctx = ctx.clone();
-        let lock_weak = lock.as_weak();
-        let list_weak = list.as_weak();
-        let unlocked = unlocked.clone();
-        let dir = dir.clone();
-        lock.on_recover(move |code, new_password| {
-            let lock = lock_weak.unwrap();
-            let vault_dir = dir.join("vault");
-            // Only the header is rewritten, so a wrong code costs one Argon2id run and
-            // leaves the vault exactly as it was.
-            if let Err(e) = ymemo_core::vault::reset_password_with_recovery(
-                &vault_dir,
-                &code,
-                new_password.as_bytes(),
-            ) {
-                lock.set_lock_message(SharedString::from(format!("{e}")));
-                return;
-            }
-            let store = match Store::open(dir.join("ymemo.db")) {
-                Ok(s) => s,
-                Err(e) => {
-                    lock.set_lock_message(SharedString::from(t!("msg.cache_open_failed", error = e)));
-                    return;
-                }
-            };
-            match Vault::open(&vault_dir, new_password.as_bytes(), store) {
-                Ok(v) => {
-                    start_unlock_session(&ctx, &v);
-                    lock.invoke_leave_recovery();
-                    lock.set_lock_message(SharedString::new());
-                    apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked);
-                }
-                Err(e) => lock.set_lock_message(SharedString::from(format!("{e}"))),
-            }
-        });
-    }
-
-    // ---- Forgotten password, no recovery code: wipe and start over. ----
-    {
-        let ctx = ctx.clone();
-        let lock_weak = lock.as_weak();
-        let syncthing = syncthing.clone();
-        lock.on_reset_vault(move || {
-            let lock = lock_weak.unwrap();
-            match reset_vault(&ctx, &syncthing) {
-                Ok(()) => {
-                    lock.invoke_leave_recovery();
-                    lock.invoke_clear_password();
-                    lock.set_vault_exists(false);
-                    lock.set_has_recovery(false);
-                    lock.set_lock_message(SharedString::from(t!("msg.reset_done")));
-                }
-                Err(e) => {
-                    lock.set_lock_message(SharedString::from(t!("msg.reset_failed", error = e)))
-                }
-            }
-        });
-    }
-
-    // ---- List window: open, add, delete. ----
-    {
-        let ctx = ctx.clone();
-        list.on_open_memo(move |id| {
-            touch(&ctx);
-            let memo = {
-                let guard = ctx.vault.borrow();
-                let Some(v) = guard.as_ref() else { return };
-                match v.store().get(&id) {
-                    Ok(Some(m)) => m,
-                    _ => return,
-                }
-            };
-            if let Err(e) = open_sticky(&ctx, &memo, false) {
-                diag!("could not open the sticky window: {e}");
-            }
-        });
-    }
-    {
-        let ctx = ctx.clone();
-        list.on_new_memo(move || new_memo(&ctx));
-    }
-    {
-        let ctx = ctx.clone();
-        list.on_new_memo_in(move |group| sticky::new_memo_in(&ctx, group.as_str()));
-    }
-    // ---- Delete, and the offer to take it back. ----
-    //
-    // Deleting is the only thing in this app that loses writing, and a deleted memo cannot be
-    // reached through its own history either — the row it would be opened from is the row
-    // that just went away. What stands in for a confirmation is the bar this puts at the top
-    // of the list: the delete happens immediately, which is right for the many that were
-    // meant, and the one that was not is one click away for the next thirty seconds.
-    {
-        let ctx = ctx.clone();
-        let list_weak = list.as_weak();
-        let undo = ctx.undo.clone();
-        let undo_timer = ctx.undo_timer.clone();
-        list.on_delete_row(move |id, is_group| {
-            touch(&ctx);
-            let removed = {
-                let mut guard = ctx.vault.borrow_mut();
-                let Some(v) = guard.as_mut() else { return };
-                // Deleting a group lifts its contents instead of removing them.
-                let res = if is_group { v.delete_group(&id) } else { v.delete(&id) };
-                let removed = match res {
-                    Ok(removed) => removed,
-                    Err(e) => {
-                        diag!("delete failed: {e}");
-                        list::report_write_failure(&e);
-                        return;
-                    }
-                };
-                refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
-                removed
-            };
-            if !is_group {
-                close_sticky(&ctx.stickies, id.as_str()); // clean up an open sticky
-                // Drop its pin and its window too, or settings.json accumulates the ids of
-                // memos that no longer exist. Only a local delete can do this; one that
-                // arrives over sync leaves its entry behind, which costs a string and nothing
-                // else. Deliberately *not* undone by the undo below: a note put back belongs
-                // where the desk has room, not necessarily under whatever is there now.
-                let mut settings = ctx.settings.borrow_mut();
-                let changed = settings.forget_memo(id.as_str());
-                if changed {
-                    settings.save(&ctx.dir);
-                }
-            }
-            let Some(removed) = removed else { return };
-            *undo.borrow_mut() = Some(removed);
-            if let Some(list) = list_weak.upgrade() {
-                list.set_undo_message(SharedString::from(if is_group {
-                    t!("ui.list_deleted_group")
-                } else {
-                    t!("ui.list_deleted_memo")
-                }));
-            }
-            // The offer expires: a bar that never goes away is furniture, and one still
-            // sitting there tomorrow says nothing about what it would put back.
-            let list_weak = list_weak.clone();
-            let undo = undo.clone();
-            undo_timer.start(TimerMode::SingleShot, UNDO_WINDOW, move || {
-                *undo.borrow_mut() = None;
-                if let Some(list) = list_weak.upgrade() {
-                    list.set_undo_message(SharedString::new());
-                }
-            });
-        });
-    }
-    {
-        let ctx = ctx.clone();
-        let list_weak = list.as_weak();
-        let undo = ctx.undo.clone();
-        let undo_timer = ctx.undo_timer.clone();
-        list.on_undo_delete(move || {
-            touch(&ctx);
-            let Some(deleted) = undo.borrow_mut().take() else { return };
-            undo_timer.stop();
-            if let Some(list) = list_weak.upgrade() {
-                list.set_undo_message(SharedString::new());
-            }
-            let mut guard = ctx.vault.borrow_mut();
-            let Some(v) = guard.as_mut() else { return };
-            if let Err(e) = v.undelete(&deleted) {
-                diag!("undo failed: {e}");
-                list::report_write_failure(&e);
-                return;
-            }
-            refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
-        });
-    }
-
-    // ---- Find. The model is rebuilt from the query, so every later refresh honours it. ----
-    {
-        let ctx = ctx.clone();
-        list.on_search(move |query| {
-            touch(&ctx);
-            *ctx.query.borrow_mut() = query.to_string();
-            let mut guard = ctx.vault.borrow_mut();
-            let Some(v) = guard.as_mut() else { return };
-            refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
-        });
-    }
-
-    // ---- Groups: create, expand/collapse, rename, drag to move. ----
-    {
-        let ctx = ctx.clone();
-        let list_weak = list.as_weak();
-        list.on_new_group(move || {
-            touch(&ctx);
-            list::clear_search(&ctx);
-            let group = ymemo_core::Group::new(t!("msg.new_group_name"));
-            {
-                let mut guard = ctx.vault.borrow_mut();
-                let Some(v) = guard.as_mut() else { return };
-                if let Err(e) = v.upsert_group(&group) {
-                    diag!("could not create the group: {e}");
-                    list::report_write_failure(&e);
-                    return;
-                }
-                refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
-            }
-            // Go straight into rename mode so the user can type.
-            if let Some(w) = list_weak.upgrade() {
-                w.set_editing_text(SharedString::from(group.name.clone()));
-                w.set_editing_id(SharedString::from(group.id.clone()));
-                // Escape in that box un-makes it; see `fresh-group-id` in `list.slint`.
-                w.set_fresh_group_id(SharedString::from(group.id));
-            }
-        });
-    }
-    // ---- A folder made and immediately backed out of. ----
-    {
-        let ctx = ctx.clone();
-        list.on_discard_group(move |id| {
-            touch(&ctx);
-            // **On the next event-loop turn**, not now. This is called from the key handler of
-            // the name box inside the row being removed, and rebuilding the model here tears
-            // that box down while it is still handling its own key — which panics inside the
-            // generated code. Same reason `close_sticky` defers dropping a window.
-            let ctx = ctx.clone();
-            slint::Timer::single_shot(Duration::ZERO, move || {
-                let mut guard = ctx.vault.borrow_mut();
-                let Some(v) = guard.as_mut() else { return };
-                // A failure is worth a line but not a notice: nothing the user wrote is at
-                // stake and the folder is empty.
-                if let Err(e) = v.delete_group(id.as_str()) {
-                    diag!("could not discard the new folder: {e}");
-                    return;
-                }
-                refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
-            });
-        });
-    }
-    {
-        let ctx = ctx.clone();
-        list.on_toggle_group(move |id| {
-            touch(&ctx);
-            {
-                let mut collapsed = ctx.collapsed.borrow_mut();
-                if !collapsed.remove(id.as_str()) {
-                    collapsed.insert(id.to_string());
-                }
-            }
-            let guard = ctx.vault.borrow();
-            let Some(v) = guard.as_ref() else { return };
-            refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
-        });
-    }
-    {
-        let ctx = ctx.clone();
-        list.on_rename_group(move |id, name| {
-            touch(&ctx);
-            // The box was seeded from the row, which is drawn in the shape Slint can render;
-            // what gets stored is the shape everything else uses. See `hangul.rs`.
-            let name = SharedString::from(crate::hangul::from_slint(&name));
-            let mut guard = ctx.vault.borrow_mut();
-            let Some(v) = guard.as_mut() else { return };
-            let Ok(Some(mut g)) = v.store().get_group(&id) else { return };
-            if g.name == name.as_str() {
-                return;
-            }
-            g.name = name.to_string();
-            g.updated_at = now_millis();
-            if let Err(e) = v.upsert_group(&g) {
-                diag!("could not rename the group: {e}");
-                list::report_write_failure(&e);
-                return;
-            }
-            refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
-        });
-    }
-    // ---- Rename the vault. The name is in the synced document, so this reaches every
-    // paired device the way a memo does. ----
-    {
-        let ctx = ctx.clone();
-        let weak = list.as_weak();
-        list.on_rename_vault(move |name| {
-            touch(&ctx);
-            let name = SharedString::from(crate::hangul::from_slint(&name));
-            let stored = {
-                let mut guard = ctx.vault.borrow_mut();
-                let Some(v) = guard.as_mut() else { return };
-                if let Err(e) = v.set_name(name.as_str()) {
-                    diag!("could not rename the vault: {e}");
-                    return;
-                }
-                v.name()
-            };
-            // Read back what was stored rather than what was typed: the core trims it and
-            // cuts it to length, and the heading must show the name that actually synced.
-            if let Some(list) = weak.upgrade() {
-                list::set_vault_name(&list, &stored);
-            }
-        });
-    }
-    {
-        let ctx = ctx.clone();
-        list.on_move_row(move |src, dst| {
-            touch(&ctx);
-            move_row(&ctx, src, dst);
-        });
-    }
-
-    // ---- Dragging a memo into a gap between rows: the folder's own arrangement. ----
-    {
-        let ctx = ctx.clone();
-        list.on_reorder_row(move |src, gap| {
-            touch(&ctx);
-            list::reorder_row(&ctx, src, gap);
-        });
-    }
-
-    // ---- Recolouring a row (folder or memo) from the list. ----
-    {
-        let ctx = ctx.clone();
-        list.on_set_row_color(move |id, is_group, color| {
-            touch(&ctx);
-            list::set_row_color(&ctx, &id, is_group, &color);
-        });
-    }
-
-    // ---- Device linking (pairing, shared devices) is wired up by the pairing module. ----
+    // Device linking (pairing, shared devices) is wired up by the pairing module.
     let _pairing = pairing::wire(
-        &lock,
-        &list,
-        &approve_win,
+        &ui.lock,
+        &ui.list,
+        &ui.approve,
         &syncthing,
         lan.clone(),
         my_device_id.clone(),
         pairing::VaultOrigin { dir: &vault_dir, created_here: created_here.clone() },
     );
 
-    // ---- Periodic merge, pulling other devices' logs into the list and stickies. ----
-    // The interval is a setting, so saving settings re-arms the timer; hence the Rc.
+    // Periodic merge, pulling other devices' logs into the list and stickies. The interval
+    // is a setting, so saving settings re-arms the timer; hence the Rc.
     let merge_timer = Rc::new(slint::Timer::default());
-    start_merge_timer(&merge_timer, &ctx, list.as_weak());
+    start_merge_timer(&merge_timer, &ctx, ui.list.as_weak());
 
     // The tray is created further down, but the settings callback needs its handle to
     // relabel the menu on a language change, so the slot is prepared here.
     let tray_handle: Rc<RefCell<Option<tray::TrayHandle>>> = Rc::new(RefCell::new(None));
+    settings_window::wire(&ctx, &ui, &unlocked, &syncthing, &merge_timer, &tray_handle);
 
-    // ---- Settings window ----
-    {
-        let ctx = ctx.clone();
-        let win = settings_win.as_weak();
-        let unlocked = unlocked.clone();
-        list.on_open_settings(move || {
-            touch(&ctx);
-            let Some(w) = win.upgrade() else { return };
-            fill_settings_window(&ctx, &w);
-            w.set_unlocked(unlocked.get());
-            w.set_status(SharedString::new());
-            present(&w);
-        });
-    }
-    {
-        let win = settings_win.as_weak();
-        settings_win.on_close_requested(move || {
-            if let Some(w) = win.upgrade() {
-                let _ = w.hide();
-            }
-        });
-    }
-    {
-        let ctx = ctx.clone();
-        let win = settings_win.as_weak();
-        let lock_weak = lock.as_weak();
-        let list_weak = list.as_weak();
-        let merge_timer = merge_timer.clone();
-        let tray_handle = tray_handle.clone();
-        let security_weak = security_win.as_weak();
-        let history_weak = history_win.as_weak();
-        let approve_weak = approve_win.as_weak();
-        let syncthing_for_settings = syncthing.clone();
-        settings_win.on_apply(move || {
-            let Some(w) = win.upgrade() else { return };
-            let (Some(lock), Some(list)) = (lock_weak.upgrade(), list_weak.upgrade()) else {
-                return;
-            };
-            touch(&ctx);
+    let _timers = timers::start(&ctx, &ui, &unlocked);
 
-            // Start from what is stored and overwrite only the fields this dialog owns.
-            // Building the struct from scratch here meant every other field — the pins, where
-            // the windows are, which notes are folded, which are on the desk — had to be
-            // copied back across by hand, and one forgotten line would have quietly reset it
-            // the next time anybody pressed Save.
-            let mut next = ctx.settings.borrow().clone();
-            next.lang = w.get_lang_sel().to_string();
-            next.unlock_days = w.get_unlock_days();
-            next.idle_lock_minutes = w.get_idle_minutes();
-            next.default_color = w.get_default_color().to_string();
-            next.default_opacity = w.get_default_opacity();
-            next.merge_seconds = w.get_merge_seconds();
-            next.watch_delay_seconds = w.get_watch_delay_seconds();
-            next.rescan_seconds = w.get_rescan_seconds();
-            next.keep_versions_days = w.get_keep_versions_days();
-            next.update_check = w.get_update_check();
-            // Starting with the session is written to the desktop, not to `settings.json`,
-            // so it is applied here on its own. A failure is reported and then read back
-            // below, which leaves the toggle showing what is actually true rather than what
-            // was asked for.
-            if let Err(e) = autostart::set(w.get_start_at_login()) {
-                diag!("could not change the start-at-login setting: {e}");
-            }
-            next.sanitize();
-            let prev_unlock_days = ctx.settings.borrow().unlock_days;
-            next.save(&ctx.dir);
-            *ctx.settings.borrow_mut() = next.clone();
-
-            // Write the sanitized values back, so out-of-range input never changes silently.
-            fill_settings_window(&ctx, &w);
-            apply_lang(
-                &ctx,
-                &lock,
-                &list,
-                &w,
-                &security_weak.unwrap(),
-                &history_weak.unwrap(),
-                &approve_weak.unwrap(),
-            );
-            if let Some(t) = tray_handle.borrow().as_ref() {
-                t.refresh();
-            }
-            start_merge_timer(&merge_timer, &ctx, list.as_weak());
-            // The watch delay lives in Syncthing's folder config, not ours, so saving has to
-            // push it across; `set_folder_timing` does nothing when the daemon already agrees.
-            if let Some(st) = syncthing_for_settings.borrow().as_ref() {
-                if let Err(e) = st.set_folder_timing(
-                    SYNC_FOLDER_ID,
-                    next.watch_delay_seconds,
-                    next.rescan_seconds,
-                ) {
-                    diag!("could not apply the sync timing: {e}");
-                }
-                if let Err(e) =
-                    st.set_folder_versioning(SYNC_FOLDER_ID, next.keep_versions_days)
-                {
-                    diag!("could not apply the version retention: {e}");
-                }
-            }
-
-            // Shortening or disabling the stay-unlocked window leaves an existing session in
-            // violation of it, so drop the session and ask for the password next time.
-            let status = if next.unlock_days != prev_unlock_days {
-                settings::clear_session(&ctx.dir);
-                t!("msg.settings_saved_relock")
-            } else {
-                t!("msg.settings_saved")
-            };
-            w.set_status(SharedString::from(status));
-        });
-    }
-    {
-        let ctx = ctx.clone();
-        let win = settings_win.as_weak();
-        let lock_weak = lock.as_weak();
-        let list_weak = list.as_weak();
-        let unlocked = unlocked.clone();
-        settings_win.on_lock_now(move || {
-            let (Some(lock), Some(list)) = (lock_weak.upgrade(), list_weak.upgrade()) else {
-                return;
-            };
-            lock_now(&ctx, &lock, &list, &unlocked);
-            if let Some(w) = win.upgrade() {
-                w.set_unlocked(false);
-                let _ = w.hide();
-            }
-        });
-    }
-    {
-        let ctx = ctx.clone();
-        let lock_weak = lock.as_weak();
-        let list_weak = list.as_weak();
-        let unlocked = unlocked.clone();
-        list.on_lock_now(move || {
-            let (Some(lock), Some(list)) = (lock_weak.upgrade(), list_weak.upgrade()) else {
-                return;
-            };
-            lock_now(&ctx, &lock, &list, &unlocked);
-        });
-    }
-
-    // ---- Idle auto-lock ----
-    let idle_timer = slint::Timer::default();
-    {
-        let ctx = ctx.clone();
-        let lock_weak = lock.as_weak();
-        let list_weak = list.as_weak();
-        let unlocked = unlocked.clone();
-        idle_timer.start(TimerMode::Repeated, IDLE_CHECK_INTERVAL, move || {
-            let minutes = ctx.settings.borrow().idle_lock_minutes;
-            if minutes <= 0 || !unlocked.get() {
-                return;
-            }
-            if ctx.last_activity.get().elapsed() < Duration::from_secs(minutes as u64 * 60) {
-                return;
-            }
-            let (Some(lock), Some(list)) = (lock_weak.upgrade(), list_weak.upgrade()) else {
-                return;
-            };
-            lock_now(&ctx, &lock, &list, &unlocked);
-        });
-    }
-
-    // ---- Magnetic snapping: a sticky that stops moving clips to the screen or another
-    // sticky's edge. Works where window positions are readable (X11), inert on Wayland. ----
-    let snap_timer = slint::Timer::default();
-    {
-        let stickies = ctx.stickies.clone();
-        snap_timer.start(TimerMode::Repeated, SNAP_INTERVAL, move || snap_tick(&stickies));
-    }
-
-    // ---- Closing the list on a desktop with no tray. See `quit_if_last_window`. ----
-    {
-        let ctx = ctx.clone();
-        let list_weak = list.as_weak();
-        list.window().on_close_requested(move || {
-            if let Some(list) = list_weak.upgrade() {
-                // Recorded here as well as on the timer: this is the last chance to see where
-                // the window was before it goes.
-                sticky::remember_geometry(&ctx, &list);
-                sticky::quit_if_last_window(&ctx, &list);
-            }
-            slint::CloseRequestResponse::HideWindow
-        });
-    }
-
-    // ---- Remembering where the windows are, so a desk stays arranged across a restart.
-    // Polled, because Slint has no "the window moved" callback — the same reason the snapping
-    // above is a poll. Far slower than that one: this one writes a file. ----
-    let geometry_timer = slint::Timer::default();
-    {
-        let ctx = ctx.clone();
-        let list_weak = list.as_weak();
-        geometry_timer.start(TimerMode::Repeated, GEOMETRY_INTERVAL, move || {
-            if let Some(list) = list_weak.upgrade() {
-                sticky::remember_geometry(&ctx, &list);
-            }
-        });
-    }
-
-    // ---- Tray icon ----
     APP.with(|a| {
         *a.borrow_mut() = Some(AppUi {
-            lock: lock.clone_strong(),
-            list: list.clone_strong(),
-            history: history_win.clone_strong(),
+            lock: ui.lock.clone_strong(),
+            list: ui.list.clone_strong(),
+            history: ui.history.clone_strong(),
             history_subject: history_subject.clone(),
-            settings: settings_win.clone_strong(),
+            settings: ui.settings.clone_strong(),
             unlocked: unlocked.clone(),
             ctx: ctx.clone(),
         })
@@ -1061,52 +191,16 @@ fn main() -> Result<()> {
         // A quiet start needs somewhere to be quiet *in*. With no tray there is no icon to
         // click, so the app would sit invisible holding an unlocked vault — show it instead.
         if ctx.quiet_start.get() && !ctx.has_tray.get() {
-            lock::show_desk(&ctx, &list.as_weak());
+            lock::show_desk(&ctx, &ui.list.as_weak());
         }
         *tray_handle.borrow_mut() = Some(tray);
     }
 
-    // Window icons only apply once the event loop has created the winit windows: a one-shot
-    // timer covers the lock and list windows, and later windows get theirs where they are
-    // shown (open_sticky, the tray toggle).
-    let icon_timer = slint::Timer::default();
-    {
-        let lock_w = lock.as_weak();
-        let list_w = list.as_weak();
-        icon_timer.start(TimerMode::SingleShot, Duration::from_millis(100), move || {
-            if let Some(w) = lock_w.upgrade() {
-                set_window_icon(w.window());
-            }
-            if let Some(w) = list_w.upgrade() {
-                set_window_icon(w.window());
-            }
-        });
-    }
-
-    // ---- Update check ----
-    // Once a day at most, and only if the user has left it on. Silent unless it finds
-    // something: an offline machine should not be told about its own network.
+    // Update check: once a day at most, and only if the user has left it on. Silent unless
+    // it finds something: an offline machine should not be told about its own network.
     if ctx.settings.borrow().update_check_due() {
         update::spawn_check(&ctx, false);
     }
-    {
-        let ctx = ctx.clone();
-        // The button asks regardless of the daily gap, and says what came back.
-        settings_win.on_check_update(move || update::spawn_check(&ctx, true));
-    }
-    settings_win.on_open_update(update::open_download);
-
-    // The log is a file the user is asked for, never one they read here: open the folder and
-    // let the desktop's own file manager do the rest.
-    {
-        let dir = dir.clone();
-        settings_win.on_open_log(move || {
-            if let Err(e) = update::open_url(&dir.to_string_lossy()) {
-                diag!("could not open the log folder: {e}");
-            }
-        });
-    }
-    list.on_open_update(update::open_download);
 
     // Started by the session rather than by the user: come up in the tray and leave the
     // screen alone. **Only where a tray actually registered** — on a desktop with none
@@ -1118,8 +212,8 @@ fn main() -> Result<()> {
         // `resize` only fires on a *change*, and the panel a fresh window opens on has not
         // changed into anything — which is how a new device met the first-run choice with its
         // second card cut off by the bottom edge.
-        lock.invoke_apply_size();
-        present(&lock);
+        ui.lock.invoke_apply_size();
+        present(&ui.lock);
     }
     slint::run_event_loop_until_quit()?;
 

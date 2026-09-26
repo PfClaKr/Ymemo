@@ -17,7 +17,6 @@
 
     <string name="widget_new_memo">새 메모</string>
     <string name="widget_photo_memo">사진 메모</string>
-    <string name="widget_open">Ymemo 열기</string>
     <string name="widget_edit">편집</string>
     <string name="widget_pick">다른 메모 선택</string>
 

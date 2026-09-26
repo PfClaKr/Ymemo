@@ -48,6 +48,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FfiPendingDevice dco_decode_ffi_pending_device(dynamic raw);
 
   @protected
+  FfiPhotoMode dco_decode_ffi_photo_mode(dynamic raw);
+
+  @protected
   FfiRelease dco_decode_ffi_release(dynamic raw);
 
   @protected
@@ -139,6 +142,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FfiPendingDevice sse_decode_ffi_pending_device(SseDeserializer deserializer);
+
+  @protected
+  FfiPhotoMode sse_decode_ffi_photo_mode(SseDeserializer deserializer);
 
   @protected
   FfiRelease sse_decode_ffi_release(SseDeserializer deserializer);
@@ -240,6 +246,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_ffi_pending_device(
       FfiPendingDevice self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ffi_photo_mode(FfiPhotoMode self, SseSerializer serializer);
 
   @protected
   void sse_encode_ffi_release(FfiRelease self, SseSerializer serializer);

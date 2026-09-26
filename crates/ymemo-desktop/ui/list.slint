@@ -102,7 +102,7 @@ export component ListWindow inherits Window {
     // id, is-group: opens the past versions of that row.
     callback show-history(string, bool);
     // Row whose inline palette is open; empty means none.
-    in-out property <string> coloring-id: "";
+    property <string> coloring-id: "";
     callback delete-row(string, bool);     // id, is-group
     callback move-row(int, int);           // source row, drop row (out of range = top level)
     callback reorder-row(int, int);        // source row, gap to drop it in (0 = above everything)

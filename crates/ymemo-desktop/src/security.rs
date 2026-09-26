@@ -39,8 +39,7 @@ pub(crate) fn wire(ctx: &Ctx, settings_win: &SettingsWindow, win: &SecurityWindo
         win.on_change_password(move |current, new| {
             let Some(w) = weak.upgrade() else { return };
             touch(&ctx);
-            let guard = ctx.vault.borrow();
-            let Some(v) = guard.as_ref() else {
+            let Some(v) = ctx.vault_ref() else {
                 return set_status(&w, t!("msg.vault_locked"), true, true);
             };
             match v.change_password(current.as_bytes(), new.as_bytes()) {
@@ -58,8 +57,7 @@ pub(crate) fn wire(ctx: &Ctx, settings_win: &SettingsWindow, win: &SecurityWindo
         win.on_issue_recovery(move || {
             let Some(w) = weak.upgrade() else { return };
             touch(&ctx);
-            let guard = ctx.vault.borrow();
-            let Some(v) = guard.as_ref() else {
+            let Some(v) = ctx.vault_ref() else {
                 return set_status(&w, t!("msg.vault_locked"), true, false);
             };
             match v.issue_recovery_code() {
@@ -82,7 +80,7 @@ fn reset_window(ctx: &Ctx, win: &SecurityWindow) {
     win.set_status(SharedString::new());
     win.set_status_is_error(false);
     win.set_has_recovery(
-        ctx.vault.borrow().as_ref().is_some_and(|v| v.has_recovery_code()),
+        ctx.vault_ref().is_some_and(|v| v.has_recovery_code()),
     );
 }
 

@@ -3,17 +3,21 @@
 //! Slint callbacks are registered independently, so everything they need is bundled into
 //! one `Ctx` and cloned into each of them; it is all `Rc`, so cloning is cheap.
 
-use std::cell::{Cell, RefCell};
+use slint::VecModel;
+use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Instant;
-
-use slint::VecModel;
+use ymemo_core::diag;
+use ymemo_core::sync::Syncthing;
 use ymemo_core::vault::Vault;
 
 use crate::settings::Settings;
-use crate::{HistoryWindow, ListRow, ListWindow, LockWindow, SettingsWindow, StickyWindow};
+use crate::{
+    ApproveWindow, HistoryWindow, ListRow, ListWindow, LockWindow, SecurityWindow, SettingsWindow,
+    StickyWindow,
+};
 
 pub(crate) type SharedVault = Rc<RefCell<Option<Vault>>>;
 
@@ -24,15 +28,105 @@ pub(crate) struct StickyEntry {
     pub(crate) save_timer: slint::Timer,
     /// Unsaved edits pending; while set, the merge timer must not overwrite the body.
     pub(crate) dirty: Rc<Cell<bool>>,
-    /// Window position at the last snap tick (physical px), to detect the end of a move.
-    pub(crate) last_pos: Cell<Option<(i32, i32)>>,
-    /// Moved since the last tick, i.e. dragging; snapping happens once it stops.
-    pub(crate) moving: Cell<bool>,
+    /// What the window system has said about this window since it was last looked at.
+    pub(crate) motion: Rc<Motion>,
     /// Grab point while dragging the title bar, relative to the window (physical px).
     pub(crate) drag_grab: Cell<Option<(i32, i32)>>,
+    /// Until then, a change of position is the app placing the note, not a hand moving it,
+    /// and is not snapped. See `snap_tick`.
+    pub(crate) settle_until: Cell<Instant>,
+    /// When this note was last opened or activated, as a tick of `sticky::next_stamp`.
+    /// Raising the desk goes through the notes in this order, so it keeps the stacking the
+    /// user left rather than the order of a hash map.
+    pub(crate) last_active: Rc<Cell<u64>>,
 }
 
 pub(crate) type Stickies = Rc<RefCell<HashMap<String, StickyEntry>>>;
+
+/// A note's window moving or changing size, as winit reports it (`Moved`, `Resized`).
+///
+/// The snap and geometry timers read this instead of asking where every note is. They used to
+/// ask — eleven times a second for snapping, every two seconds for the geometry — and each
+/// question is a round trip to the X server per note, so an untouched desk of forty notes cost
+/// 3.3% of a core in the app and as much again in the X server. Measured under Xvfb.
+pub(crate) struct Motion {
+    /// When the window last moved, while that has not been dealt with. `snap_tick` snaps a
+    /// note once this is a moment old, and clears it.
+    pub(crate) moved_at: Cell<Option<Instant>>,
+    /// Moved or resized since its geometry was last written down.
+    pub(crate) geometry_dirty: Cell<bool>,
+}
+
+impl Motion {
+    /// A note just opened: nothing to snap, and a geometry that has never been recorded.
+    pub(crate) fn new() -> Rc<Self> {
+        Rc::new(Motion { moved_at: Cell::new(None), geometry_dirty: Cell::new(true) })
+    }
+}
+
+impl Ctx {
+    /// The state a session starts with: no vault open yet, an empty list, nothing on the
+    /// desk. `has_tray` is answered later, once the tray has had its go.
+    pub(crate) fn new(
+        dir: PathBuf,
+        settings: Settings,
+        syncthing: Rc<RefCell<Option<Syncthing>>>,
+    ) -> Self {
+        Ctx {
+            vault: Rc::new(RefCell::new(None)),
+            model: Rc::new(VecModel::from(Vec::<ListRow>::new())),
+            stickies: Rc::new(RefCell::new(HashMap::new())),
+            collapsed: Rc::new(RefCell::new(HashSet::new())),
+            query: Rc::new(RefCell::new(String::new())),
+            undo: Rc::new(RefCell::new(None)),
+            undo_timer: Rc::new(slint::Timer::default()),
+            syncthing,
+            dir: Rc::new(dir),
+            settings: Rc::new(RefCell::new(settings)),
+            last_activity: Rc::new(Cell::new(Instant::now())),
+            has_tray: Rc::new(Cell::new(false)),
+            quiet_start: Rc::new(Cell::new(crate::autostart::launched_hidden())),
+        }
+    }
+
+    /// The open vault, or `None` when it is locked — **or already borrowed further up the
+    /// stack**. Slint can run a callback from inside another one, and a second
+    /// `borrow_mut` there is a panic: that is what used to kill the app on the first merge
+    /// after a sticky was opened (see the merge timer). Asking through here turns the same
+    /// mistake into a skipped action and a line in the log.
+    #[track_caller]
+    pub(crate) fn vault_mut(&self) -> Option<RefMut<'_, Vault>> {
+        let Ok(guard) = self.vault.try_borrow_mut() else {
+            let at = std::panic::Location::caller();
+            diag!("the vault was already in use; skipped a write at {at}");
+            return None;
+        };
+        RefMut::filter_map(guard, Option::as_mut).ok()
+    }
+
+    /// [`Ctx::vault_mut`] for reading.
+    #[track_caller]
+    pub(crate) fn vault_ref(&self) -> Option<Ref<'_, Vault>> {
+        let Ok(guard) = self.vault.try_borrow() else {
+            let at = std::panic::Location::caller();
+            diag!("the vault was already in use; skipped a read at {at}");
+            return None;
+        };
+        Ref::filter_map(guard, Option::as_ref).ok()
+    }
+}
+
+/// The windows that exist for the whole session, built once in `main` and handed to the
+/// code that wires them. Slint handles are cheap to hold; the windows are only shown and
+/// hidden, never rebuilt, so their positions survive.
+pub(crate) struct Ui {
+    pub(crate) lock: LockWindow,
+    pub(crate) list: ListWindow,
+    pub(crate) settings: SettingsWindow,
+    pub(crate) security: SecurityWindow,
+    pub(crate) history: HistoryWindow,
+    pub(crate) approve: ApproveWindow,
+}
 
 /// The bundle of shared app state.
 #[derive(Clone)]

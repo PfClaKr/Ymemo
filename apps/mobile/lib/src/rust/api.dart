@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_revocations`, `field_label`, `lan_lock`, `rejected_lock`, `remember_delete`, `sanitize`, `share_with_peer`, `sync_lock`, `with_sync`, `with_vault`
+// These functions are ignored because they are not marked as `pub`: `apply_revocations`, `body_of_attachment`, `field_label`, `sanitize`, `share_with_peer`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `fmt`, `from`, `from`, `from`
 
 /// Sets the language of core error messages (`"ko"`, `"en"`, or a locale like `"ko-KR"`).
@@ -15,9 +15,6 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 /// and again whenever the language changes, or the screen ends up mixing languages.
 Future<void> setLanguage({required String code}) =>
     RustLib.instance.api.crateApiSetLanguage(code: code);
-
-/// Language code currently used for core messages.
-Future<String> language() => RustLib.instance.api.crateApiLanguage();
 
 /// Collects the mobile strings for the current language.
 Future<FfiStrings> mobileStrings() =>
@@ -126,10 +123,6 @@ Future<void> memoDelete({required String id}) =>
 /// fighting over it. See `Vault::undelete`.
 Future<bool> memoUndelete() => RustLib.instance.api.crateApiMemoUndelete();
 
-/// Whether a delete is still waiting to be taken back.
-Future<bool> memoCanUndelete() =>
-    RustLib.instance.api.crateApiMemoCanUndelete();
-
 /// Every past version of one memo, **newest first** — the one you want back is nearly always
 /// a recent one.
 ///
@@ -148,11 +141,6 @@ Future<void> memoRestore({required String id, required int index}) =>
 /// Sets the palette key.
 Future<void> memoSetColor({required String id, required String color}) =>
     RustLib.instance.api.crateApiMemoSetColor(id: id, color: color);
-
-/// Sets the opacity in percent; the core clamps out-of-range values.
-Future<void> memoSetOpacity(
-        {required String id, required PlatformInt64 opacity}) =>
-    RustLib.instance.api.crateApiMemoSetOpacity(id: id, opacity: opacity);
 
 /// Moves a memo into a group; an empty `group_id` moves it to the top level.
 Future<void> memoSetGroup({required String id, required String groupId}) =>
@@ -189,12 +177,6 @@ Future<Uint8List> attachmentBytes({required String hash}) =>
 Future<bool> attachmentHasBlob({required String hash}) =>
     RustLib.instance.api.crateApiAttachmentHasBlob(hash: hash);
 
-/// Sets the display width in 1/1000 em; other devices see the same proportion.
-Future<void> attachmentSetWidth(
-        {required String id, required PlatformInt64 widthEmMilli}) =>
-    RustLib.instance.api
-        .crateApiAttachmentSetWidth(id: id, widthEmMilli: widthEmMilli);
-
 /// Sets where the photo sits on the note and how wide it is, in one write.
 ///
 /// The position is a fraction of the note (per-mille) rather than pixels, so a photo dropped
@@ -211,12 +193,26 @@ Future<void> attachmentSetLayout(
         yPermille: yPermille,
         widthEmMilli: widthEmMilli);
 
-/// Moves a photo between lying on the writing and having a band of its own under it.
+/// Puts a photo **into** the writing after `after_line` lines of it, opening `rows` blank
+/// lines to stand in.
 ///
-/// A fact about the memo, not about this device: a photo put in the flow here is out of the
-/// way of the writing on the desktop sticky too.
-Future<void> attachmentSetFlow({required String id, required bool flow}) =>
-    RustLib.instance.api.crateApiAttachmentSetFlow(id: id, flow: flow);
+/// A fact about the memo, not about this device: a photo put into the writing here is in the
+/// writing on the desktop sticky too, at the same words. The room is real blank lines in the
+/// body — see `Vault::place_attachment_in_writing`, which writes both halves together.
+/// Returns the memo's body **after** the room was opened, because that is what the editor on
+/// screen now has to be showing: the writing it is holding is a version of the note without
+/// the gap in it, and saving that back over the top would close the room again.
+Future<String> attachmentPlaceInWriting(
+        {required String id,
+        required PlatformInt64 afterLine,
+        required int rows}) =>
+    RustLib.instance.api.crateApiAttachmentPlaceInWriting(
+        id: id, afterLine: afterLine, rows: rows);
+
+/// Takes a photo back out of the writing, closing the room it stood in, and lays it on top.
+/// Returns the body without the room, for the same reason as above.
+Future<String> attachmentTakeOutOfWriting({required String id}) =>
+    RustLib.instance.api.crateApiAttachmentTakeOutOfWriting(id: id);
 
 /// Detaches a photo; the blob file stays (no GC).
 Future<void> attachmentRemove({required String id}) =>
@@ -270,10 +266,6 @@ Future<void> groupRename({required String id, required String name}) =>
 /// way, so the two UIs agree on what a folder looks like.
 Future<void> groupSetColor({required String id, required String color}) =>
     RustLib.instance.api.crateApiGroupSetColor(id: id, color: color);
-
-/// Moves a group under another; moving it into its own subtree is rejected.
-Future<void> groupMove({required String id, required String parentId}) =>
-    RustLib.instance.api.crateApiGroupMove(id: id, parentId: parentId);
 
 /// Deletes a group; its memos and subgroups move up instead of being deleted.
 Future<void> groupDelete({required String id}) =>
@@ -342,13 +334,6 @@ Future<void> syncSetPaused({required bool paused}) =>
 
 /// Stops the daemon. Safe to call when it is not running.
 Future<void> syncStop() => RustLib.instance.api.crateApiSyncStop();
-
-/// Whether the daemon is up. Cheap: it does not talk to it.
-Future<bool> syncRunning() => RustLib.instance.api.crateApiSyncRunning();
-
-/// This device's pairing code (`YMEMO1:<device-id>`), for the other device to scan or type.
-Future<String> syncPairingCode() =>
-    RustLib.instance.api.crateApiSyncPairingCode();
 
 /// Pairs with a scanned or typed code: registers the peer and shares the vault with it.
 ///
@@ -494,9 +479,11 @@ class FfiAttachment {
   final PlatformInt64 xPermille;
   final PlatformInt64 yPermille;
 
-  /// Whether the photo takes a band of its own under the writing instead of lying on top
-  /// of it. False is what every photo was before there was a choice.
-  final bool flow;
+  /// How the photo sits against the writing.
+  final FfiPhotoMode mode;
+
+  /// For [`FfiPhotoMode::InWriting`]: how many lines of the body the photo stands after.
+  final PlatformInt64 anchorLine;
   final PlatformInt64 createdAt;
 
   const FfiAttachment({
@@ -510,7 +497,8 @@ class FfiAttachment {
     required this.widthEmMilli,
     required this.xPermille,
     required this.yPermille,
-    required this.flow,
+    required this.mode,
+    required this.anchorLine,
     required this.createdAt,
   });
 
@@ -526,7 +514,8 @@ class FfiAttachment {
       widthEmMilli.hashCode ^
       xPermille.hashCode ^
       yPermille.hashCode ^
-      flow.hashCode ^
+      mode.hashCode ^
+      anchorLine.hashCode ^
       createdAt.hashCode;
 
   @override
@@ -544,7 +533,8 @@ class FfiAttachment {
           widthEmMilli == other.widthEmMilli &&
           xPermille == other.xPermille &&
           yPermille == other.yPermille &&
-          flow == other.flow &&
+          mode == other.mode &&
+          anchorLine == other.anchorLine &&
           createdAt == other.createdAt;
 }
 
@@ -675,6 +665,23 @@ class FfiPendingDevice {
           id == other.id &&
           name == other.name &&
           verificationCode == other.verificationCode;
+}
+
+/// How a photo sits against the writing, as the UI needs to draw it.
+///
+/// An enum rather than the two booleans this used to be: there are three places a photo can
+/// be, and a pair of flags can say a fourth thing that does not exist.
+enum FfiPhotoMode {
+  /// Lying on the writing, at the corner it was left at.
+  float,
+
+  /// In a band of its own under the writing. Not offered any more, but still drawn: memos
+  /// have photos in it, and so do other devices.
+  flow,
+
+  /// Standing **in** the writing, in room the memo makes for it.
+  inWriting,
+  ;
 }
 
 /// A release newer than the running build.
@@ -986,7 +993,6 @@ class FfiStrings {
   final String moveTo;
   final String history;
   final String historyEmpty;
-  final String historyPick;
   final String historyRestore;
   final String historyRestored;
   final String newGroup;
@@ -1047,7 +1053,6 @@ class FfiStrings {
   final String recoveryAck;
   final String recoveryCode;
   final String recoveryHint;
-  final String recoveryIssued;
   final String recoveryPresent;
   final String recoveryPrompt;
   final String recoveryWarning;
@@ -1145,7 +1150,6 @@ class FfiStrings {
     required this.moveTo,
     required this.history,
     required this.historyEmpty,
-    required this.historyPick,
     required this.historyRestore,
     required this.historyRestored,
     required this.newGroup,
@@ -1204,7 +1208,6 @@ class FfiStrings {
     required this.recoveryAck,
     required this.recoveryCode,
     required this.recoveryHint,
-    required this.recoveryIssued,
     required this.recoveryPresent,
     required this.recoveryPrompt,
     required this.recoveryWarning,
@@ -1304,7 +1307,6 @@ class FfiStrings {
       moveTo.hashCode ^
       history.hashCode ^
       historyEmpty.hashCode ^
-      historyPick.hashCode ^
       historyRestore.hashCode ^
       historyRestored.hashCode ^
       newGroup.hashCode ^
@@ -1363,7 +1365,6 @@ class FfiStrings {
       recoveryAck.hashCode ^
       recoveryCode.hashCode ^
       recoveryHint.hashCode ^
-      recoveryIssued.hashCode ^
       recoveryPresent.hashCode ^
       recoveryPrompt.hashCode ^
       recoveryWarning.hashCode ^
@@ -1465,7 +1466,6 @@ class FfiStrings {
           moveTo == other.moveTo &&
           history == other.history &&
           historyEmpty == other.historyEmpty &&
-          historyPick == other.historyPick &&
           historyRestore == other.historyRestore &&
           historyRestored == other.historyRestored &&
           newGroup == other.newGroup &&
@@ -1524,7 +1524,6 @@ class FfiStrings {
           recoveryAck == other.recoveryAck &&
           recoveryCode == other.recoveryCode &&
           recoveryHint == other.recoveryHint &&
-          recoveryIssued == other.recoveryIssued &&
           recoveryPresent == other.recoveryPresent &&
           recoveryPrompt == other.recoveryPrompt &&
           recoveryWarning == other.recoveryWarning &&

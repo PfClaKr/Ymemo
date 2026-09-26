@@ -141,7 +141,7 @@ impl PairListener {
 
     /// Current 6-digit code to display.
     pub fn code(&self) -> String {
-        let mut c = self.codes.lock().unwrap();
+        let mut c = self.codes.lock().unwrap_or_else(|e| e.into_inner());
         c.maybe_rotate();
         c.current.clone()
     }
@@ -174,7 +174,7 @@ fn recv_loop(
     let mut last_attempt = Instant::now() - MIN_ATTEMPT_GAP;
     while running.load(Ordering::Relaxed) {
         {
-            codes.lock().unwrap().maybe_rotate();
+            codes.lock().unwrap_or_else(|e| e.into_inner()).maybe_rotate();
         }
         let (n, src) = match socket.recv_from(&mut buf) {
             Ok(v) => v,
@@ -188,7 +188,7 @@ fn recv_loop(
         last_attempt = Instant::now();
 
         let (current, previous) = {
-            let c = codes.lock().unwrap();
+            let c = codes.lock().unwrap_or_else(|e| e.into_inner());
             (c.current.clone(), c.previous.clone())
         };
         let matched = decode(MSG_HELLO, &current, packet)
@@ -202,7 +202,7 @@ fn recv_loop(
         }
         let _ = peers_tx.send(peer_id);
         // Rotate immediately, so the code cannot be reused or replayed.
-        codes.lock().unwrap().rotate();
+        codes.lock().unwrap_or_else(|e| e.into_inner()).rotate();
     }
 }
 
