@@ -4,17 +4,16 @@
 //! Nothing here caches them: a history is read when the window opens and again after a
 //! restore, because a restore is itself a new revision.
 
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
-
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use ymemo_core::history::{Entity, Revision, RevisionKind};
 use ymemo_i18n::t;
 
 use crate::state::{touch, Ctx};
 use crate::sticky::format_created_at;
 use crate::window::present;
-use crate::{HistoryWindow, RevisionRow};
+use crate::{HistoryWindow, ListWindow, RevisionRow};
 
 /// What the open history window is showing. `None` while it is closed.
 pub(crate) type Subject = Rc<RefCell<Option<(Entity, String)>>>;
@@ -69,6 +68,19 @@ pub(crate) fn wire(ctx: &Ctx, win: &HistoryWindow, subject: &Subject) {
             crate::list::refresh_after_restore(&ctx, entity, &id);
         });
     }
+}
+
+/// The list's history button: past versions of the memo or folder a row stands for.
+pub(crate) fn wire_list(ctx: &Ctx, list: &ListWindow, win: &HistoryWindow, subject: &Subject) {
+    let ctx = ctx.clone();
+    let win = win.as_weak();
+    let subject = subject.clone();
+    list.on_show_history(move |id, is_group| {
+        touch(&ctx);
+        let Some(w) = win.upgrade() else { return };
+        let entity = if is_group { Entity::Group } else { Entity::Memo };
+        show(&ctx, &w, &subject, entity, &id);
+    });
 }
 
 /// Opens the window on one memo or folder.

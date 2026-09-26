@@ -12,20 +12,21 @@
 //!   window of its own because the app lives in the tray: a request that only appeared inside
 //!   the pairing panel would go unseen by anyone who had closed it.
 
-use ymemo_core::diag;
+use slint::{ComponentHandle, LogicalSize, SharedString, TimerMode};
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
-
-use slint::{ComponentHandle, LogicalSize, ModelRc, SharedString, TimerMode, VecModel};
+use ymemo_core::diag;
 use ymemo_core::{lan_pair, pairing, pairing::PairingCode, sync::Syncthing};
 use ymemo_i18n::t;
 
+mod approve;
+mod devices;
+mod lan;
+
 use crate::state::APP;
-use crate::sync::{to_shared_row, SYNC_FOLDER_ID};
-use crate::window::present;
-use crate::{ApproveWindow, ListWindow, LockWindow, SharedDeviceRow};
+use crate::sync::SYNC_FOLDER_ID;
+use crate::{ApproveWindow, ListWindow, LockWindow};
 
 /// How often incoming requests are polled for. Answering one is a person walking to another
 /// device, so seconds are fine and a tighter loop would only spend REST calls.
@@ -187,128 +188,54 @@ pub(crate) fn wire(
     vault: VaultOrigin<'_>,
 ) -> PairingTimers {
     let VaultOrigin { dir: vault_dir, created_here } = vault;
-    let pair_timer = slint::Timer::default();
-    // Held by an Rc so the watch below can stop itself; see the comment where it is started.
-    let vault_watch_timer = Rc::new(slint::Timer::default());
-    let devices_timer = slint::Timer::default();
-    let pending_timer = slint::Timer::default();
-
     // Whose answer we are waiting on, shared by the two panels: registering from either
     // window is the same act, so both show the same waiting state.
     let waiting: Rc<RefCell<Option<Waiting>>> = Rc::new(RefCell::new(None));
 
-    // ---- Pairing by pasting a full device id (both windows, the fallback path). ----
-    {
-        let lock_w = lock.as_weak();
-        let list_w = list.as_weak();
-        let set_state = move |msg: SharedString, code: SharedString| {
-            if let Some(w) = lock_w.upgrade() {
-                w.set_peer_message(msg.clone());
-                w.set_pair_waiting_code(code.clone());
-            }
-            if let Some(w) = list_w.upgrade() {
-                w.set_peer_message(msg);
-                w.set_pair_waiting_code(code);
-            }
-        };
-        let handler = pairing_handler(syncthing.clone(), waiting.clone(), set_state);
-        lock.on_add_peer(handler.clone());
-        list.on_add_peer(handler);
-    }
+    wire_add_peer(lock, list, syncthing, &waiting);
+    let pair = lan::wire(lock, list, syncthing, lan, my_device_id);
+    let vault_watch = watch_for_vault(lock, vault_dir, created_here);
+    let (devices, refresh_devices) = devices::wire(lock, list, syncthing, &waiting);
+    let pending = approve::wire(approve, syncthing, &refresh_devices);
+    wire_panel_resize(list);
 
-    // ---- LAN pairing over a 6-digit code. ----
-    // join blocks for seconds, so it runs on a thread and sends its result back through a
-    // channel, which pair_timer below drains and registers.
-    let (join_tx, join_rx) = std::sync::mpsc::channel::<Result<Option<String>, String>>();
-    {
-        let lan_join = {
-            let id = my_device_id.clone();
-            let lock_w = lock.as_weak();
-            let list_w = list.as_weak();
-            let join_tx = join_tx.clone();
-            move |code: SharedString| {
-                let Some(my_id) = id.clone() else { return };
-                let set_msg = |m: &str| {
-                    if let Some(w) = lock_w.upgrade() {
-                        w.set_lan_message(SharedString::from(m));
-                    }
-                    if let Some(w) = list_w.upgrade() {
-                        w.set_lan_message(SharedString::from(m));
-                    }
-                };
-                let code = code.trim().to_string();
-                if code.len() != 6 || !code.bytes().all(|b| b.is_ascii_digit()) {
-                    set_msg(&t!("msg.enter_six_digits"));
-                    return;
-                }
-                set_msg(&t!("msg.connecting"));
-                let join_tx = join_tx.clone();
-                std::thread::spawn(move || {
-                    let res = lan_pair::join(&code, &my_id, Duration::from_secs(6))
-                        .map_err(|e| e.to_string());
-                    let _ = join_tx.send(res);
-                });
-            }
-        };
-        lock.on_lan_join(lan_join.clone());
-        list.on_lan_join(lan_join);
-    }
+    PairingTimers { _pair: pair, _vault_watch: vault_watch, _devices: devices, _pending: pending }
+}
 
-    // Refresh the displayed code and register whoever paired, on a timer.
-    //
-    // **The timer runs whether or not this device could open the listener.** Only the top
-    // half needs one: showing our own six digits, and taking the peers that joined with them.
-    // Draining `join_rx` is the other direction — someone typed *their* code here — and that
-    // needs no listener at all, which is exactly the case the panel promises still works when
-    // something else already holds the port. With the whole timer behind `lan` the join
-    // thread's answer sat in the channel forever: the peer was never registered, the folder
-    // never shared back, and the panel stayed on "connecting" until it was closed. The other
-    // device then dialled in as a stranger and asked to be approved — a screen that tells the
-    // user to check eight characters against a device which, having paired over the six
-    // digits already, has no reason to be showing them.
-    {
-        let lan = lan.clone();
-        let lock_w = lock.as_weak();
-        let list_w = list.as_weak();
-        let syncthing = syncthing.clone();
-        pair_timer.start(TimerMode::Repeated, Duration::from_millis(800), move || {
-            let set_msg = |m: String| {
-                let m = SharedString::from(m);
-                if let Some(w) = lock_w.upgrade() {
-                    w.set_lan_message(m.clone());
-                }
-                if let Some(w) = list_w.upgrade() {
-                    w.set_lan_message(m);
-                }
-            };
-            if let Some(lan) = lan.as_ref() {
-                // Show this device's current code in both windows.
-                let code = SharedString::from(lan.code());
-                if let Some(w) = lock_w.upgrade() {
-                    w.set_lan_pair_code(code.clone());
-                }
-                if let Some(w) = list_w.upgrade() {
-                    w.set_lan_pair_code(code.clone());
-                }
-                // Peers that joined with our code (host side).
-                while let Some(peer) = lan.next_paired_peer() {
-                    set_msg(register_peer(&syncthing, &peer));
-                }
-            }
-            // Results of us joining with their code (joiner side).
-            while let Ok(res) = join_rx.try_recv() {
-                match res {
-                    Ok(Some(peer)) => set_msg(register_peer(&syncthing, &peer)),
-                    Ok(None) => set_msg(t!("msg.lan_peer_not_found")),
-                    Err(e) => set_msg(e),
-                }
-            }
-        });
-    }
+/// Pairing by pasting a full device id (both windows, the fallback path).
+fn wire_add_peer(
+    lock: &LockWindow,
+    list: &ListWindow,
+    syncthing: &Rc<RefCell<Option<Syncthing>>>,
+    waiting: &Rc<RefCell<Option<Waiting>>>,
+) {
+    let lock_w = lock.as_weak();
+    let list_w = list.as_weak();
+    let set_state = move |msg: SharedString, code: SharedString| {
+        if let Some(w) = lock_w.upgrade() {
+            w.set_peer_message(msg.clone());
+            w.set_pair_waiting_code(code.clone());
+        }
+        if let Some(w) = list_w.upgrade() {
+            w.set_peer_message(msg);
+            w.set_pair_waiting_code(code);
+        }
+    };
+    let handler = pairing_handler(syncthing.clone(), waiting.clone(), set_state);
+    lock.on_add_peer(handler.clone());
+    list.on_add_peer(handler);
+}
 
-    // ---- Watch for vault.json: once pairing has synced it to a device that chose "link to
-    // an existing device", switch the lock screen to password entry. Without this the user
-    // could enter a password first and create a vault with its own salt, diverging keys.
+/// Watch for vault.json: once pairing has synced it to a device that chose "link to an
+/// existing device", switch the lock screen to password entry. Without this the user could
+/// enter a password first and create a vault with its own salt, diverging keys.
+fn watch_for_vault(
+    lock: &LockWindow,
+    vault_dir: &std::path::Path,
+    created_here: Rc<Cell<bool>>,
+) -> Rc<slint::Timer> {
+    // Held by an Rc so the watch can stop itself; see the comment where it fires.
+    let vault_watch_timer = Rc::new(slint::Timer::default());
     if !vault_dir.join("vault.json").exists() {
         let lock_weak = lock.as_weak();
         let vault_json = vault_dir.join("vault.json");
@@ -343,239 +270,20 @@ pub(crate) fn wire(
             }
         });
     }
+    vault_watch_timer
+}
 
-    // ---- Shared devices: periodic refresh plus revoke. ----
-    // Both windows share one model, so updating it updates both.
-    let devices_model: Rc<VecModel<SharedDeviceRow>> = Rc::new(VecModel::from(Vec::new()));
-    lock.set_shared_devices(ModelRc::from(devices_model.clone()));
-    list.set_shared_devices(ModelRc::from(devices_model.clone()));
-
-    let refresh_devices = {
-        let syncthing = syncthing.clone();
-        let devices_model = devices_model.clone();
-        let waiting = waiting.clone();
-        let lock_w = lock.as_weak();
-        let list_w = list.as_weak();
-        move || {
-            let guard = syncthing.borrow();
-            let Some(st) = guard.as_ref() else { return };
-            let devices = match st.shared_devices(SYNC_FOLDER_ID) {
-                Ok(list) => list,
-                Err(e) => return diag!("could not list the shared devices: {e}"),
-            };
-
-            // Has the device we asked let us in yet? It has to look connected on
-            // LINKED_POLLS polls running, because a refused request flickers connected on
-            // every retry (see the constant).
-            let mut linked = false;
-            if let Some(w) = waiting.borrow_mut().as_mut() {
-                let up = devices.iter().any(|d| d.id == w.peer_id && d.connected);
-                w.connected_polls = if up { w.connected_polls + 1 } else { 0 };
-                linked = w.connected_polls >= LINKED_POLLS;
-            }
-            if linked {
-                *waiting.borrow_mut() = None;
-                let msg = SharedString::from(t!("msg.pair_connected"));
-                for w in [lock_w.upgrade().map(Panel::Lock), list_w.upgrade().map(Panel::List)]
-                    .into_iter()
-                    .flatten()
-                {
-                    w.set_pair_state(msg.clone(), SharedString::new());
-                }
-            }
-
-            devices_model.set_vec(devices.into_iter().map(to_shared_row).collect::<Vec<_>>());
+/// Resize the window as the pairing panel opens and closes. The panel has to fit on one
+/// screen without scrolling, and neither window is that big by default, so it grows while
+/// open and shrinks back afterwards.
+fn wire_panel_resize(list: &ListWindow) {
+    let saved = Rc::new(Cell::new(None));
+    let weak = list.as_weak();
+    list.on_sync_toggled(move |open| {
+        if let Some(w) = weak.upgrade() {
+            grow_for_panel(w.window(), open, PAIRING_MIN_SIZE, &saved);
         }
-    };
-
-    {
-        let refresh = refresh_devices.clone();
-        devices_timer.start(TimerMode::Repeated, Duration::from_secs(4), refresh);
-    }
-    refresh_devices(); // once at startup
-
-    {
-        let syncthing = syncthing.clone();
-        let refresh = refresh_devices.clone();
-        let lock_w = lock.as_weak();
-        let list_w = list.as_weak();
-        let unshare = move |id: SharedString| {
-            // Record the decision in the vault first, so it travels to the other devices.
-            // Dropping the peer here alone does not hold: every device is an introducer, and
-            // the ones that still have it hand it straight back.
-            //
-            // The pairing panel is reachable from the lock screen, where there is no open
-            // vault to write to. The local drop still happens; it is the one case where a
-            // removal can come back, and pressing it again once unlocked makes it stick.
-            APP.with(|a| {
-                let borrow = a.borrow();
-                let Some(app) = borrow.as_ref() else { return };
-                let Some(mut guard) = app.ctx.vault_mut() else { return };
-                let v = &mut *guard;
-                if let Err(e) = v.revoke_device(id.as_str()) {
-                    diag!("could not record the removed device in the vault: {e}");
-                }
-                // Straight away, rather than on the next merge: the peer is dropped and its
-                // entry parked, so a re-introduction in the meantime lands on nothing live.
-                crate::sync::apply_revocations(&app.ctx, v);
-            });
-            let msg = match syncthing.borrow().as_ref() {
-                Some(st) => match st.unshare_folder_with(SYNC_FOLDER_ID, id.as_str()) {
-                    Ok(()) => t!("msg.unshared"),
-                    Err(e) => t!("msg.unshare_failed", error = e),
-                },
-                None => t!("msg.sync_off"),
-            };
-            let msg = SharedString::from(msg);
-            if let Some(w) = lock_w.upgrade() {
-                w.set_lan_message(msg.clone());
-            }
-            if let Some(w) = list_w.upgrade() {
-                w.set_lan_message(msg);
-            }
-            refresh(); // update the list right away
-        };
-        lock.on_unshare(unshare.clone());
-        list.on_unshare(unshare);
-    }
-
-    // ---- Incoming requests: the other half of linking. ----
-    // Refusals are remembered here rather than in Syncthing, which files a device again on
-    // its next retry. In memory on purpose: restarting the app gives a mis-clicked "reject"
-    // another chance, and there is no list of blocked devices to maintain or explain.
-    let rejected: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
-    // Which request the window is currently showing, so it is only raised when that changes
-    // — presenting it on every poll would take the focus away every two seconds.
-    let shown: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
-
-    {
-        let syncthing = syncthing.clone();
-        let rejected = rejected.clone();
-        let shown = shown.clone();
-        let approve_w = approve.as_weak();
-        pending_timer.start(TimerMode::Repeated, PENDING_POLL, move || {
-            let Some(win) = approve_w.upgrade() else { return };
-            let guard = syncthing.borrow();
-            let Some(st) = guard.as_ref() else { return };
-
-            let mut pending = match st.pending_devices() {
-                Ok(p) => p,
-                // Offline or shutting down: not worth a message on a window nobody asked for.
-                Err(e) => return diag!("could not read the pending devices: {e}"),
-            };
-            pending.retain(|d| !rejected.borrow().contains(&d.id));
-
-            let Some(next) = pending.first() else {
-                // Nothing left to answer — including the case where the peer gave up, so the
-                // window must not sit there offering a stale request.
-                if shown.borrow_mut().take().is_some() {
-                    let _ = win.hide();
-                }
-                return;
-            };
-
-            win.set_more_message(SharedString::from(if pending.len() > 1 {
-                t!("msg.more_requests_waiting", count = pending.len() - 1)
-            } else {
-                String::new()
-            }));
-
-            if shown.borrow().as_deref() == Some(next.id.as_str()) {
-                return; // already on screen; leave the window where the user put it
-            }
-            let verify = st
-                .device_id()
-                .map(|mine| pairing::verification_code(&mine, &next.id))
-                .unwrap_or_default();
-            win.set_device_id(SharedString::from(next.id.clone()));
-            win.set_device_name(SharedString::from(next.name.clone()));
-            win.set_verification_code(SharedString::from(verify));
-            win.set_status(SharedString::new());
-            win.set_status_is_error(false);
-            *shown.borrow_mut() = Some(next.id.clone());
-            present(&win);
-        });
-    }
-
-    {
-        let syncthing = syncthing.clone();
-        let shown = shown.clone();
-        let refresh = refresh_devices.clone();
-        let approve_w = approve.as_weak();
-        approve.on_allow(move || {
-            let Some(win) = approve_w.upgrade() else { return };
-            let id = win.get_device_id().to_string();
-            let guard = syncthing.borrow();
-            let Some(st) = guard.as_ref() else { return };
-            // Sharing the folder back is the whole of the approval; Syncthing drops the
-            // pending entry itself once the device is in the config.
-            match st.share_folder_with(SYNC_FOLDER_ID, &id) {
-                Ok(()) => {
-                    lift_revocation(&id);
-                    *shown.borrow_mut() = None;
-                    let _ = win.hide();
-                    drop(guard);
-                    refresh(); // show it in the device list straight away
-                }
-                Err(e) => {
-                    win.set_status_is_error(true);
-                    win.set_status(SharedString::from(t!("msg.approve_failed", error = e)));
-                }
-            }
-        });
-    }
-
-    {
-        let syncthing = syncthing.clone();
-        let rejected = rejected.clone();
-        let shown = shown.clone();
-        let approve_w = approve.as_weak();
-        approve.on_reject(move || {
-            let Some(win) = approve_w.upgrade() else { return };
-            let id = win.get_device_id().to_string();
-            rejected.borrow_mut().insert(id.clone());
-            // Best effort: our own answer is what silences the prompt, and clearing
-            // Syncthing's copy only keeps its list tidy.
-            if let Some(st) = syncthing.borrow().as_ref() {
-                let _ = st.dismiss_pending_device(&id);
-            }
-            *shown.borrow_mut() = None;
-            let _ = win.hide();
-        });
-    }
-
-    {
-        // Closing the window is not an answer: the request stays pending and comes back on
-        // the next poll, which is what someone who wants to go and check the other device's
-        // screen first would expect.
-        let shown = shown.clone();
-        let approve_w = approve.as_weak();
-        approve.on_close_requested(move || {
-            let Some(win) = approve_w.upgrade() else { return };
-            *shown.borrow_mut() = None;
-            let _ = win.hide();
-        });
-    }
-
-    // ---- Resize the window as the pairing panel opens and closes. ----
-    // The panel has to fit on one screen without scrolling, and neither window is that big
-    // by default, so it grows while open and shrinks back afterwards.
-    {
-        let saved = Rc::new(Cell::new(None));
-        let weak = list.as_weak();
-        list.on_sync_toggled(move |open| {
-            if let Some(w) = weak.upgrade() {
-                grow_for_panel(w.window(), open, PAIRING_MIN_SIZE, &saved);
-            }
-        });
-    }
-
-    PairingTimers {
-        _pair: pair_timer,
-        _vault_watch: vault_watch_timer,
-        _devices: devices_timer,
-        _pending: pending_timer,
-    }
+    });
 }
 
 /// Keeps the pairing timers alive; dropping it stops them.
@@ -606,6 +314,47 @@ impl Panel {
                 w.set_peer_message(message);
                 w.set_pair_waiting_code(waiting_code);
             }
+        }
+    }
+}
+
+/// Puts this device's pairing code, and its QR, on the lock and list windows. Returns the
+/// device id, or `None` when the daemon would not say.
+pub(crate) fn show_own_code(
+    st: &Syncthing,
+    lock: &LockWindow,
+    list: &ListWindow,
+) -> Option<String> {
+    let id = match st.device_id() {
+        Ok(id) => id,
+        Err(e) => {
+            diag!("could not read the device id: {e}");
+            return None;
+        }
+    };
+    let code = PairingCode::new(&id).encode();
+    if let Some(img) = qr_image(&code) {
+        lock.set_qr_image(img);
+    }
+    if let Some(img) = qr_image(&code) {
+        list.set_qr_image(img);
+    }
+    lock.set_my_pairing_code(SharedString::from(code.clone()));
+    list.set_my_pairing_code(SharedString::from(code));
+    lock.set_sync_available(true);
+    list.set_sync_available(true);
+    Some(id)
+}
+
+/// The LAN pairing listener: swaps device ids over a 6-digit code. Only started once our own
+/// id is known, since that is what it answers with.
+pub(crate) fn start_lan(my_device_id: Option<&String>) -> Option<Rc<lan_pair::PairListener>> {
+    let id = my_device_id?;
+    match lan_pair::PairListener::start(id.clone()) {
+        Ok(l) => Some(Rc::new(l)),
+        Err(e) => {
+            diag!("LAN pairing unavailable, continuing without it: {e}");
+            None
         }
     }
 }

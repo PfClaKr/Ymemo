@@ -3,18 +3,21 @@
 //! Slint callbacks are registered independently, so everything they need is bundled into
 //! one `Ctx` and cloned into each of them; it is all `Rc`, so cloning is cheap.
 
+use slint::VecModel;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Instant;
-
-use slint::VecModel;
 use ymemo_core::diag;
+use ymemo_core::sync::Syncthing;
 use ymemo_core::vault::Vault;
 
 use crate::settings::Settings;
-use crate::{HistoryWindow, ListRow, ListWindow, LockWindow, SettingsWindow, StickyWindow};
+use crate::{
+    ApproveWindow, HistoryWindow, ListRow, ListWindow, LockWindow, SecurityWindow, SettingsWindow,
+    StickyWindow,
+};
 
 pub(crate) type SharedVault = Rc<RefCell<Option<Vault>>>;
 
@@ -43,6 +46,30 @@ pub(crate) struct StickyEntry {
 pub(crate) type Stickies = Rc<RefCell<HashMap<String, StickyEntry>>>;
 
 impl Ctx {
+    /// The state a session starts with: no vault open yet, an empty list, nothing on the
+    /// desk. `has_tray` is answered later, once the tray has had its go.
+    pub(crate) fn new(
+        dir: PathBuf,
+        settings: Settings,
+        syncthing: Rc<RefCell<Option<Syncthing>>>,
+    ) -> Self {
+        Ctx {
+            vault: Rc::new(RefCell::new(None)),
+            model: Rc::new(VecModel::from(Vec::<ListRow>::new())),
+            stickies: Rc::new(RefCell::new(HashMap::new())),
+            collapsed: Rc::new(RefCell::new(HashSet::new())),
+            query: Rc::new(RefCell::new(String::new())),
+            undo: Rc::new(RefCell::new(None)),
+            undo_timer: Rc::new(slint::Timer::default()),
+            syncthing,
+            dir: Rc::new(dir),
+            settings: Rc::new(RefCell::new(settings)),
+            last_activity: Rc::new(Cell::new(Instant::now())),
+            has_tray: Rc::new(Cell::new(false)),
+            quiet_start: Rc::new(Cell::new(crate::autostart::launched_hidden())),
+        }
+    }
+
     /// The open vault, or `None` when it is locked — **or already borrowed further up the
     /// stack**. Slint can run a callback from inside another one, and a second
     /// `borrow_mut` there is a panic: that is what used to kill the app on the first merge
@@ -51,7 +78,8 @@ impl Ctx {
     #[track_caller]
     pub(crate) fn vault_mut(&self) -> Option<RefMut<'_, Vault>> {
         let Ok(guard) = self.vault.try_borrow_mut() else {
-            diag!("the vault was already in use; skipped a write at {}", std::panic::Location::caller());
+            let at = std::panic::Location::caller();
+            diag!("the vault was already in use; skipped a write at {at}");
             return None;
         };
         RefMut::filter_map(guard, Option::as_mut).ok()
@@ -61,11 +89,24 @@ impl Ctx {
     #[track_caller]
     pub(crate) fn vault_ref(&self) -> Option<Ref<'_, Vault>> {
         let Ok(guard) = self.vault.try_borrow() else {
-            diag!("the vault was already in use; skipped a read at {}", std::panic::Location::caller());
+            let at = std::panic::Location::caller();
+            diag!("the vault was already in use; skipped a read at {at}");
             return None;
         };
         Ref::filter_map(guard, Option::as_ref).ok()
     }
+}
+
+/// The windows that exist for the whole session, built once in `main` and handed to the
+/// code that wires them. Slint handles are cheap to hold; the windows are only shown and
+/// hidden, never rebuilt, so their positions survive.
+pub(crate) struct Ui {
+    pub(crate) lock: LockWindow,
+    pub(crate) list: ListWindow,
+    pub(crate) settings: SettingsWindow,
+    pub(crate) security: SecurityWindow,
+    pub(crate) history: HistoryWindow,
+    pub(crate) approve: ApproveWindow,
 }
 
 /// The bundle of shared app state.

@@ -4,12 +4,15 @@
 //! spawn the daemon at startup, then periodically merge other devices' logs into the UI.
 
 use ymemo_core::diag;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::Duration;
 
 use slint::{ComponentHandle, TimerMode};
 use ymemo_core::sync::{SharedDevice, Syncthing};
 
 use crate::list::refresh_list;
+use crate::settings::Settings;
 use crate::state::Ctx;
 use crate::sticky::sticky_text;
 use crate::{ListWindow, SharedDeviceRow};
@@ -175,5 +178,20 @@ pub(crate) fn start_syncthing(data_dir: &std::path::Path, vault_dir: &std::path:
             diag!("syncthing did not start, continuing without sync: {e}");
             None
         }
+    }
+}
+
+/// Pushes the folder settings that live in Syncthing's config rather than ours: the watch
+/// delay and rescan interval, and how long replaced files are kept. At startup — because
+/// `ensure_folder` only configures a folder it had to create — and after every save.
+pub(crate) fn apply_folder_settings(syncthing: &Rc<RefCell<Option<Syncthing>>>, s: &Settings) {
+    let guard = syncthing.borrow();
+    let Some(st) = guard.as_ref() else { return };
+    if let Err(e) = st.set_folder_timing(SYNC_FOLDER_ID, s.watch_delay_seconds, s.rescan_seconds) {
+        diag!("could not apply the sync timing: {e}");
+    }
+    // A safety net under the logs, not the memo history — see the core's docs.
+    if let Err(e) = st.set_folder_versioning(SYNC_FOLDER_ID, s.keep_versions_days) {
+        diag!("could not apply the version retention: {e}");
     }
 }

@@ -1,6 +1,8 @@
 //! Model for the memo list window: flattens the group tree into rows and applies dragged
 //! rows back to the core.
 
+pub(crate) mod actions;
+
 use ymemo_core::diag;
 use std::collections::{HashMap, HashSet};
 
