@@ -9,7 +9,6 @@
 
 use std::collections::HashSet;
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
 
 use anyhow::{anyhow, Result};
 use ymemo_core::{
@@ -21,59 +20,12 @@ use ymemo_core::{
     Attachment, Group, Memo, Store,
 };
 use ymemo_core::diag;
+
+use crate::globals::{
+    lan_lock, rejected_lock, relock, remember_delete, sync_lock, vault_lock, with_sync, with_vault,
+    LAST_DELETE,
+};
 use ymemo_i18n::t;
-
-/// The open vault; one per app process.
-static VAULT: Mutex<Option<Vault>> = Mutex::new(None);
-
-/// The last thing a delete removed, for as long as the UI is offering to put it back.
-///
-/// One slot, like the desktop's: what this stands in for is a confirmation dialog, and the
-/// question a confirmation answers is only ever about the delete that just happened. It is
-/// cleared by [`vault_close`], so a locked vault leaves nothing here — the value holds a
-/// memo's text, and that must not outlive the session that could read it.
-static LAST_DELETE: Mutex<Option<ymemo_core::vault::Deleted>> = Mutex::new(None);
-
-/// Records what a delete removed, so [`memo_undelete`] can offer it back.
-fn remember_delete(removed: Option<ymemo_core::vault::Deleted>) {
-    *relock(&LAST_DELETE) = removed;
-}
-
-/// Locks one of this file's globals, taking it back if a panic poisoned it.
-///
-/// flutter_rust_bridge turns a panic into a Dart exception and the app carries on, but a
-/// `Mutex` held at that moment stays poisoned — and every call after it failed, for the rest
-/// of the process, until the user thought to restart. None of these hold anything a panic
-/// can leave half-true except the vault, which [`vault_lock`] re-reads.
-fn relock<T>(m: &'static Mutex<T>) -> MutexGuard<'static, T> {
-    m.lock().unwrap_or_else(|poisoned| {
-        diag!("a lock was poisoned by a panic; carrying on with it");
-        m.clear_poison();
-        poisoned.into_inner()
-    })
-}
-
-/// [`relock`] for the vault, which on the way back is re-read from its logs: a panic in the
-/// middle of an edit can leave the document in memory holding half of it.
-fn vault_lock() -> MutexGuard<'static, Option<Vault>> {
-    VAULT.lock().unwrap_or_else(|poisoned| {
-        diag!("the vault lock was poisoned by a panic; re-reading the vault");
-        VAULT.clear_poison();
-        let mut guard = poisoned.into_inner();
-        if let Some(v) = guard.as_mut() {
-            if let Err(e) = v.reload() {
-                diag!("could not re-read the vault after a panic: {e}");
-            }
-        }
-        guard
-    })
-}
-
-fn with_vault<T>(f: impl FnOnce(&mut Vault) -> Result<T>) -> Result<T> {
-    let mut guard = vault_lock();
-    let vault = guard.as_mut().ok_or_else(|| anyhow!(t!("core.vault_not_open")))?;
-    f(vault)
-}
 
 /// A memo as handed to Dart; same fields as the core `Memo`.
 pub struct FfiMemo {
@@ -1156,19 +1108,6 @@ fn apply_revocations() {
 // open. (If the process is killed outright, `PR_SET_PDEATHSIG` in the core takes the daemon
 // with it, so nothing is left running.)
 
-/// The running daemon, one per app process, like [`VAULT`].
-static SYNC: Mutex<Option<Syncthing>> = Mutex::new(None);
-
-fn sync_lock() -> MutexGuard<'static, Option<Syncthing>> {
-    relock(&SYNC)
-}
-
-fn with_sync<T>(f: impl FnOnce(&Syncthing) -> Result<T>) -> Result<T> {
-    let guard = sync_lock();
-    let st = guard.as_ref().ok_or_else(|| anyhow!(t!("core.sync_not_running")))?;
-    f(st)
-}
-
 /// Another device sharing this vault.
 pub struct FfiSharedDevice {
     /// Syncthing device id — also what unpairing takes.
@@ -1335,19 +1274,6 @@ pub fn sync_unpair(device_id: String) -> Result<()> {
 // device, which is what turns up in `sync_pending_devices`. Allowing one is the same
 // `share_folder_with` the scan side already did, in the other direction.
 
-/// Requests refused during this run of the app.
-///
-/// Syncthing does not remember a refusal — the caller keeps retrying and is filed again —
-/// so the answer is kept here instead. Deliberately in memory and deliberately **not** in
-/// the `Syncthing` handle: mobile stops the daemon every time the app is backgrounded, and
-/// a refusal that expired on the walk back to the app would be no refusal at all. Starting
-/// the app again clears it, so a mis-tapped "reject" is never permanent.
-static REJECTED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
-
-fn rejected_lock() -> MutexGuard<'static, Option<HashSet<String>>> {
-    relock(&REJECTED)
-}
-
 /// A device asking to be let in.
 pub struct FfiPendingDevice {
     /// Syncthing device id; the handle for approving or rejecting.
@@ -1425,13 +1351,6 @@ pub fn sync_verification_code(peer_device_id: String) -> Result<String> {
 // "pairing mode", and on a phone it also keeps a UDP socket and a wifi multicast lock from
 // sitting there all day.
 
-/// The pairing-mode listener, alive only while the screen is open.
-static LAN: Mutex<Option<lan_pair::PairListener>> = Mutex::new(None);
-
-fn lan_lock() -> MutexGuard<'static, Option<lan_pair::PairListener>> {
-    relock(&LAN)
-}
-
 /// Registers a peer learnt over LAN with the running daemon.
 ///
 /// Kept separate so the LAN lock is never held while the sync lock is taken — the two are
@@ -1494,6 +1413,7 @@ pub fn lan_join(code: String, timeout_secs: u64) -> Result<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     /// The vault is process-global, so tests that open one would clobber each other in
     /// parallel; they take this lock instead. A poisoned lock is reused as-is, since it only
