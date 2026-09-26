@@ -31,6 +31,13 @@ pub(crate) struct StickyEntry {
     pub(crate) moving: Cell<bool>,
     /// Grab point while dragging the title bar, relative to the window (physical px).
     pub(crate) drag_grab: Cell<Option<(i32, i32)>>,
+    /// Until then, a change of position is the app placing the note, not a hand moving it,
+    /// and is not snapped. See `snap_tick`.
+    pub(crate) settle_until: Cell<Instant>,
+    /// When this note was last opened or activated, as a tick of `sticky::next_stamp`.
+    /// Raising the desk goes through the notes in this order, so it keeps the stacking the
+    /// user left rather than the order of a hash map.
+    pub(crate) last_active: Rc<Cell<u64>>,
 }
 
 pub(crate) type Stickies = Rc<RefCell<HashMap<String, StickyEntry>>>;

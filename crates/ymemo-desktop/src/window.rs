@@ -142,24 +142,44 @@ pub(crate) fn skip_taskbar<T: ComponentHandle + 'static>(component: &T) {
             window.set_skip_taskbar(true);
         }
         #[cfg(target_os = "linux")]
-        {
-            use i_slint_backend_winit::winit::raw_window_handle::{
-                HasWindowHandle, RawWindowHandle,
-            };
-            // None under native Wayland, where the handle is a Wayland surface and there is
-            // nothing to ask for.
-            let xid = window.window_handle().ok().and_then(|h| match h.as_raw() {
-                RawWindowHandle::Xlib(h) => Some(h.window as u32),
-                RawWindowHandle::Xcb(h) => Some(h.window.get()),
-                _ => None,
-            });
-            if let Some(xid) = xid {
-                x11::skip_taskbar(xid);
-            }
+        if let Some(xid) = x11_id(window) {
+            x11::skip_taskbar(xid);
         }
         #[cfg(not(any(windows, target_os = "linux")))]
         let _ = window;
     });
+}
+
+/// Makes a window that was **created** always-on-top actually be on top, on X11.
+///
+/// Slint builds a window hidden and maps it later, and winit asks for the level only once, at
+/// creation, as a client message — which EWMH reserves for *mapped* windows, so the window
+/// manager drops it. A pinned note that was opened pinned (every one put back after a restart,
+/// and every pinned one opened from the list) came up as an ordinary window, under whatever
+/// was focused next; toggling the pin by hand worked because by then the note was mapped.
+/// Measured under openbox: `_NET_WM_STATE` empty on a restored pinned note, `ABOVE` after a
+/// click on its pin. Windows and Wayland are left to winit.
+pub(crate) fn keep_above<T: ComponentHandle + 'static>(component: &T) {
+    with_window(component, |window| {
+        #[cfg(target_os = "linux")]
+        if let Some(xid) = x11_id(window) {
+            x11::keep_above(xid);
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = window;
+    });
+}
+
+/// The X11 window id, or `None` under native Wayland, where the handle is a Wayland surface
+/// and there is nothing to ask for.
+#[cfg(target_os = "linux")]
+fn x11_id(window: &i_slint_backend_winit::winit::window::Window) -> Option<u32> {
+    use i_slint_backend_winit::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    window.window_handle().ok().and_then(|h| match h.as_raw() {
+        RawWindowHandle::Xlib(h) => Some(h.window as u32),
+        RawWindowHandle::Xcb(h) => Some(h.window.get()),
+        _ => None,
+    })
 }
 
 /// Re-applies [`skip_taskbar`] after the window level has been changed.
@@ -193,14 +213,58 @@ pub(crate) fn raise<T: ComponentHandle + 'static>(component: &T) {
     with_window(component, |window| window.focus_window());
 }
 
+/// Puts a window on top of the others in its layer **without focusing it** — a pinned note
+/// stays among the pinned ones. winit has no such call: `focus_window` raises by activating,
+/// and putting the desk back must not take the caret from whatever the user turned to.
+///
+/// X11 asks with a `ConfigureWindow` restack, which the window manager receives as a request
+/// and may refuse; Windows is `SetWindowPos(HWND_TOP, SWP_NOACTIVATE)`. Nothing on Wayland,
+/// where a client does not get a say in stacking at all.
+pub(crate) fn restack_top(window: &i_slint_backend_winit::winit::window::Window) {
+    #[cfg(windows)]
+    windows_impl::bring_to_top(window);
+    #[cfg(target_os = "linux")]
+    if let Some(xid) = x11_id(window) {
+        x11::restack_top(xid);
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    let _ = window;
+}
+
 /// The Windows half of [`skip_taskbar`] that winit has no API for.
 #[cfg(windows)]
 mod windows_impl {
     use i_slint_backend_winit::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use i_slint_backend_winit::winit::window::Window;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOP,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, WS_EX_APPWINDOW,
+        WS_EX_TOOLWINDOW,
     };
+
+    fn hwnd(window: &Window) -> Option<*mut core::ffi::c_void> {
+        let handle = window.window_handle().ok()?;
+        let RawWindowHandle::Win32(win32) = handle.as_raw() else { return None };
+        Some(win32.hwnd.get() as *mut core::ffi::c_void)
+    }
+
+    /// See [`super::restack_top`]. `HWND_TOP` is the top of the window's own band, so a
+    /// topmost (pinned) note stays topmost and an ordinary one stays under the pinned ones.
+    pub(super) fn bring_to_top(window: &Window) {
+        let Some(hwnd) = hwnd(window) else { return };
+        // SAFETY: the handle comes from the winit window we are holding, live for the call.
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                HWND_TOP,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+            );
+        }
+    }
 
     /// Marks a window as a tool window, which is the shell's own idea of "not an application":
     /// no taskbar button, and no place in Alt+Tab either — the same statement.
@@ -215,9 +279,7 @@ mod windows_impl {
     /// Safe to call on a window already in this state — the read-modify-write leaves it as it
     /// was, and every `present` comes back through here.
     pub(super) fn tool_window(window: &Window) {
-        let Ok(handle) = window.window_handle() else { return };
-        let RawWindowHandle::Win32(win32) = handle.as_raw() else { return };
-        let hwnd = win32.hwnd.get() as *mut core::ffi::c_void;
+        let Some(hwnd) = hwnd(window) else { return };
         // SAFETY: the handle comes from the winit window we are holding, so it is live for
         // the length of this call, and GWL_EXSTYLE is an isize on every supported target.
         unsafe {
@@ -241,7 +303,8 @@ mod x11 {
 
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::{
-        AtomEnum, ClientMessageEvent, ConnectionExt, EventMask, PropMode, Window,
+        AtomEnum, ClientMessageEvent, ConfigureWindowAux, ConnectionExt, EventMask, PropMode,
+        StackMode, Window,
     };
     use x11rb::rust_connection::RustConnection;
     // `change_property32` is on this second extension trait, not on the xproto one.
@@ -257,6 +320,7 @@ mod x11 {
         state: u32,
         skip_taskbar: u32,
         skip_pager: u32,
+        above: u32,
     }
 
     thread_local! {
@@ -275,7 +339,8 @@ mod x11 {
             let state = atom("_NET_WM_STATE")?;
             let skip_taskbar = atom("_NET_WM_STATE_SKIP_TASKBAR")?;
             let skip_pager = atom("_NET_WM_STATE_SKIP_PAGER")?;
-            Ok(Wm { conn, root, state, skip_taskbar, skip_pager })
+            let above = atom("_NET_WM_STATE_ABOVE")?;
+            Ok(Wm { conn, root, state, skip_taskbar, skip_pager, above })
         };
         match run() {
             Ok(wm) => Some(wm),
@@ -287,19 +352,47 @@ mod x11 {
     }
 
     pub(super) fn skip_taskbar(xid: u32) {
-        WM.with(|cell| {
-            let mut slot = cell.borrow_mut();
-            let wm = slot.get_or_insert_with(open);
-            let Some(wm) = wm.as_ref() else { return };
+        with_wm(|wm| {
             // Checked rather than merely flushed: the round trips are a local socket, and
             // without them a rejected hint is a note that silently keeps its taskbar button.
-            if let Err(e) = apply(wm, xid) {
+            if let Err(e) = add_states(wm, xid, [wm.skip_taskbar, wm.skip_pager]) {
                 ymemo_core::diag!("could not hide the window from the taskbar: {e}");
             }
         });
     }
 
-    /// Asks for the two states **both** ways EWMH defines, because which one works depends on
+    pub(super) fn keep_above(xid: u32) {
+        with_wm(|wm| {
+            // 0 in the second slot is "no second state", per EWMH.
+            if let Err(e) = add_states(wm, xid, [wm.above, 0]) {
+                ymemo_core::diag!("could not keep the window on top: {e}");
+            }
+        });
+    }
+
+    pub(super) fn restack_top(xid: u32) {
+        with_wm(|wm| {
+            let run = || -> anyhow::Result<()> {
+                let aux = ConfigureWindowAux::new().stack_mode(StackMode::ABOVE);
+                wm.conn.configure_window(xid, &aux)?.check()?;
+                Ok(())
+            };
+            if let Err(e) = run() {
+                ymemo_core::diag!("could not restack a window: {e}");
+            }
+        });
+    }
+
+    fn with_wm(f: impl FnOnce(&Wm)) {
+        WM.with(|cell| {
+            let mut slot = cell.borrow_mut();
+            if let Some(wm) = slot.get_or_insert_with(open).as_ref() {
+                f(wm);
+            }
+        });
+    }
+
+    /// Asks for up to two states **both** ways EWMH defines, because which one works depends on
     /// something we cannot see here.
     ///
     /// The spec is explicit: a *mapped* window's state is changed by a client message to the
@@ -307,15 +400,15 @@ mod x11 {
     /// manager owns the property from the map onwards. Slint's `show()` only queues the map
     /// request, so by the time this runs the window is one or the other and there is no way
     /// to ask which. Doing both costs one round trip and is right either way.
-    fn apply(wm: &Wm, xid: u32) -> anyhow::Result<()> {
-        // Read-modify-write, never a plain overwrite: winit puts `_NET_WM_STATE_ABOVE` in
-        // this same property for a pinned note, and replacing the list would unpin it.
+    fn add_states(wm: &Wm, xid: u32, wanted: [u32; 2]) -> anyhow::Result<()> {
+        // Read-modify-write, never a plain overwrite: the taskbar states and `ABOVE` share
+        // this property, and replacing the list to add one would drop the other.
         let current = wm
             .conn
             .get_property(false, xid, wm.state, AtomEnum::ATOM, 0, 64)?
             .reply()?;
         let mut states: Vec<u32> = current.value32().map(|v| v.collect()).unwrap_or_default();
-        for atom in [wm.skip_taskbar, wm.skip_pager] {
+        for atom in wanted.into_iter().filter(|&a| a != 0) {
             if !states.contains(&atom) {
                 states.push(atom);
             }
@@ -329,7 +422,7 @@ mod x11 {
             32,
             xid,
             wm.state,
-            [STATE_ADD, wm.skip_taskbar, wm.skip_pager, SOURCE_APPLICATION, 0],
+            [STATE_ADD, wanted[0], wanted[1], SOURCE_APPLICATION, 0],
         );
         wm.conn
             .send_event(

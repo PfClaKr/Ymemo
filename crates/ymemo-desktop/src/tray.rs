@@ -79,6 +79,13 @@ pub(crate) fn request_toggle() {
 
 /// A second launch asked us to come forward (see `instance::serve`). Unlike a tray
 /// click this only ever shows: the user just asked for the app, so hiding it would be absurd.
+///
+/// **Shows means raises.** It used to `present` the list and stop, and presenting a window
+/// that is already visible does nothing to where it is stacked — so with the list and the
+/// notes buried under a browser, launching the app again printed "asked it to show itself"
+/// and nothing moved. Where no tray registered that launch is the only way back to a buried
+/// note, which made them unreachable. The notes come up first and the list last, in front:
+/// the list is what launching "the app" names.
 pub(crate) fn request_show() {
     let _ = slint::invoke_from_event_loop(|| {
         APP.with(|a| {
@@ -89,10 +96,16 @@ pub(crate) fn request_show() {
             if app.ctx.quiet_start.get() {
                 crate::lock::show_desk(&app.ctx, &app.list.as_weak());
             }
-            if app.unlocked.get() {
-                present(&app.list);
-            } else {
+            if !app.unlocked.get() {
                 present(&app.lock);
+                crate::window::raise(&app.lock);
+                return;
+            }
+            crate::sticky::raise_open(&app.ctx);
+            if app.list.window().is_visible() {
+                crate::window::raise(&app.list);
+            } else {
+                present(&app.list);
             }
         });
     });

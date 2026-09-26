@@ -245,6 +245,9 @@ pub(crate) fn show_desk(ctx: &Ctx, list_weak: &slint::Weak<ListWindow>) {
             None => list.window().set_size(slint::LogicalSize::new(340.0, 460.0)),
         }
     }
-    // After the list, so the notes land in front of it rather than behind it.
+    // After the list, so the notes land in front of it rather than behind it — which the
+    // order of these calls alone does not achieve; see `stack_desk`.
     reopen_desk(ctx);
+    let ids = ctx.settings.borrow().open_memos().to_vec();
+    crate::sticky::stack_desk(ctx, Some(list_weak.clone()), &ids);
 }

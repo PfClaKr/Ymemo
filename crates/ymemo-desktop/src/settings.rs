@@ -331,6 +331,20 @@ impl Settings {
         true
     }
 
+    /// Moves an open memo to the end of the open list — the top of the desk when it is put
+    /// back. Returns whether that changed anything.
+    pub fn move_open_memo_to_top(&mut self, id: &str) -> bool {
+        let Some(at) = self.open_memos.iter().position(|m| m == id) else {
+            return false;
+        };
+        if at + 1 == self.open_memos.len() {
+            return false;
+        }
+        let moved = self.open_memos.remove(at);
+        self.open_memos.push(moved);
+        true
+    }
+
     /// Forgets everything remembered about one memo's window, for a memo that is now gone.
     pub fn forget_memo(&mut self, id: &str) -> bool {
         let mut changed = self.forget_memo_window(id);
@@ -564,6 +578,19 @@ mod tests {
         assert!(s.set_memo_open("m1", false));
         assert_eq!(s.open_memos(), ["m2".to_string()]);
         assert!(!s.set_memo_open("m1", false));
+    }
+
+    /// Activating a note makes it the top of the desk the next start puts back.
+    #[test]
+    fn an_activated_note_goes_to_the_top_of_the_open_list() {
+        let mut s = Settings::default();
+        for id in ["a", "b", "c"] {
+            s.set_memo_open(id, true);
+        }
+        assert!(s.move_open_memo_to_top("a"));
+        assert_eq!(s.open_memos(), ["b", "c", "a"]);
+        assert!(!s.move_open_memo_to_top("a"), "already on top: nothing to save");
+        assert!(!s.move_open_memo_to_top("gone"));
     }
 
     /// Folding is a state, not a 24px window height.
