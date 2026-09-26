@@ -14,7 +14,7 @@ use ymemo_core::{now_millis, Memo};
 use ymemo_i18n::t;
 
 use crate::list::refresh_list;
-use crate::state::{touch, Ctx, StickyEntry, Stickies, APP};
+use crate::state::{Motion, touch, Ctx, StickyEntry, Stickies, APP};
 use crate::window::restore_geometry;
 use crate::{apply_strings, StickyWindow, Strings};
 
@@ -31,7 +31,7 @@ mod title;
 
 pub(crate) use desk::{hide_open_notes_from_taskbar, raise_open, stack_desk};
 pub(crate) use geometry::{remember_geometry, rescue_offscreen};
-pub(crate) use photos::{set_photo_models, split_photo_rows};
+pub(crate) use photos::{forget_all_photos, set_photo_models, split_photo_rows};
 pub(crate) use snap::snap_tick;
 pub(crate) use title::derive_title;
 
@@ -112,10 +112,9 @@ pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) -> bool {
     // holding the text it was given last time. Without this the picture stays where it was
     // while the writing slides out from under it. Only the photos are pushed, never the text:
     // the user is typing in it.
-    let models = split_photo_rows(v, id);
     if let Some(entry) = ctx.stickies.borrow().get(id) {
         if !entry.window.get_photo_busy() {
-            set_photo_models(&entry.window, models);
+            set_photo_models(&entry.window, split_photo_rows(v, id));
         }
     }
     // Reflect the new title in the title bar.
@@ -212,6 +211,7 @@ pub(crate) fn close_sticky(stickies: &Stickies, id: &str) {
     let id = id.to_string();
     slint::Timer::single_shot(Duration::ZERO, move || {
         stickies.borrow_mut().remove(&id);
+        photos::forget_photos_of(&id);
     });
 }
 
@@ -320,7 +320,8 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     // the stacking order. Registered after the window is on screen, because until then there
     // is no winit window to hang the filter on and this is quietly a no-op.
     let last_active = Rc::new(Cell::new(next_stamp()));
-    wire_window_events(ctx, &window, &memo.id, last_active.clone());
+    let motion = Motion::new();
+    wire_window_events(ctx, &window, &memo.id, last_active.clone(), motion.clone());
     put_back(ctx, &window, &memo.id, &expanded_height);
     // A note opens at its first line, whatever the widget's scroll offset happened to be.
     window.invoke_body_to_top();
@@ -333,8 +334,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
             window,
             save_timer: slint::Timer::default(),
             dirty,
-            last_pos: Cell::new(None),
-            moving: Cell::new(false),
+            motion,
             drag_grab: Cell::new(None),
             settle_until: Cell::new(Instant::now() + SETTLE),
             last_active,

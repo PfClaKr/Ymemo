@@ -28,10 +28,8 @@ pub(crate) struct StickyEntry {
     pub(crate) save_timer: slint::Timer,
     /// Unsaved edits pending; while set, the merge timer must not overwrite the body.
     pub(crate) dirty: Rc<Cell<bool>>,
-    /// Window position at the last snap tick (physical px), to detect the end of a move.
-    pub(crate) last_pos: Cell<Option<(i32, i32)>>,
-    /// Moved since the last tick, i.e. dragging; snapping happens once it stops.
-    pub(crate) moving: Cell<bool>,
+    /// What the window system has said about this window since it was last looked at.
+    pub(crate) motion: Rc<Motion>,
     /// Grab point while dragging the title bar, relative to the window (physical px).
     pub(crate) drag_grab: Cell<Option<(i32, i32)>>,
     /// Until then, a change of position is the app placing the note, not a hand moving it,
@@ -44,6 +42,27 @@ pub(crate) struct StickyEntry {
 }
 
 pub(crate) type Stickies = Rc<RefCell<HashMap<String, StickyEntry>>>;
+
+/// A note's window moving or changing size, as winit reports it (`Moved`, `Resized`).
+///
+/// The snap and geometry timers read this instead of asking where every note is. They used to
+/// ask — eleven times a second for snapping, every two seconds for the geometry — and each
+/// question is a round trip to the X server per note, so an untouched desk of forty notes cost
+/// 3.3% of a core in the app and as much again in the X server. Measured under Xvfb.
+pub(crate) struct Motion {
+    /// When the window last moved, while that has not been dealt with. `snap_tick` snaps a
+    /// note once this is a moment old, and clears it.
+    pub(crate) moved_at: Cell<Option<Instant>>,
+    /// Moved or resized since its geometry was last written down.
+    pub(crate) geometry_dirty: Cell<bool>,
+}
+
+impl Motion {
+    /// A note just opened: nothing to snap, and a geometry that has never been recorded.
+    pub(crate) fn new() -> Rc<Self> {
+        Rc::new(Motion { moved_at: Cell::new(None), geometry_dirty: Cell::new(true) })
+    }
+}
 
 impl Ctx {
     /// The state a session starts with: no vault open yet, an empty list, nothing on the

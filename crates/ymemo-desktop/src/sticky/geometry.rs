@@ -148,11 +148,23 @@ pub(crate) fn rescue_offscreen(ctx: &Ctx, list: &crate::ListWindow) {
 pub(crate) fn remember_geometry(ctx: &Ctx, list: &crate::ListWindow) {
     let mut changed = false;
     // Read outside the `settings` borrow: `geometry_to_remember` reads the settings itself.
+    // Only the notes winit said moved or resized (`Motion`), and any with no screen on record
+    // yet — asking every note where it is, every two seconds, cost a round trip each.
     let seen: Vec<(String, [i32; 4])> = {
         let map = ctx.stickies.borrow();
-        map.iter()
-            .filter(|(_, e)| e.window.window().is_visible())
+        let settings = ctx.settings.borrow();
+        let wanted: Vec<(&String, &crate::state::StickyEntry)> = map
+            .iter()
+            .filter(|(id, e)| {
+                e.window.window().is_visible()
+                    && (e.motion.geometry_dirty.get() || settings.memo_screen(id).is_none())
+            })
+            .collect();
+        drop(settings);
+        wanted
+            .into_iter()
             .map(|(id, e)| {
+                e.motion.geometry_dirty.set(false);
                 let g = geometry_to_remember(ctx, id, e.window.window(), e.window.get_collapsed());
                 (id.clone(), g)
             })

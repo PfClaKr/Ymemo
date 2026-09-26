@@ -7,7 +7,7 @@ use i_slint_backend_winit::WinitWindowAccessor;
 use i_slint_backend_winit::winit::dpi::PhysicalPosition;
 use slint::ComponentHandle;
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::StickyWindow;
 use crate::state::{touch, Ctx, StickyEntry, Stickies};
@@ -17,91 +17,55 @@ use super::SNAP_DIST;
 /// A rectangle in physical px: (x, y, w, h).
 pub(crate) type Rect = (i32, i32, i32, i32);
 
-/// One snap tick: read every open sticky's position and snap the ones that just stopped.
+/// How long a note has to have been still before it counts as put down.
+const STILL: Duration = Duration::from_millis(150);
+
+/// One snap tick: snap the notes that moved and have since stopped.
+///
+/// Which ones moved is what winit said (`Motion::moved_at`), so a desk nobody is touching
+/// costs nothing here — no note is asked where it is. Only a note that has just been put down
+/// is, and the others once, as snap targets. The monitor too, of that one note only: asking
+/// every note for it every tick was once most of what an idle desk cost.
 pub(crate) fn snap_tick(stickies: &Stickies) {
     let map = stickies.borrow();
-    if map.is_empty() {
-        return;
-    }
-    // 1) Read rect and scale of the visible windows (only works on X11).
-    //
-    // **Not the monitor.** `current_monitor()` is a question for the windowing system, and
-    // asking it for every note eleven times a second — to answer something only the one note
-    // that just stopped being dragged ever asks — is most of what a desk full of notes costs
-    // while nobody is touching it: measured at 4.3% of a core with two notes open and 14.4%
-    // with eight, doing nothing at all. It is asked for below instead, once, of the one note
-    // that needs it.
-    let mut rects: Vec<(String, Rect, f32)> = Vec::new();
-    for (id, e) in map.iter() {
+    let now = Instant::now();
+    let stopped: Vec<&String> = map
+        .iter()
+        .filter_map(|(id, e)| {
+            let moved = e.motion.moved_at.get()?;
+            // Dragged by its own title bar: `drag_move` snaps live. Still arriving: the window
+            // manager's placement and `restore_geometry` are not a hand putting it down, and
+            // snapping them pulled overlapping notes a little closer on every start.
+            if e.drag_grab.get().is_some() || now < e.settle_until.get() {
+                e.motion.moved_at.set(None);
+                return None;
+            }
+            (now.duration_since(moved) >= STILL).then_some(id)
+        })
+        .collect();
+    for id in stopped {
+        let e = &map[id];
+        e.motion.moved_at.set(None);
         if !e.window.window().is_visible() {
             continue;
         }
         let got = e.window.window().with_winit_window(|ww| {
             let p = ww.outer_position().ok()?;
             let s = ww.inner_size();
-            Some(((p.x, p.y, s.width as i32, s.height as i32), ww.scale_factor() as f32))
+            let mon = ww.current_monitor().map(|m| {
+                let (mp, ms) = (m.position(), m.size());
+                (mp.x, mp.y, ms.width as i32, ms.height as i32)
+            });
+            Some(((p.x, p.y, s.width as i32, s.height as i32), ww.scale_factor() as f32, mon))
         });
-        if let Some(Some((rect, scale))) = got {
-            rects.push((id.clone(), rect, scale));
-        }
-    }
-
-    // 2) Compare with the last tick to detect the end of a move, then snap once.
-    for (idx, (id, rect, scale)) in rects.iter().enumerate() {
-        let Some(e) = map.get(id) else { continue };
-        let cur = (rect.0, rect.1);
-        // A window being dragged is already snapped live by drag_move.
-        if e.drag_grab.get().is_some() {
-            e.last_pos.set(Some(cur));
-            e.moving.set(false);
-            continue;
-        }
-        // First sighting, or the app still placing it. Snapping here treated a note merely
-        // *appearing* as the end of a drag: every restart pulled overlapping notes 10px
-        // towards their neighbours, so a desk drifted a little further each time the app
-        // started. Measured under openbox with twelve cascaded notes.
-        if e.last_pos.get().is_none() || Instant::now() < e.settle_until.get() {
-            e.last_pos.set(Some(cur));
-            e.moving.set(false);
-            continue;
-        }
-        if e.last_pos.get() != Some(cur) {
-            // Still moving.
-            e.moving.set(true);
-            e.last_pos.set(Some(cur));
-            continue;
-        }
-        if !e.moving.get() {
-            continue; // still at rest, leave it alone
-        }
-        // Just stopped: snap to the other windows and the screen edges. The monitor is asked
-        // for here and nowhere else — one note, once, at the end of one drag.
-        let others: Vec<Rect> = rects
-            .iter()
-            .enumerate()
-            .filter(|(j, _)| *j != idx)
-            .map(|(_, r)| r.1)
-            .collect();
-        let mon = e
-            .window
-            .window()
-            .with_winit_window(|ww| {
-                ww.current_monitor().map(|m| {
-                    let mp = m.position();
-                    let ms = m.size();
-                    (mp.x, mp.y, ms.width as i32, ms.height as i32)
-                })
-            })
-            .flatten();
-        let threshold = (SNAP_DIST * *scale) as i32;
-        let (nx, ny) = snap_position(*rect, &others, mon, threshold);
-        if (nx, ny) != cur {
+        let Some(Some((rect, scale, mon))) = got else { continue };
+        let threshold = (SNAP_DIST * scale) as i32;
+        let (nx, ny) = snap_position(rect, &other_rects(&map, id), mon, threshold);
+        if (nx, ny) != (rect.0, rect.1) {
             e.window.window().with_winit_window(|ww| {
                 ww.set_outer_position(PhysicalPosition::new(nx, ny));
             });
-            e.last_pos.set(Some((nx, ny)));
         }
-        e.moving.set(false);
     }
 }
 
@@ -238,30 +202,21 @@ fn wire_drag_move(ctx: &Ctx, window: &StickyWindow, id: &str) {
             sw.with_winit_window(|ww| {
                 ww.set_outer_position(PhysicalPosition::new(nx, ny));
             });
-            me.last_pos.set(Some((nx, ny)));
         }
     });
 }
 
-/// Release: clear the drag state and record the current position, so the snap timer does
-/// not mistake this for a window that just stopped and snap it again.
+/// Release: clear the drag state, so the snap timer does not take the end of a drag it
+/// already snapped live for a note just put down.
 fn wire_drag_end(ctx: &Ctx, window: &StickyWindow, id: &str) {
-    let weak = window.as_weak();
     let ctx = ctx.clone();
     let id = id.to_string();
     window.on_drag_end(move || {
         let map = ctx.stickies.borrow();
         let Some(e) = map.get(&id) else { return };
         e.drag_grab.set(None);
-        if let Some(w) = weak.upgrade() {
-            if let Some(Some(p)) = w
-                .window()
-                .with_winit_window(|ww| ww.outer_position().ok().map(|p| (p.x, p.y)))
-            {
-                e.last_pos.set(Some(p));
-            }
-        }
-        e.moving.set(false);
+        // Already snapped live while it moved; a `Moved` still on its way is not a new drop.
+        e.motion.moved_at.set(None);
     });
 }
 

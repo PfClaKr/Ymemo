@@ -56,7 +56,10 @@ pub(crate) fn lock_now(ctx: &Ctx, lock: &LockWindow, list: &ListWindow, unlocked
     // Defer dropping the window handles to the next event-loop turn (as in close_sticky).
     {
         let stickies = ctx.stickies.clone();
-        slint::Timer::single_shot(Duration::ZERO, move || stickies.borrow_mut().clear());
+        slint::Timer::single_shot(Duration::ZERO, move || {
+            stickies.borrow_mut().clear();
+            crate::sticky::forget_all_photos();
+        });
     }
 
     *ctx.vault.borrow_mut() = None;

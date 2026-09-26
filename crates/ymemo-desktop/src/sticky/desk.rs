@@ -9,7 +9,7 @@ use std::time::Instant;
 use ymemo_core::diag;
 
 use crate::StickyWindow;
-use crate::state::Ctx;
+use crate::state::{Ctx, Motion};
 use crate::window::{present, raise, skip_taskbar};
 
 use super::SETTLE;
@@ -178,6 +178,7 @@ pub(super) fn wire_window_events(
     window: &StickyWindow,
     memo_id: &str,
     last_active: Rc<Cell<u64>>,
+    motion: Rc<Motion>,
 ) {
     use i_slint_backend_winit::winit::event::WindowEvent;
     use i_slint_backend_winit::EventResult;
@@ -201,6 +202,11 @@ pub(super) fn wire_window_events(
                     settings.save(&ctx.dir);
                 }
             }
+            WindowEvent::Moved(_) => {
+                motion.moved_at.set(Some(Instant::now()));
+                motion.geometry_dirty.set(true);
+            }
+            WindowEvent::Resized(_) => motion.geometry_dirty.set(true),
             WindowEvent::HoveredFile(path) => {
                 if looks_like_a_photo(path) {
                     if let Some(w) = weak.upgrade() {

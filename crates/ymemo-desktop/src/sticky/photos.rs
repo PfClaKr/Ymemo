@@ -2,6 +2,8 @@
 //! callbacks that move them about.
 
 use slint::ComponentHandle;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,6 +31,7 @@ pub(crate) fn split_photo_rows(v: &Vault, memo_id: &str) -> PhotoModels {
             return PhotoModels::default();
         }
     };
+    note_shows(memo_id, list.iter().map(|a| a.hash.clone()).collect());
     // The writing, for the photos standing in it: each one is drawn at the height of the
     // lines above it, and only the toolkit can measure that, so the words go with the row.
     let body = v.store().get(memo_id).ok().flatten().map(|m| m.body).unwrap_or_default();
@@ -92,11 +95,7 @@ pub(super) fn rows_of(v: &Vault, list: Vec<ymemo_core::Attachment>, prefix: &str
     list.into_iter()
         .map(|a| {
             let (w, h) = a.display_size(BODY_FONT_PX);
-            let image = v
-                .has_blob(&a.hash)
-                .then(|| v.attachment_bytes(&a.hash).ok())
-                .flatten()
-                .and_then(|bytes| decode_image(&bytes));
+            let image = photo_image(v, &a.hash);
             PhotoRow {
                 id: a.id.into(),
                 missing: image.is_none(),
@@ -111,6 +110,72 @@ pub(super) fn rows_of(v: &Vault, list: Vec<ymemo_core::Attachment>, prefix: &str
             }
         })
         .collect()
+}
+
+thread_local! {
+    static PHOTOS: RefCell<PhotoCache> = RefCell::new(PhotoCache::default());
+}
+
+/// Decoded photos, kept while an open note shows them. See [`photo_image`].
+#[derive(Default)]
+struct PhotoCache {
+    /// Decoded image by content hash.
+    images: HashMap<String, slint::Image>,
+    /// The hashes each open note is showing, by memo id — what keeps an image alive.
+    shown: HashMap<String, Vec<String>>,
+}
+
+impl PhotoCache {
+    fn drop_unshown(&mut self) {
+        let live: HashSet<&String> = self.shown.values().flatten().collect();
+        self.images.retain(|hash, _| live.contains(hash));
+    }
+}
+
+/// A photo ready to draw, decrypted and decoded at most once while any open note shows it.
+///
+/// A note's photo rows are rebuilt routinely: every merge that brings anything in, every save
+/// of a note with a photo standing in its writing. Each rebuild decrypted and decoded every
+/// picture again — 370-490 ms of the UI thread per merge with four notes holding a phone-sized
+/// photo, measured, whatever the merge was about. A blob never changes under its hash, so the
+/// decoded image can be kept, and `slint::Image` shares its pixels: one the window is drawing
+/// costs nothing more for being cached.
+fn photo_image(v: &Vault, hash: &str) -> Option<slint::Image> {
+    if let Some(image) = PHOTOS.with(|c| c.borrow().images.get(hash).cloned()) {
+        return Some(image);
+    }
+    let image = v
+        .has_blob(hash)
+        .then(|| v.attachment_bytes(hash).ok())
+        .flatten()
+        .and_then(|bytes| decode_image(&bytes))?;
+    PHOTOS.with(|c| c.borrow_mut().images.insert(hash.to_string(), image.clone()));
+    Some(image)
+}
+
+/// Records which photos a note is about to show, and lets go of any no open note shows.
+fn note_shows(memo_id: &str, hashes: Vec<String>) {
+    PHOTOS.with(|c| {
+        let mut c = c.borrow_mut();
+        c.shown.insert(memo_id.to_string(), hashes);
+        c.drop_unshown();
+    });
+}
+
+/// A note closed: its photos are let go unless another open note shows them too. A full-size
+/// decode is tens of megabytes, so the cache must not outlive the notes that asked for it.
+pub(crate) fn forget_photos_of(memo_id: &str) {
+    PHOTOS.with(|c| {
+        let mut c = c.borrow_mut();
+        c.shown.remove(memo_id);
+        c.drop_unshown();
+    });
+}
+
+/// Locked: every decoded photo goes. They are the plaintext of the vault's pictures, and a
+/// locked vault leaves none of its contents behind.
+pub(crate) fn forget_all_photos() {
+    PHOTOS.with(|c| *c.borrow_mut() = PhotoCache::default());
 }
 
 /// Photo bytes to an RGBA8 Slint image; `None` for an unsupported format.
