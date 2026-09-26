@@ -16,6 +16,7 @@ import '../pending_edits.dart';
 import '../src/rust/api.dart';
 import '../ui_util.dart';
 import '../widgets/note_photo.dart';
+import 'history_screen.dart';
 
 /// Memo editor: title and body, saved on the way out.
 class MemoEditScreen extends StatefulWidget {
@@ -46,6 +47,10 @@ class MemoEditScreen extends StatefulWidget {
   /// Palette key the memo arrived with; the editor wears it the way the desktop's sticky
   /// does, so the same memo looks like the same memo on either device.
   final String color;
+
+  /// What the editor pops with when the memo is to be deleted; the list does the deleting,
+  /// because the list is where the undo can be offered.
+  static const deleteResult = 'delete';
 
   @override
   State<MemoEditScreen> createState() => _MemoEditScreenState();
@@ -165,6 +170,29 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
     if (widget.isNew && _title.text.trim().isEmpty && _body.text.trim().isEmpty) {
       await memoDiscardIfBlank(id: widget.id);
     }
+  }
+
+  /// Saves, shows the memo's past, and — if a version was put back — takes the restored text
+  /// into the fields, which would otherwise write the pre-restore words straight back.
+  Future<void> _openHistory() async {
+    if (!await _save() || !mounted) return;
+    final restored = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      builder: (_) => HistoryScreen(
+        strings: widget.strings,
+        memoId: widget.id,
+        title: _title.text,
+        color: _color,
+      ),
+    ));
+    if (restored != true || !mounted) return;
+    final memo = (await memoList()).where((m) => m.id == widget.id).firstOrNull;
+    if (memo == null || !mounted) return;
+    _savedTitle = memo.title;
+    _savedBody = memo.body;
+    _title.text = memo.title;
+    _body.text = memo.body;
+    setState(() => _color = memo.color);
+    await _reloadPhotos();
   }
 
   void _scheduleAutosave() {
@@ -427,6 +455,25 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                 final saved = await _save();
                 if (saved && context.mounted) Navigator.of(context).pop();
               },
+            ),
+            // The memo's past and its deletion, which were only reachable from the list's
+            // long press — somewhere nobody looks from inside a memo.
+            PopupMenuButton<String>(
+              onSelected: (action) async {
+                if (action == 'history') {
+                  await _openHistory();
+                } else if (action == MemoEditScreen.deleteResult) {
+                  _autosave?.cancel();
+                  Navigator.of(context).pop(MemoEditScreen.deleteResult);
+                }
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem(value: 'history', child: Text(widget.strings.history)),
+                PopupMenuItem(
+                  value: MemoEditScreen.deleteResult,
+                  child: Text(widget.strings.delete),
+                ),
+              ],
             ),
           ],
         ),

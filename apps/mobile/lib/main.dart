@@ -238,13 +238,13 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
     // to edge. Flutter's default leaves its clock and icons **light**, which on this cream
     // paper is white on off-white — unreadable on every screen that has no AppBar to set the
     // style for it, which is every screen before the vault is open. Setting it on the theme
-    // covers those too, and follows the platform brightness so a dark phone still gets light
-    // icons. `systemNavigationBar` is left alone: the gesture bar draws its own contrast.
-    final dark = MediaQuery.platformBrightnessOf(context) == Brightness.dark;
-    final overlay = SystemUiOverlayStyle(
+    // covers those too. **Always dark icons**: the app has one, light, look, and following the
+    // phone's dark mode put white icons on the cream and yellow — the clock vanished, seen on
+    // the emulator. `systemNavigationBar` is left alone: the gesture bar draws its own contrast.
+    const overlay = SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
-      statusBarIconBrightness: dark ? Brightness.light : Brightness.dark,
-      statusBarBrightness: dark ? Brightness.dark : Brightness.light,
+      statusBarIconBrightness: Brightness.dark,
+      statusBarBrightness: Brightness.light,
     );
     SystemChrome.setSystemUIOverlayStyle(overlay);
     return MaterialApp(
@@ -253,7 +253,7 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFE6D24A)),
         useMaterial3: true,
-        appBarTheme: AppBarTheme(systemOverlayStyle: overlay),
+        appBarTheme: const AppBarTheme(systemOverlayStyle: overlay),
       ),
       home: _restoring
           // Brief: reading one key out of the keystore. Showing the lock screen first would

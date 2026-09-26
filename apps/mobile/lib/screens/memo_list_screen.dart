@@ -527,9 +527,11 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
   /// The memo is really gone from the document the whole time; undoing writes it back as a new
   /// edit (see `Vault::undelete`), so nothing here is a pending state that sync could catch
   /// half-done. The core keeps exactly one of these, and drops it when the vault closes.
-  Future<void> _deleteWithUndo(FfiMemo memo) async {
+  Future<void> _deleteWithUndo(FfiMemo memo) => _deleteIdWithUndo(memo.id);
+
+  Future<void> _deleteIdWithUndo(String id) async {
     final messenger = ScaffoldMessenger.of(context);
-    await memoDelete(id: memo.id);
+    await memoDelete(id: id);
     await _reload();
     if (!mounted) return;
     messenger.hideCurrentSnackBar();
@@ -546,7 +548,9 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
     ));
   }
 
-  /// Recolor or move, on a long press. Deleting is the swipe, so it is not repeated here.
+  /// Recolor, move, look back or delete, on a long press. Deleting is also the swipe, but a
+  /// swipe is a gesture nobody is told about: with the sheet offering everything else, a
+  /// memo looked as if it could not be deleted at all.
   Future<void> _memoMenu(FfiMemo memo) async {
     final s = widget.strings;
     final action = await showModalBottomSheet<String>(
@@ -567,6 +571,11 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
               title: Text(s.history),
               onTap: () => Navigator.of(context).pop('history'),
             ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: Text(s.delete),
+              onTap: () => Navigator.of(context).pop('delete'),
+            ),
           ],
         ),
       ),
@@ -578,6 +587,8 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
       await _reload();
     } else if (action == 'move') {
       await _moveMemo(memo);
+    } else if (action == 'delete') {
+      await _deleteWithUndo(memo);
     } else if (action == 'history') {
       final restored = await Navigator.of(context).push<bool>(MaterialPageRoute(
         builder: (_) => HistoryScreen(
@@ -699,7 +710,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
       return;
     }
     if (!mounted) return;
-    await Navigator.of(context).push(
+    final result = await Navigator.of(context).push<String>(
       MaterialPageRoute(
         builder: (_) => MemoEditScreen(
           strings: widget.strings,
@@ -712,6 +723,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
         ),
       ),
     );
+    if (result == MemoEditScreen.deleteResult) return _deleteIdWithUndo(id);
     // Backing out without writing anything leaves the memo this created behind, and one
     // "New memo" row for every time anyone tapped the button and changed their mind. The
     // core decides — a photo counts as writing.
@@ -724,7 +736,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
   }
 
   Future<void> _open(FfiMemo memo) async {
-    await Navigator.of(context).push(
+    final result = await Navigator.of(context).push<String>(
       MaterialPageRoute(
         builder: (_) => MemoEditScreen(
           strings: widget.strings,
@@ -735,6 +747,8 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
         ),
       ),
     );
+    // Deleting from the editor comes back here, where the undo can be offered.
+    if (result == MemoEditScreen.deleteResult) return _deleteIdWithUndo(memo.id);
     await _reload();
   }
 

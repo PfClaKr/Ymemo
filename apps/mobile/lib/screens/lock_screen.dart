@@ -234,8 +234,10 @@ class _LockScreenState extends State<LockScreen> {
       }
       await widget.onUnlocked();
     } catch (e) {
-      // Core errors already arrive in the current language.
+      // Core errors already arrive in the current language. The password is selected, so a
+      // retry is typed straight over it rather than deleted first.
       setState(() => _error = '$e');
+      _password.selection = TextSelection(baseOffset: 0, extentOffset: _password.text.length);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
