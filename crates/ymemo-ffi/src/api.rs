@@ -157,11 +157,6 @@ pub fn set_language(code: String) {
     ymemo_i18n::set_lang(lang);
 }
 
-/// Language code currently used for core messages.
-pub fn language() -> String {
-    ymemo_i18n::lang().code().to_string()
-}
-
 /// The mobile UI strings in the current language; Dart fetches these once at startup.
 ///
 /// Keeping them in Dart instead would split the languages — catalog for core errors,
@@ -243,7 +238,6 @@ pub struct FfiStrings {
     pub move_to: String,
     pub history: String,
     pub history_empty: String,
-    pub history_pick: String,
     pub history_restore: String,
     pub history_restored: String,
     pub new_group: String,
@@ -306,7 +300,6 @@ pub struct FfiStrings {
     pub recovery_ack: String,
     pub recovery_code: String,
     pub recovery_hint: String,
-    pub recovery_issued: String,
     pub recovery_present: String,
     pub recovery_prompt: String,
     pub recovery_warning: String,
@@ -409,7 +402,6 @@ pub fn mobile_strings() -> FfiStrings {
         move_to: t!("mobile.move_to"),
         history: t!("mobile.history"),
         history_empty: t!("mobile.history_empty"),
-        history_pick: t!("mobile.history_pick"),
         history_restore: t!("mobile.history_restore"),
         history_restored: t!("mobile.history_restored"),
         new_group: t!("mobile.new_group"),
@@ -469,7 +461,6 @@ pub fn mobile_strings() -> FfiStrings {
         recovery_ack: t!("mobile.recovery_ack"),
         recovery_code: t!("mobile.recovery_code"),
         recovery_hint: t!("mobile.recovery_hint"),
-        recovery_issued: t!("msg.recovery_issued"),
         recovery_present: t!("mobile.recovery_present"),
         recovery_prompt: t!("mobile.recovery_prompt"),
         recovery_warning: t!("mobile.recovery_warning"),
@@ -687,11 +678,6 @@ pub fn memo_undelete() -> Result<bool> {
     Ok(true)
 }
 
-/// Whether a delete is still waiting to be taken back.
-pub fn memo_can_undelete() -> bool {
-    relock(&LAST_DELETE).is_some()
-}
-
 /// One past version of a memo, as the phone's history screen shows it.
 ///
 /// The labels are built here rather than in Dart so that both platforms say the same words
@@ -801,19 +787,6 @@ pub fn memo_set_color(id: String, color: String) -> Result<()> {
     })
 }
 
-/// Sets the opacity in percent; the core clamps out-of-range values.
-pub fn memo_set_opacity(id: String, opacity: i64) -> Result<()> {
-    with_vault(|v| {
-        let mut memo = v
-            .store()
-            .get(&id)?
-            .ok_or_else(|| anyhow!(t!("core.memo_not_found", id = id)))?;
-        memo.opacity = opacity;
-        memo.updated_at = now_millis();
-        v.upsert(&memo)
-    })
-}
-
 /// Moves a memo into a group; an empty `group_id` moves it to the top level.
 pub fn memo_set_group(id: String, group_id: String) -> Result<()> {
     with_vault(|v| {
@@ -864,11 +837,6 @@ pub fn attachment_bytes(hash: String) -> Result<Vec<u8>> {
 /// Whether the photo has arrived on this device; do not ask for bytes if it has not.
 pub fn attachment_has_blob(hash: String) -> Result<bool> {
     with_vault(|v| Ok(v.has_blob(&hash)))
-}
-
-/// Sets the display width in 1/1000 em; other devices see the same proportion.
-pub fn attachment_set_width(id: String, width_em_milli: i64) -> Result<()> {
-    with_vault(|v| v.set_attachment_width(&id, width_em_milli))
 }
 
 /// Sets where the photo sits on the note and how wide it is, in one write.
@@ -1021,23 +989,6 @@ pub fn group_set_color(id: String, color: String) -> Result<()> {
             .get_group(&id)?
             .ok_or_else(|| anyhow!(t!("core.group_not_found", id = id)))?;
         group.color = color;
-        group.updated_at = now_millis();
-        v.upsert_group(&group)
-    })
-}
-
-/// Moves a group under another; moving it into its own subtree is rejected.
-pub fn group_move(id: String, parent_id: String) -> Result<()> {
-    with_vault(|v| {
-        let groups = v.store().list_groups()?;
-        if !parent_id.is_empty() && ymemo_core::is_descendant(&groups, &parent_id, &id) {
-            return Err(anyhow!(t!("core.group_cycle")));
-        }
-        let mut group = v
-            .store()
-            .get_group(&id)?
-            .ok_or_else(|| anyhow!(t!("core.group_not_found", id = id)))?;
-        group.parent_id = parent_id;
         group.updated_at = now_millis();
         v.upsert_group(&group)
     })
@@ -1212,16 +1163,6 @@ pub fn sync_stop() -> Result<()> {
     // Dropping it shuts the daemon down over REST, then kills it if it will not go.
     *sync_lock() = None;
     Ok(())
-}
-
-/// Whether the daemon is up. Cheap: it does not talk to it.
-pub fn sync_running() -> bool {
-    sync_lock().is_some()
-}
-
-/// This device's pairing code (`YMEMO1:<device-id>`), for the other device to scan or type.
-pub fn sync_pairing_code() -> Result<String> {
-    with_sync(|st| Ok(PairingCode::new(&st.device_id()?).encode()))
 }
 
 /// Pairs with a scanned or typed code: registers the peer and shares the vault with it.
@@ -1510,9 +1451,6 @@ mod tests {
         let listed = attachment_list(memo_id.clone()).unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].width_em_milli, ymemo_core::DEFAULT_WIDTH_EM_MILLI);
-
-        attachment_set_width(a.id.clone(), 6_000).unwrap();
-        assert_eq!(attachment_list(memo_id.clone()).unwrap()[0].width_em_milli, 6_000);
 
         // Moving and resizing at once is one call, and comes back on the next list.
         attachment_set_layout(a.id.clone(), 250, 750, 12_000).unwrap();

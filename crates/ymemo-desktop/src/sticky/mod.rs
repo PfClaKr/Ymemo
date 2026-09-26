@@ -306,7 +306,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     let window = build_window(ctx, memo)?;
     let dirty = Rc::new(Cell::new(false));
     let expanded_height = Rc::new(Cell::new(0.0f32));
-    wire_history(ctx, &window, &memo.id);
+    wire_history(&window, &memo.id);
     wire_editing(ctx, &window, &memo.id, &dirty);
     wire_close(ctx, &window, &memo.id, &dirty);
     wire_wm_close(&window);
@@ -352,7 +352,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
 /// had closed, since the idle auto-lock is off by default.
 ///
 /// With a tray this does nothing at all; the notes are one click away there.
-pub(crate) fn quit_if_last_window(ctx: &Ctx, _list: &crate::ListWindow) {
+pub(crate) fn quit_if_last_window(ctx: &Ctx) {
     if ctx.has_tray.get() {
         return;
     }
@@ -410,7 +410,7 @@ pub(crate) fn discard_if_blank(ctx: &Ctx, id: &str) {
 
 /// Past versions of this memo. The window belongs to main, so it is reached through the
 /// same thread_local the tray uses.
-fn wire_history(_ctx: &Ctx, window: &StickyWindow, id: &str) {
+fn wire_history(window: &StickyWindow, id: &str) {
     let id = id.to_string();
     window.on_show_history(move || {
         APP.with(|a| {
@@ -493,7 +493,7 @@ fn wire_close(ctx: &Ctx, window: &StickyWindow, id: &str, dirty: &Rc<Cell<bool>>
         APP.with(|a| {
             let borrow = a.borrow();
             if let Some(app) = borrow.as_ref() {
-                quit_if_last_window(&app.ctx, &app.list);
+                quit_if_last_window(&app.ctx);
             }
         });
     });

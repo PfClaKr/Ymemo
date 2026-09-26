@@ -68,15 +68,6 @@ impl Vault {
         self.store.upsert_attachment(a)
     }
 
-    /// Sets just the display width (1/1000 em); resizing on one device carries to the others.
-    pub fn set_attachment_width(&mut self, id: &str, width_em_milli: i64) -> Result<()> {
-        let Some(mut a) = self.store.get_attachment(id)? else {
-            bail!(t!("core.attachment_not_found", id = id));
-        };
-        a.width_em_milli = clamp_width_em_milli(width_em_milli);
-        self.upsert_attachment(&a)
-    }
-
     /// Sets position and size together — one write, because dragging a photo's corner moves
     /// and resizes it at once and two writes would leave two revisions in the history.
     pub fn set_attachment_layout(
@@ -92,18 +83,6 @@ impl Vault {
         a.x_permille = clamp_permille(x_permille);
         a.y_permille = clamp_permille(y_permille);
         a.width_em_milli = clamp_width_em_milli(width_em_milli);
-        self.upsert_attachment(&a)
-    }
-
-    /// Sets how a photo sits against the writing: floating over it, or in the flow below it.
-    ///
-    /// A choice about the memo, not about this device, so it travels like everything else —
-    /// a photo put in the flow on the phone is out of the way on the desktop too.
-    pub fn set_attachment_mode(&mut self, id: &str, mode: crate::PhotoMode) -> Result<()> {
-        let Some(mut a) = self.store.get_attachment(id)? else {
-            bail!(t!("core.attachment_not_found", id = id));
-        };
-        a.mode = mode.as_stored().to_string();
         self.upsert_attachment(&a)
     }
 

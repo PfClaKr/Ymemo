@@ -16,9 +16,6 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 Future<void> setLanguage({required String code}) =>
     RustLib.instance.api.crateApiSetLanguage(code: code);
 
-/// Language code currently used for core messages.
-Future<String> language() => RustLib.instance.api.crateApiLanguage();
-
 /// Collects the mobile strings for the current language.
 Future<FfiStrings> mobileStrings() =>
     RustLib.instance.api.crateApiMobileStrings();
@@ -126,10 +123,6 @@ Future<void> memoDelete({required String id}) =>
 /// fighting over it. See `Vault::undelete`.
 Future<bool> memoUndelete() => RustLib.instance.api.crateApiMemoUndelete();
 
-/// Whether a delete is still waiting to be taken back.
-Future<bool> memoCanUndelete() =>
-    RustLib.instance.api.crateApiMemoCanUndelete();
-
 /// Every past version of one memo, **newest first** — the one you want back is nearly always
 /// a recent one.
 ///
@@ -148,11 +141,6 @@ Future<void> memoRestore({required String id, required int index}) =>
 /// Sets the palette key.
 Future<void> memoSetColor({required String id, required String color}) =>
     RustLib.instance.api.crateApiMemoSetColor(id: id, color: color);
-
-/// Sets the opacity in percent; the core clamps out-of-range values.
-Future<void> memoSetOpacity(
-        {required String id, required PlatformInt64 opacity}) =>
-    RustLib.instance.api.crateApiMemoSetOpacity(id: id, opacity: opacity);
 
 /// Moves a memo into a group; an empty `group_id` moves it to the top level.
 Future<void> memoSetGroup({required String id, required String groupId}) =>
@@ -188,12 +176,6 @@ Future<Uint8List> attachmentBytes({required String hash}) =>
 /// Whether the photo has arrived on this device; do not ask for bytes if it has not.
 Future<bool> attachmentHasBlob({required String hash}) =>
     RustLib.instance.api.crateApiAttachmentHasBlob(hash: hash);
-
-/// Sets the display width in 1/1000 em; other devices see the same proportion.
-Future<void> attachmentSetWidth(
-        {required String id, required PlatformInt64 widthEmMilli}) =>
-    RustLib.instance.api
-        .crateApiAttachmentSetWidth(id: id, widthEmMilli: widthEmMilli);
 
 /// Sets where the photo sits on the note and how wide it is, in one write.
 ///
@@ -285,10 +267,6 @@ Future<void> groupRename({required String id, required String name}) =>
 Future<void> groupSetColor({required String id, required String color}) =>
     RustLib.instance.api.crateApiGroupSetColor(id: id, color: color);
 
-/// Moves a group under another; moving it into its own subtree is rejected.
-Future<void> groupMove({required String id, required String parentId}) =>
-    RustLib.instance.api.crateApiGroupMove(id: id, parentId: parentId);
-
 /// Deletes a group; its memos and subgroups move up instead of being deleted.
 Future<void> groupDelete({required String id}) =>
     RustLib.instance.api.crateApiGroupDelete(id: id);
@@ -356,13 +334,6 @@ Future<void> syncSetPaused({required bool paused}) =>
 
 /// Stops the daemon. Safe to call when it is not running.
 Future<void> syncStop() => RustLib.instance.api.crateApiSyncStop();
-
-/// Whether the daemon is up. Cheap: it does not talk to it.
-Future<bool> syncRunning() => RustLib.instance.api.crateApiSyncRunning();
-
-/// This device's pairing code (`YMEMO1:<device-id>`), for the other device to scan or type.
-Future<String> syncPairingCode() =>
-    RustLib.instance.api.crateApiSyncPairingCode();
 
 /// Pairs with a scanned or typed code: registers the peer and shares the vault with it.
 ///
@@ -1022,7 +993,6 @@ class FfiStrings {
   final String moveTo;
   final String history;
   final String historyEmpty;
-  final String historyPick;
   final String historyRestore;
   final String historyRestored;
   final String newGroup;
@@ -1083,7 +1053,6 @@ class FfiStrings {
   final String recoveryAck;
   final String recoveryCode;
   final String recoveryHint;
-  final String recoveryIssued;
   final String recoveryPresent;
   final String recoveryPrompt;
   final String recoveryWarning;
@@ -1181,7 +1150,6 @@ class FfiStrings {
     required this.moveTo,
     required this.history,
     required this.historyEmpty,
-    required this.historyPick,
     required this.historyRestore,
     required this.historyRestored,
     required this.newGroup,
@@ -1240,7 +1208,6 @@ class FfiStrings {
     required this.recoveryAck,
     required this.recoveryCode,
     required this.recoveryHint,
-    required this.recoveryIssued,
     required this.recoveryPresent,
     required this.recoveryPrompt,
     required this.recoveryWarning,
@@ -1340,7 +1307,6 @@ class FfiStrings {
       moveTo.hashCode ^
       history.hashCode ^
       historyEmpty.hashCode ^
-      historyPick.hashCode ^
       historyRestore.hashCode ^
       historyRestored.hashCode ^
       newGroup.hashCode ^
@@ -1399,7 +1365,6 @@ class FfiStrings {
       recoveryAck.hashCode ^
       recoveryCode.hashCode ^
       recoveryHint.hashCode ^
-      recoveryIssued.hashCode ^
       recoveryPresent.hashCode ^
       recoveryPrompt.hashCode ^
       recoveryWarning.hashCode ^
@@ -1501,7 +1466,6 @@ class FfiStrings {
           moveTo == other.moveTo &&
           history == other.history &&
           historyEmpty == other.historyEmpty &&
-          historyPick == other.historyPick &&
           historyRestore == other.historyRestore &&
           historyRestored == other.historyRestored &&
           newGroup == other.newGroup &&
@@ -1560,7 +1524,6 @@ class FfiStrings {
           recoveryAck == other.recoveryAck &&
           recoveryCode == other.recoveryCode &&
           recoveryHint == other.recoveryHint &&
-          recoveryIssued == other.recoveryIssued &&
           recoveryPresent == other.recoveryPresent &&
           recoveryPrompt == other.recoveryPrompt &&
           recoveryWarning == other.recoveryWarning &&

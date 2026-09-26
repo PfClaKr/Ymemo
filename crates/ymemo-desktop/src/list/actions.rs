@@ -360,7 +360,7 @@ fn wire_close(ctx: &Ctx, ui: &Ui) {
             // Recorded here as well as on the timer: this is the last chance to see where
             // the window was before it goes.
             sticky::remember_geometry(&ctx, &list);
-            sticky::quit_if_last_window(&ctx, &list);
+            sticky::quit_if_last_window(&ctx);
         }
         slint::CloseRequestResponse::HideWindow
     });

@@ -250,7 +250,7 @@ fn display_width_syncs_between_devices() {
     let a = phone.attach(&memo.id, b"jpeg", "p.jpg", "image/jpeg", 1000, 500).unwrap();
 
     // Shrink to 8em on the phone.
-    phone.set_attachment_width(&a.id, 8_000).unwrap();
+    phone.set_attachment_layout(&a.id, a.x_permille, a.y_permille, 8_000).unwrap();
 
     // The desktop (another cache, another device) merges and sees the same value.
     let desktop = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
@@ -282,10 +282,6 @@ fn photo_placement_syncs_between_devices() {
     assert_eq!((got.x_permille, got.y_permille), (500, 250));
     assert_eq!(got.width_em_milli, 10_000);
 
-    // Half across, a quarter down, on either canvas.
-    assert_eq!(got.display_pos(800.0, 600.0, 16.0), (400.0, 150.0));
-    assert_eq!(got.display_pos(400.0, 1000.0, 16.0), (200.0, 250.0));
-
     fs::remove_dir_all(&dir).ok();
 }
 
@@ -302,7 +298,7 @@ fn photo_mode_syncs_and_defaults_to_floating() {
     assert_eq!(a.mode(), crate::PhotoMode::Float);
     assert!(a.mode.is_empty(), "a float stores nothing, so old memos need no migration");
 
-    phone.set_attachment_mode(&a.id, crate::PhotoMode::Flow).unwrap();
+    phone.take_attachment_out_of_writing(&a.id, crate::PhotoMode::Flow).unwrap();
 
     let mut desktop = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
     assert_eq!(
@@ -311,7 +307,7 @@ fn photo_mode_syncs_and_defaults_to_floating() {
     );
 
     // And back again.
-    desktop.set_attachment_mode(&a.id, crate::PhotoMode::Float).unwrap();
+    desktop.take_attachment_out_of_writing(&a.id, crate::PhotoMode::Float).unwrap();
     let back = desktop.store().get_attachment(&a.id).unwrap().unwrap();
     assert_eq!(back.mode(), crate::PhotoMode::Float);
     assert!(back.mode.is_empty());
@@ -326,21 +322,6 @@ fn an_unknown_photo_mode_reads_as_floating() {
     assert_eq!(crate::PhotoMode::parse("wrapped-around"), crate::PhotoMode::Float);
     assert_eq!(crate::PhotoMode::parse(""), crate::PhotoMode::Float);
     assert_eq!(crate::PhotoMode::parse("flow"), crate::PhotoMode::Flow);
-}
-
-/// A photo dropped on a note narrower than itself is pulled back on, not left hanging
-/// off the right edge where its resize handle cannot be reached.
-#[test]
-fn photo_placement_stays_on_a_small_note() {
-    let mut a = crate::Attachment::new("m", "h");
-    a.width_px = 100;
-    a.height_px = 100;
-    a.width_em_milli = 20_000; // 20em = 320px at a 16px font
-    a.x_permille = 900;
-    a.y_permille = 900;
-    assert_eq!(a.display_pos(400.0, 400.0, 16.0), (80.0, 80.0));
-    // Narrower than the photo: flush left rather than off the edge.
-    assert_eq!(a.display_pos(200.0, 200.0, 16.0), (0.0, 0.0));
 }
 
 /// Two photos on one memo do not land on the same spot, or the lower one could not be

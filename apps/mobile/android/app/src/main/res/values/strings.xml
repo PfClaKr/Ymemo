@@ -23,7 +23,6 @@
 
     <string name="widget_new_memo">New memo</string>
     <string name="widget_photo_memo">New memo with a photo</string>
-    <string name="widget_open">Open Ymemo</string>
     <string name="widget_edit">Edit</string>
     <string name="widget_pick">Show another memo</string>
 

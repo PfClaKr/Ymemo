@@ -8,8 +8,6 @@
 //! Clicks and menu items go through the `request_*` functions below, because tray callbacks
 //! do not run on the UI thread and slint components are not `Send`.
 
-// TrayHandle is public as start()'s return type, but main only ever infers it.
-#[allow(unused_imports)]
 pub use imp::{start, TrayHandle};
 
 use slint::ComponentHandle;

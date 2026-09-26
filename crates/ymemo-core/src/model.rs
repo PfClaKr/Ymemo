@@ -203,20 +203,6 @@ impl Attachment {
         }
     }
 
-    /// Top-left corner in logical px for a note area of `canvas_w` x `canvas_h` px.
-    ///
-    /// Clamped so the photo always ends up at least partly on the note, however small the
-    /// window is or whatever another device stored.
-    pub fn display_pos(&self, canvas_w: f64, canvas_h: f64, base_font_px: f64) -> (f64, f64) {
-        let (w, h) = self.display_size(base_font_px);
-        let x = clamp_permille(self.x_permille) as f64 / 1000.0 * canvas_w;
-        let y = clamp_permille(self.y_permille) as f64 / 1000.0 * canvas_h;
-        (
-            x.min((canvas_w - w).max(0.0)),
-            y.min((canvas_h - h).max(0.0)),
-        )
-    }
-
     /// Display size in logical px for this platform, where `base_font_px` is the UI's body
     /// font size. Without an aspect ratio the result is square — a placeholder.
     /// How this photo sits against the writing.
