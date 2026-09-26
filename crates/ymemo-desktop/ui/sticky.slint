@@ -418,6 +418,10 @@ component NotePad {
     out property <length> text-x: scroll.x;
     out property <length> text-y: scroll.y;
     out property <length> scroll-y: scroll.viewport-y;
+    // How far the field can scroll, and how tall the part of it on screen is: what the read
+    // view needs to follow it (see `blocks` in `StickyWindow`).
+    out property <length> scroll-range: max(0px, scroll.viewport-height - scroll.visible-height);
+    out property <length> view-height: scroll.height;
     callback edited(string);
 
     public function focus-text() { input.focus(); }
@@ -1000,7 +1004,23 @@ export component StickyWindow inherits Window {
                         // clickable, which is the right trade: this is a note being edited,
                         // not a page being browsed. ----
                         if !body.has-focus && root.blocks.length > 0: Rectangle {
+                            // The same box the field scrolls in, clipped, so the words stop
+                            // where the field's do — above the date, not under it.
+                            y: 0px;
+                            height: body.text-y + body.view-height;
+                            clip: true;
                             VerticalLayout {
+                                // Scrolled with the field. The wheel moves the field, which is
+                                // on top and invisible, and this used to stay at the first line
+                                // while the scrollbar went down: a long note could not be read
+                                // without clicking into it. Proportional rather than one to
+                                // one, because headings make this taller than the plain text
+                                // the field lays out — so the top and the end still line up.
+                                y: body.scroll-range > 0
+                                    ? body.scroll-y / body.scroll-range
+                                        * max(0px, self.preferred-height - parent.height)
+                                    : 0px;
+                                height: max(self.preferred-height, parent.height);
                                 // Exactly where the field puts its text — `scroll`'s 7px and
                                 // 5px in `NotePad`. The read view is meant to be the same
                                 // words in the same place, and it was 5px left and 3px above
