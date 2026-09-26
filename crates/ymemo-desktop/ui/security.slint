@@ -75,7 +75,10 @@ export component SecurityWindow inherits Window {
     // The button stays out of reach until the two new entries agree, which catches the
     // typo that would otherwise lock the user out of their own vault.
     private property <bool> can-change:
-        root.current-pw != "" && root.new-pw != "" && root.new-pw == root.confirm-pw;
+        root.current-pw != "" && root.new-pw.character-count >= root.min-password
+            && root.new-pw == root.confirm-pw;
+    // Shortest new password accepted; set from `ymemo_core::crypto::MIN_PASSWORD_CHARS`.
+    in property <int> min-password: 8;
 
     // Escape closes this window, the way it closes the folder-name box and puts a
     // note down. A `FocusScope` around the whole of it rather than a handler on one
@@ -137,7 +140,12 @@ export component SecurityWindow inherits Window {
                                 if (root.can-change) { root.change-password(root.current-pw, root.new-pw); }
                             }
                         }
-                        if root.confirm-pw != "" && root.new-pw != root.confirm-pw: Text {
+                        if root.new-pw != "" && root.new-pw.character-count < root.min-password: Text {
+                            text: Strings.ui_password_too_short;
+                            font-size: 10px;
+                            color: #e79a9a;
+                        }
+                        if root.new-pw.character-count >= root.min-password && root.confirm-pw != "" && root.new-pw != root.confirm-pw: Text {
                             text: Strings.ui_security_mismatch;
                             font-size: 10px;
                             color: #e79a9a;

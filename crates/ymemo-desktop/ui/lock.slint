@@ -17,7 +17,9 @@ component FieldLabel inherits Text {
 // Lock window: the master password prompt, hidden once unlocked.
 // ---------------------------------------------------------------------------
 export component LockWindow inherits Window {
-    title: Strings.ui_lock_title;
+    // "Locked" only once there is something to be locked: a device setting up for the first
+    // time has no vault yet, and a title calling it locked reads like a door it cannot open.
+    title: root.vault-exists ? Strings.ui_lock_title : "Ymemo";
     preferred-width: 320px;
     preferred-height: 300px;
     // A minimum rather than only a preference: a Window whose root is a layout is sized by
@@ -41,6 +43,8 @@ export component LockWindow inherits Window {
     // Whether vault.json exists: true is an existing vault (unlock), false a new device
     // (choice screen). Rust flips it once pairing delivers vault.json.
     in property <bool> vault-exists: false;
+    // Shortest new password accepted; set from `ymemo_core::crypto::MIN_PASSWORD_CHARS`.
+    in property <int> min-password: 8;
     in property <[SharedDeviceRow]> shared-devices;
     // Whether this vault has a recovery code, read straight from vault.json: the lock
     // screen has to know before anything is unlocked.
@@ -219,12 +223,20 @@ export component LockWindow inherits Window {
                     newpw2 := LineEdit {
                         input-type: InputType.password;
                         accepted => {
-                            if (newpw.text != "" && newpw.text == self.text) {
+                            if (newpw.text.character-count >= root.min-password && newpw.text == self.text) {
                                 root.recover(code.text, newpw.text);
                             }
                         }
                     }
-                    if newpw2.text != "" && newpw.text != newpw2.text: Text {
+                    // One message in one place: too short first, since matching a password that
+                    // will not be accepted anyway is not the next thing to fix.
+                    if newpw.text != "" && newpw.text.character-count < root.min-password: Text {
+                        text: Strings.ui_password_too_short;
+                        font-size: 11px;
+                        color: #e79a9a;
+                        wrap: word-wrap;
+                    }
+                    if newpw.text.character-count >= root.min-password && newpw2.text != "" && newpw.text != newpw2.text: Text {
                         text: Strings.ui_lock_password_mismatch;
                         font-size: 11px;
                         color: #e79a9a;
@@ -235,7 +247,7 @@ export component LockWindow inherits Window {
                         Button {
                             text: Strings.ui_lock_recover;
                             primary: true;
-                            enabled: code.text != "" && newpw.text != "" && newpw.text == newpw2.text;
+                            enabled: code.text != "" && newpw.text.character-count >= root.min-password && newpw.text == newpw2.text;
                             clicked => { root.recover(code.text, newpw.text); }
                         }
                     }
@@ -327,12 +339,18 @@ export component LockWindow inherits Window {
                 npw2 := LineEdit {
                     input-type: InputType.password;
                     accepted => {
-                        if (npw.text != "" && npw.text == self.text) {
+                        if (npw.text.character-count >= root.min-password && npw.text == self.text) {
                             root.create-vault(npw.text);
                         }
                     }
                 }
-                if npw2.text != "" && npw.text != npw2.text: Text {
+                if npw.text != "" && npw.text.character-count < root.min-password: Text {
+                    text: Strings.ui_password_too_short;
+                    font-size: 11px;
+                    color: #e79a9a;
+                    wrap: word-wrap;
+                }
+                if npw.text.character-count >= root.min-password && npw2.text != "" && npw.text != npw2.text: Text {
                     text: Strings.ui_lock_password_mismatch;
                     font-size: 11px;
                     color: #e79a9a;
@@ -347,7 +365,7 @@ export component LockWindow inherits Window {
                     Button {
                         text: Strings.ui_lock_create;
                         primary: true;
-                        enabled: npw.text != "" && npw.text == npw2.text;
+                        enabled: npw.text.character-count >= root.min-password && npw.text == npw2.text;
                         clicked => { root.create-vault(npw.text); }
                     }
                     Button {

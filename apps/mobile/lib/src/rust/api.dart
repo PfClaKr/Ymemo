@@ -43,6 +43,10 @@ Future<String> vaultSetName({required String name}) =>
 /// Closes the vault (log out).
 Future<void> vaultClose() => RustLib.instance.api.crateApiVaultClose();
 
+/// Shortest new master password the app accepts; see `ymemo_core::crypto::MIN_PASSWORD_CHARS`.
+Future<int> passwordMinChars() =>
+    RustLib.instance.api.crateApiPasswordMinChars();
+
 /// Whether `vault_dir` already holds a vault.
 ///
 /// The lock screen asks before anything is unlocked, to tell "set a password" from "enter
@@ -1049,6 +1053,7 @@ class FfiStrings {
   final String passwordChanged;
   final String passwordHint;
   final String passwordMismatch;
+  final String passwordTooShort;
   final String recoveryAbsent;
   final String recoveryAck;
   final String recoveryCode;
@@ -1204,6 +1209,7 @@ class FfiStrings {
     required this.passwordChanged,
     required this.passwordHint,
     required this.passwordMismatch,
+    required this.passwordTooShort,
     required this.recoveryAbsent,
     required this.recoveryAck,
     required this.recoveryCode,
@@ -1361,6 +1367,7 @@ class FfiStrings {
       passwordChanged.hashCode ^
       passwordHint.hashCode ^
       passwordMismatch.hashCode ^
+      passwordTooShort.hashCode ^
       recoveryAbsent.hashCode ^
       recoveryAck.hashCode ^
       recoveryCode.hashCode ^
@@ -1520,6 +1527,7 @@ class FfiStrings {
           passwordChanged == other.passwordChanged &&
           passwordHint == other.passwordHint &&
           passwordMismatch == other.passwordMismatch &&
+          passwordTooShort == other.passwordTooShort &&
           recoveryAbsent == other.recoveryAbsent &&
           recoveryAck == other.recoveryAck &&
           recoveryCode == other.recoveryCode &&

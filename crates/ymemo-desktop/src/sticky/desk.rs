@@ -212,7 +212,13 @@ pub(super) fn wire_window_events(
                 motion.moved_at.set(Some(Instant::now()));
                 motion.geometry_dirty.set(true);
             }
-            WindowEvent::Resized(_) => motion.geometry_dirty.set(true),
+            WindowEvent::Resized(size) => {
+                motion.geometry_dirty.set(true);
+                if let Some(w) = weak.upgrade() {
+                    let scale = w.window().scale_factor();
+                    w.set_window_width(size.width as f32 / scale);
+                }
+            }
             WindowEvent::HoveredFile(path) => {
                 if looks_like_a_photo(path) {
                     if let Some(w) = weak.upgrade() {

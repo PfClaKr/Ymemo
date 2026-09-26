@@ -63,6 +63,11 @@ pub(super) fn wire(
                 }
             }
 
+            let online = devices.iter().filter(|d| d.connected).count() as i32;
+            if let Some(w) = list_w.upgrade() {
+                w.set_linked_devices(devices.len() as i32);
+                w.set_online_devices(online);
+            }
             devices_model.set_vec(devices.into_iter().map(to_shared_row).collect::<Vec<_>>());
         }
     };

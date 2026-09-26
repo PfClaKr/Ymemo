@@ -54,6 +54,10 @@ export component ListWindow inherits Window {
     in-out property <string> vault-name;
     // The same name again, as it is really spelled: the line above is drawn by Slint and goes
     // through `hangul.rs`, this one goes to the desktop's own title bar and must not.
+    // Devices the vault is shared with, and how many of them are connected right now. Set
+    // on every refresh of the shared-device list (`pairing::devices`).
+    in property <int> linked-devices: 0;
+    in property <int> online-devices: 0;
     in property <string> vault-title;
     callback rename-vault(string);
     // Whether the heading is being edited right now.
@@ -371,7 +375,9 @@ export component ListWindow inherits Window {
                     height: 100%;
                     text: b-lock.hovering ? Strings.ui_list_tip_lock
                         : b-gear.hovering ? Strings.ui_list_tip_settings
-                        : b-link.hovering ? Strings.ui_list_tip_sync
+                        : b-link.hovering ? (root.linked-devices == 0 ? Strings.ui_list_tip_sync
+                            : Strings.ui_list_sync_online + " " + root.online-devices + "/"
+                                + root.linked-devices)
                         : b-folder.hovering ? Strings.ui_list_tip_new_group
                         : b-plus.hovering ? Strings.ui_list_tip_new_memo
                         : root.vault-name == "" ? Strings.ui_list_heading
@@ -410,6 +416,9 @@ export component ListWindow inherits Window {
             b-link := IconButton {
                 icon: "link";
                 label: Strings.ui_list_tip_sync;
+                // Whether syncing is actually happening, without opening the panel: green
+                // while some device is connected, hollow while every paired one is away.
+                badge: root.linked-devices == 0 ? 0 : root.online-devices > 0 ? 1 : 2;
                 clicked => { root.show-sync = !root.show-sync; }
             }
             b-folder := IconButton {

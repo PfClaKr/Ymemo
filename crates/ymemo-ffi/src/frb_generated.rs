@@ -37,7 +37,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -799599206;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1476621191;
 
 // Section: executor
 
@@ -1320,6 +1320,38 @@ fn wire__crate__api__mobile_strings_impl(
             move |context| {
                 transform_result_sse::<_, ()>((move || {
                     let output_ok = Result::<_, ()>::Ok(crate::api::mobile_strings())?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__password_min_chars_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "password_min_chars",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Result::<_, ()>::Ok(crate::api::password_min_chars())?;
                     Ok(output_ok)
                 })())
             }
@@ -2771,6 +2803,7 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_passwordChanged = <String>::sse_decode(deserializer);
         let mut var_passwordHint = <String>::sse_decode(deserializer);
         let mut var_passwordMismatch = <String>::sse_decode(deserializer);
+        let mut var_passwordTooShort = <String>::sse_decode(deserializer);
         let mut var_recoveryAbsent = <String>::sse_decode(deserializer);
         let mut var_recoveryAck = <String>::sse_decode(deserializer);
         let mut var_recoveryCode = <String>::sse_decode(deserializer);
@@ -2925,6 +2958,7 @@ impl SseDecode for crate::api::FfiStrings {
             password_changed: var_passwordChanged,
             password_hint: var_passwordHint,
             password_mismatch: var_passwordMismatch,
+            password_too_short: var_passwordTooShort,
             recovery_absent: var_recoveryAbsent,
             recovery_ack: var_recoveryAck,
             recovery_code: var_recoveryCode,
@@ -3159,42 +3193,43 @@ fn pde_ffi_dispatcher_primary_impl(
         34 => wire__crate__api__memo_upsert_impl(port, ptr, rust_vec_len, data_len),
         35 => wire__crate__api__memos_in_group_impl(port, ptr, rust_vec_len, data_len),
         36 => wire__crate__api__mobile_strings_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__set_language_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__settings_load_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__settings_save_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__sync_approve_device_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__sync_devices_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__sync_ensure_folder_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__sync_pair_with_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__sync_pending_devices_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__api__sync_rebuild_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__api__sync_reject_device_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__sync_set_device_name_impl(port, ptr, rust_vec_len, data_len),
-        48 => wire__crate__api__sync_set_paused_impl(port, ptr, rust_vec_len, data_len),
-        49 => wire__crate__api__sync_set_timing_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__api__sync_set_versioning_impl(port, ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__sync_start_impl(port, ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__sync_stop_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__sync_unpair_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__sync_verification_code_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__update_check_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__vault_change_password_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__vault_close_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__vault_exists_impl(port, ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__vault_has_recovery_code_impl(port, ptr, rust_vec_len, data_len),
-        60 => wire__crate__api__vault_issue_recovery_code_impl(port, ptr, rust_vec_len, data_len),
-        61 => wire__crate__api__vault_key_impl(port, ptr, rust_vec_len, data_len),
-        62 => wire__crate__api__vault_name_impl(port, ptr, rust_vec_len, data_len),
-        63 => wire__crate__api__vault_open_impl(port, ptr, rust_vec_len, data_len),
-        64 => wire__crate__api__vault_open_with_key_impl(port, ptr, rust_vec_len, data_len),
-        65 => wire__crate__api__vault_reset_impl(port, ptr, rust_vec_len, data_len),
-        66 => wire__crate__api__vault_reset_password_with_recovery_impl(
+        37 => wire__crate__api__password_min_chars_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__set_language_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__settings_load_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__settings_save_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__sync_approve_device_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__sync_devices_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__sync_ensure_folder_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__sync_pair_with_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__sync_pending_devices_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__sync_rebuild_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__sync_reject_device_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__api__sync_set_device_name_impl(port, ptr, rust_vec_len, data_len),
+        49 => wire__crate__api__sync_set_paused_impl(port, ptr, rust_vec_len, data_len),
+        50 => wire__crate__api__sync_set_timing_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__sync_set_versioning_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__sync_start_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__sync_stop_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__sync_unpair_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__sync_verification_code_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__update_check_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__vault_change_password_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__vault_close_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__vault_exists_impl(port, ptr, rust_vec_len, data_len),
+        60 => wire__crate__api__vault_has_recovery_code_impl(port, ptr, rust_vec_len, data_len),
+        61 => wire__crate__api__vault_issue_recovery_code_impl(port, ptr, rust_vec_len, data_len),
+        62 => wire__crate__api__vault_key_impl(port, ptr, rust_vec_len, data_len),
+        63 => wire__crate__api__vault_name_impl(port, ptr, rust_vec_len, data_len),
+        64 => wire__crate__api__vault_open_impl(port, ptr, rust_vec_len, data_len),
+        65 => wire__crate__api__vault_open_with_key_impl(port, ptr, rust_vec_len, data_len),
+        66 => wire__crate__api__vault_reset_impl(port, ptr, rust_vec_len, data_len),
+        67 => wire__crate__api__vault_reset_password_with_recovery_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        67 => wire__crate__api__vault_set_name_impl(port, ptr, rust_vec_len, data_len),
+        68 => wire__crate__api__vault_set_name_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -3535,6 +3570,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.password_changed.into_into_dart().into_dart(),
             self.password_hint.into_into_dart().into_dart(),
             self.password_mismatch.into_into_dart().into_dart(),
+            self.password_too_short.into_into_dart().into_dart(),
             self.recovery_absent.into_into_dart().into_dart(),
             self.recovery_ack.into_into_dart().into_dart(),
             self.recovery_code.into_into_dart().into_dart(),
@@ -3845,6 +3881,7 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.password_changed, serializer);
         <String>::sse_encode(self.password_hint, serializer);
         <String>::sse_encode(self.password_mismatch, serializer);
+        <String>::sse_encode(self.password_too_short, serializer);
         <String>::sse_encode(self.recovery_absent, serializer);
         <String>::sse_encode(self.recovery_ack, serializer);
         <String>::sse_encode(self.recovery_code, serializer);

@@ -181,6 +181,8 @@ export component IconButton inherits Rectangle {
     in property <string> label;
     in property <color> ink: #e8e2d2;
     in property <bool> enabled: true;
+    // A status dot in the corner: 0 none, 1 good (filled green), 2 waiting (hollow grey).
+    in property <int> badge: 0;
     out property <bool> hovering: ta.has-hover;
     callback clicked();
 
@@ -202,6 +204,17 @@ export component IconButton inherits Rectangle {
         height: 16px;
         name: root.icon;
         stroke: root.ink;
+    }
+
+    if root.badge != 0: Rectangle {
+        x: parent.width - 9px;
+        y: 3px;
+        width: 6px;
+        height: 6px;
+        border-radius: 3px;
+        background: root.badge == 1 ? #6fae6f : transparent;
+        border-width: root.badge == 1 ? 0px : 1.5px;
+        border-color: #a8a294;
     }
 
     ta := TouchArea {

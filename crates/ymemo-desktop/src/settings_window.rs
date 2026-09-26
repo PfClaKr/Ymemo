@@ -79,7 +79,7 @@ pub(crate) fn wire(
     tray_handle: &Rc<RefCell<Option<tray::TrayHandle>>>,
 ) {
     wire_open(ctx, ui, unlocked);
-    wire_close(ui);
+    wire_close(ctx, ui);
     wire_apply(ctx, ui, syncthing, merge_timer, tray_handle);
     wire_lock_now(ctx, ui, unlocked);
     wire_updates(ctx, ui);
@@ -98,18 +98,35 @@ fn wire_open(ctx: &Ctx, ui: &Ui, unlocked: &Rc<Cell<bool>>) {
         fill_settings_window(&ctx, &w);
         w.set_unlocked(unlocked.get());
         w.set_status(SharedString::new());
+        w.set_close_warned(false);
         present(&w);
     });
 }
 
-/// Closing only hides it, so its position survives.
-fn wire_close(ui: &Ui) {
+/// Closing only hides it, so its position survives — but not over unsaved changes without a
+/// word. The dialog applies on Save, and "Close" used to throw away whatever had been changed
+/// with nothing said; now the first close says so and a second one means it. The window's own
+/// close button takes the same way out.
+fn wire_close(ctx: &Ctx, ui: &Ui) {
     let settings_win = &ui.settings;
+    let ctx = ctx.clone();
     let win = settings_win.as_weak();
     settings_win.on_close_requested(move || {
-        if let Some(w) = win.upgrade() {
-            let _ = w.hide();
+        let Some(w) = win.upgrade() else { return };
+        if !w.get_close_warned() && has_unsaved_changes(&ctx, &w) {
+            w.set_close_warned(true);
+            w.set_status(SharedString::from(t!("msg.settings_unsaved")));
+            return;
         }
+        w.set_close_warned(false);
+        let _ = w.hide();
+    });
+    let win = settings_win.as_weak();
+    settings_win.window().on_close_requested(move || {
+        if let Some(w) = win.upgrade() {
+            w.invoke_close_requested();
+        }
+        slint::CloseRequestResponse::KeepWindowShown
     });
 }
 
@@ -145,6 +162,7 @@ fn wire_apply(
         touch(&ctx);
         let prev_unlock_days = ctx.settings.borrow().unlock_days;
         let next = store_dialog(&ctx, &w);
+        w.set_close_warned(false);
 
         // Write the sanitized values back, so out-of-range input never changes silently.
         fill_settings_window(&ctx, &w);
@@ -219,13 +237,13 @@ fn wire_updates(ctx: &Ctx, ui: &Ui) {
     });
 }
 
-/// Reads the dialog over what is stored, sanitizes it, saves it and makes it current.
+/// The dialog's fields laid over what is stored, sanitized — what Save would store.
 ///
 /// Starts from what is stored and overwrites only the fields this dialog owns. Building the
 /// struct from scratch here meant every other field — the pins, where the windows are, which
 /// notes are folded, which are on the desk — had to be copied back across by hand, and one
 /// forgotten line would have quietly reset it the next time anybody pressed Save.
-fn store_dialog(ctx: &Ctx, w: &SettingsWindow) -> Settings {
+fn read_dialog(ctx: &Ctx, w: &SettingsWindow) -> Settings {
     let mut next = ctx.settings.borrow().clone();
     next.lang = w.get_lang_sel().to_string();
     next.unlock_days = w.get_unlock_days();
@@ -237,6 +255,19 @@ fn store_dialog(ctx: &Ctx, w: &SettingsWindow) -> Settings {
     next.rescan_seconds = w.get_rescan_seconds();
     next.keep_versions_days = w.get_keep_versions_days();
     next.update_check = w.get_update_check();
+    next.sanitize();
+    next
+}
+
+/// Whether closing now would throw away something the user changed in the dialog.
+fn has_unsaved_changes(ctx: &Ctx, w: &SettingsWindow) -> bool {
+    read_dialog(ctx, w) != *ctx.settings.borrow()
+        || (crate::autostart::supported() && w.get_start_at_login() != crate::autostart::enabled())
+}
+
+/// Stores the dialog (see [`read_dialog`]) and makes it current.
+fn store_dialog(ctx: &Ctx, w: &SettingsWindow) -> Settings {
+    let next = read_dialog(ctx, w);
     // Starting with the session is written to the desktop, not to `settings.json`, so it is
     // applied here on its own. A failure is reported and then read back when the window is
     // refilled, which leaves the toggle showing what is actually true rather than what was
@@ -244,7 +275,6 @@ fn store_dialog(ctx: &Ctx, w: &SettingsWindow) -> Settings {
     if let Err(e) = autostart::set(w.get_start_at_login()) {
         diag!("could not change the start-at-login setting: {e}");
     }
-    next.sanitize();
     next.save(&ctx.dir);
     *ctx.settings.borrow_mut() = next.clone();
     next

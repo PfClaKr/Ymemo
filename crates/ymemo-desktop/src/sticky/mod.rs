@@ -311,6 +311,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     wire_close(ctx, &window, &memo.id, &dirty);
     wire_wm_close(&window);
     wire_new_memo(ctx, &window);
+    wire_delete(&window, &memo.id);
     photos::wire(ctx, &window, &memo.id);
     appearance::wire(ctx, &window, &memo.id, &expanded_height);
     snap::wire_drag(ctx, &window, &memo.id);
@@ -519,4 +520,23 @@ fn wire_wm_close(window: &StickyWindow) {
 fn wire_new_memo(ctx: &Ctx, window: &StickyWindow) {
     let ctx = ctx.clone();
     window.on_new_memo(move || new_memo(&ctx));
+}
+
+/// Delete, from the note's colour panel. The list is brought up with its undo bar, since a
+/// deleted note leaves nothing else on screen to take it back from.
+fn wire_delete(window: &StickyWindow, id: &str) {
+    let id = id.to_string();
+    window.on_delete_memo(move || {
+        APP.with(|a| {
+            let borrow = a.borrow();
+            let Some(app) = borrow.as_ref() else { return };
+            touch(&app.ctx);
+            crate::list::actions::delete_and_offer_undo(&app.ctx, &app.list, &id, false);
+            if app.list.window().is_visible() {
+                crate::window::raise(&app.list);
+            } else {
+                crate::window::present(&app.list);
+            }
+        });
+    });
 }

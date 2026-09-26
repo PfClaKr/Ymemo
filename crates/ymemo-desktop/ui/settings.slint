@@ -68,6 +68,8 @@ export component SettingsWindow inherits Window {
     in-out property <int> keep-versions-days: 30;
     // One-line status, e.g. the result of a save.
     in property <string> status;
+    // A close was refused once over unsaved changes; the next one goes through. Rust sets it.
+    in-out property <bool> close-warned: false;
     // Whether the vault is unlocked; locking again is meaningless when it is not.
     in property <bool> unlocked: false;
     // Running version (CARGO_PKG_VERSION), for bug reports.
@@ -366,14 +368,18 @@ export component SettingsWindow inherits Window {
                         }
                     }
 
-                    if root.status != "": Text {
-                        text: root.status;
-                        font-size: 11px;
-                        color: #a8d0a8;
-                        wrap: word-wrap;
-                    }
 
                 }
+            }
+
+            // Outside the scrolling part, above the buttons it answers: it sat at the bottom of
+            // the scroll, so "saved" — and "you have unsaved changes" when Close was refused —
+            // happened out of sight unless the settings had been scrolled to the end.
+            if root.status != "": Text {
+                text: root.status;
+                font-size: 11px;
+                color: root.close-warned ? #e7b76a : #a8d0a8;
+                wrap: word-wrap;
             }
 
             Text {

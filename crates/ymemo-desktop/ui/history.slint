@@ -114,6 +114,9 @@ export component HistoryWindow inherits Window {
                                 spacing: 2px;
                                 HorizontalLayout {
                                     spacing: 5px;
+                                    // Packed to the left: stretched, the two texts shared the
+                                    // row's width and the kind floated off halfway across it.
+                                    alignment: start;
                                     Text {
                                         text: row.when;
                                         font-size: 11px;

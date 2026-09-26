@@ -296,6 +296,7 @@ pub struct FfiStrings {
     pub password_changed: String,
     pub password_hint: String,
     pub password_mismatch: String,
+    pub password_too_short: String,
     pub recovery_absent: String,
     pub recovery_ack: String,
     pub recovery_code: String,
@@ -457,6 +458,7 @@ pub fn mobile_strings() -> FfiStrings {
         password_changed: t!("msg.password_changed"),
         password_hint: t!("mobile.password_hint"),
         password_mismatch: t!("mobile.password_mismatch"),
+        password_too_short: t!("mobile.password_too_short"),
         recovery_absent: t!("mobile.recovery_absent"),
         recovery_ack: t!("mobile.recovery_ack"),
         recovery_code: t!("mobile.recovery_code"),
@@ -529,6 +531,11 @@ pub fn vault_close() -> Result<()> {
 // The core does all of this by rewriting `vault.json`'s wrapper alone — no log and no blob
 // is touched — so every call here is two Argon2id runs at worst and nothing to show progress
 // for. See `ymemo_core::vault` for why that is safe.
+
+/// Shortest new master password the app accepts; see `ymemo_core::crypto::MIN_PASSWORD_CHARS`.
+pub fn password_min_chars() -> u32 {
+    ymemo_core::crypto::MIN_PASSWORD_CHARS as u32
+}
 
 /// Whether `vault_dir` already holds a vault.
 ///

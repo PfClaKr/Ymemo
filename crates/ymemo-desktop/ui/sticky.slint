@@ -553,6 +553,17 @@ export component StickyWindow inherits Window {
     in property <bool> collapsed: false;
     // Whether this note's window is the active one; set from Rust on winit's `Focused`.
     in property <bool> window-active: false;
+    // A note pulled narrow gives its title room before its buttons: at the minimum width six
+    // buttons left the title as a lone "…". What goes first is what has another way in — a
+    // photo can be dropped on the note, its history opened from the list, a new note made
+    // with Ctrl+N.
+    //
+    // The width comes from Rust (winit's `Resized`), not from `root.width`: the buttons are part
+    // of the layout that decides the window's own minimum width, so reading it here closed a
+    // binding loop Slint warns may panic at runtime.
+    in property <length> window-width: 220px;
+    private property <bool> narrow: root.window-width < 200px;
+    private property <bool> very-narrow: root.window-width < 170px;
     // Two models, not one filtered here: Slint's `for` cannot skip rows, and the two sit in
     // completely different places — one lying on the writing, one in a band under it.
     in property <[PhotoRow]> photos: [];
@@ -590,6 +601,7 @@ export component StickyWindow inherits Window {
     callback set-color(string);
     callback set-opacity(float);
     callback toggle-collapse();
+    callback delete-memo();
     // Fires as the colour panel opens and closes; Rust grows the window to fit it and
     // shrinks it back, the way the pairing panel does.
     callback palette-toggled(bool);
@@ -738,7 +750,7 @@ export component StickyWindow inherits Window {
                     // the file dialog, the history window, the colour panel — either lands on
                     // a note that is not there or reopens it behind the user's back. Only the
                     // unfold (double-click), the pin and the close stay.
-                    if !root.collapsed: photo-ta := TouchArea {
+                    if !root.collapsed && !root.narrow: photo-ta := TouchArea {
                         width: 20px;
                         mouse-cursor: pointer;
                         accessible-role: button;
@@ -779,7 +791,7 @@ export component StickyWindow inherits Window {
                         }
                         clicked => { root.add-photo(); }
                     }
-                    if !root.collapsed: b-history := BarButton {
+                    if !root.collapsed && !root.narrow: b-history := BarButton {
                         tip <=> root.tip;
                         icon: "history";
                         color-key: root.sticky-color;
@@ -811,7 +823,7 @@ export component StickyWindow inherits Window {
                         }
                         clicked => { root.show-palette = !root.show-palette; }
                     }
-                    if !root.collapsed: b-new := BarButton {
+                    if !root.collapsed && !root.very-narrow: b-new := BarButton {
                         tip <=> root.tip;
                         icon: "plus";
                         color-key: root.sticky-color;
@@ -881,6 +893,11 @@ export component StickyWindow inherits Window {
                     HorizontalLayout {
                         spacing: 7px;
                         alignment: center;
+                        // Deleting from the note itself, tucked in with the colours rather
+                        // than on the bar: the bar gives up buttons as a note gets narrow, and
+                        // this is the one a stray click must not reach. The list comes up
+                        // with its undo bar, so the way back is on screen.
+                        Rectangle { width: 19px; }
                         for key in ["yellow", "pink", "green", "blue", "purple"]: Rectangle {
                             width: 19px;
                             height: 19px;
@@ -890,6 +907,27 @@ export component StickyWindow inherits Window {
                             border-color: root.sticky-color == key ? #ffffff : #00000040;
                             chip := TouchArea {
                                 clicked => { root.set-color(key); }
+                            }
+                        }
+                        Rectangle {
+                            width: 19px;
+                            height: 19px;
+                            del-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.delete-memo(); }
+                                changed has-hover => {
+                                    if (self.has-hover) { root.tip = Strings.ui_sticky_delete; }
+                                    else if (root.tip == Strings.ui_sticky_delete) { root.tip = ""; }
+                                }
+                            }
+                            Glyph {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: 14px;
+                                height: 14px;
+                                name: "trash";
+                                stroke: del-ta.has-hover ? #c0392b : Palette.ink(root.sticky-color);
+                                opacity: del-ta.has-hover ? 1 : 0.6;
                             }
                         }
                     }

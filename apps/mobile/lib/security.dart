@@ -59,6 +59,10 @@ class _SecurityScreenState extends State<SecurityScreen> {
 
   Future<void> _changePassword() async {
     final s = widget.strings;
+    if (_next.text.characters.length < await passwordMinChars()) {
+      setState(() => _error = s.passwordTooShort);
+      return;
+    }
     if (_next.text != _confirm.text) {
       setState(() => _error = s.passwordMismatch);
       return;

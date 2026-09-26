@@ -106,6 +106,9 @@ class _LockScreenState extends State<LockScreen> {
     _probeVault();
     _probe = Timer.periodic(_probeInterval, (_) => _probeVault());
     _prepareBiometrics();
+    passwordMinChars().then((n) {
+      if (mounted) setState(() => _minPassword = n);
+    });
   }
 
   /// Decides whether the fingerprint button belongs on this screen, and offers the prompt
@@ -193,7 +196,14 @@ class _LockScreenState extends State<LockScreen> {
 
   /// Whether the button may be pressed: a password, and — when creating — the same one twice.
   bool get _canSubmit =>
-      _password.text.isNotEmpty && (_vaultExists || _confirm.text == _password.text);
+      _password.text.isNotEmpty &&
+      (_vaultExists || (!_tooShort(_password.text) && _confirm.text == _password.text));
+
+  /// Shortest new password accepted, from the core; 8 until it has answered.
+  int _minPassword = 8;
+
+  /// Only a *new* password is held to it: a vault made with a shorter one still opens.
+  bool _tooShort(String password) => password.characters.length < _minPassword;
 
   Future<void> _unlock() async {
     if (!_canSubmit || _busy) return;
@@ -253,7 +263,7 @@ class _LockScreenState extends State<LockScreen> {
   /// vault exactly as it was.
   Future<void> _recover() async {
     if (_recoveryCode.text.isEmpty ||
-        _recoveryPassword.text.isEmpty ||
+        _tooShort(_recoveryPassword.text) ||
         _recoveryPassword.text != _recoveryConfirm.text ||
         _busy) {
       return;
@@ -360,7 +370,7 @@ class _LockScreenState extends State<LockScreen> {
   /// device that should have been paired gives it a key of its own and the two never merge —
   /// so that warning belongs on the choice itself, not in a footnote under both.
   List<Widget> _setupPanel(FfiStrings s) => [
-        const _Wordmark(),
+        _Wordmark(locked: _vaultExists),
         const SizedBox(height: 20),
         Text(s.setupQuestion, style: Theme.of(context).textTheme.titleSmall),
         const SizedBox(height: 12),
@@ -381,7 +391,7 @@ class _LockScreenState extends State<LockScreen> {
 
   /// The normal way in: type the password, or set one on a device with no vault yet.
   List<Widget> _passwordPanel(FfiStrings s) => [
-        const _Wordmark(),
+        _Wordmark(locked: _vaultExists),
         const SizedBox(height: 16),
         if (!_vaultExists)
           Padding(
@@ -417,7 +427,12 @@ class _LockScreenState extends State<LockScreen> {
             onSubmitted: (_) => _unlock(),
             onChanged: (_) => setState(() {}),
           ),
-          if (_confirm.text.isNotEmpty && _confirm.text != _password.text)
+          if (_password.text.isNotEmpty && _tooShort(_password.text))
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(s.passwordTooShort, style: const TextStyle(color: Colors.red)),
+            )
+          else if (_confirm.text.isNotEmpty && _confirm.text != _password.text)
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Text(s.repeatMismatch, style: const TextStyle(color: Colors.red)),
@@ -498,7 +513,12 @@ class _LockScreenState extends State<LockScreen> {
             onSubmitted: (_) => _recover(),
             onChanged: (_) => setState(() {}),
           ),
-          if (_recoveryConfirm.text.isNotEmpty &&
+          if (_recoveryPassword.text.isNotEmpty && _tooShort(_recoveryPassword.text))
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(s.passwordTooShort, style: const TextStyle(color: Colors.red)),
+            )
+          else if (_recoveryConfirm.text.isNotEmpty &&
               _recoveryConfirm.text != _recoveryPassword.text)
             Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -542,15 +562,21 @@ class _LockScreenState extends State<LockScreen> {
 /// Material's bundled icon font, not a 🔒: an emoji is drawn by whatever the phone vendor
 /// ships, and the desktop had to stop using them for the same reason.
 class _Wordmark extends StatelessWidget {
-  const _Wordmark();
+  const _Wordmark({required this.locked});
+
+  /// The padlock only once there is a vault to be locked: on a device setting up for the
+  /// first time it said "locked" about nothing, the same thing the desktop's title said.
+  final bool locked;
 
   @override
-  Widget build(BuildContext context) => const Row(
+  Widget build(BuildContext context) => Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text('Ymemo', style: TextStyle(fontSize: 24)),
-          SizedBox(width: 8),
-          Icon(Icons.lock_outline, size: 22),
+          const Text('Ymemo', style: TextStyle(fontSize: 24)),
+          if (locked) ...[
+            const SizedBox(width: 8),
+            const Icon(Icons.lock_outline, size: 22),
+          ],
         ],
       );
 }
