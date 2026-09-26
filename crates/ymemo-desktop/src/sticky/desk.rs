@@ -193,7 +193,13 @@ pub(super) fn wire_window_events(
             // hands the focus to each note as it maps, in the order Slint creates them —
             // which is backwards (see `stack_desk`). Counted, that reversed the saved order on
             // every restart.
-            WindowEvent::Focused(true) if born.elapsed() >= SETTLE => {
+            WindowEvent::Focused(focused) => {
+                if let Some(w) = weak.upgrade() {
+                    w.set_window_active(*focused);
+                }
+                if !*focused || born.elapsed() < SETTLE {
+                    return EventResult::Propagate;
+                }
                 last_active.set(next_stamp());
                 // The open list is the order the desk comes back in, bottom first; the note
                 // just activated is now the top of it.

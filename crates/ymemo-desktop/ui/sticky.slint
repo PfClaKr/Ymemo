@@ -551,6 +551,8 @@ export component StickyWindow inherits Window {
     // property of this desktop, not of the memo.
     in property <bool> pinned: false;
     in property <bool> collapsed: false;
+    // Whether this note's window is the active one; set from Rust on winit's `Focused`.
+    in property <bool> window-active: false;
     // Two models, not one filtered here: Slint's `for` cannot skip rows, and the two sit in
     // completely different places — one lying on the writing, one in a band under it.
     in property <[PhotoRow]> photos: [];
@@ -675,7 +677,11 @@ export component StickyWindow inherits Window {
         // The trigger is the caret and not the pointer or the window's own focus: dragging
         // the title bar or reaching for the palette is not writing, and the opacity slider
         // sits below with the focus on itself, so it still previews what it is setting.
-        opacity: body.has-focus ? 1.0 : root.sticky-opacity / 100;
+        //
+        // **Except when folded.** A folded note has no body to put a caret in, so clicking it
+        // left it as faint as ever — and the bar is all there is to read. There the window
+        // being the active one takes the fade off, and clicking anywhere else puts it back.
+        opacity: body.has-focus || (root.collapsed && root.window-active) ? 1.0 : root.sticky-opacity / 100;
         animate opacity { duration: 120ms; }
 
         VerticalLayout {
