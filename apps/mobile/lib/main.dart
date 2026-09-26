@@ -59,6 +59,13 @@ Future<void> main() async {
     // quietly. Framework errors need no separate hook — `presentError` prints through this.
     unawaited(diagLog(message: message).catchError((_) {}));
   };
+  // An error nobody awaited — a timer's callback, a fire-and-forget future — never reaches
+  // `presentError`; it goes here, and with no handler the engine logs it to stderr, which on
+  // Android is nowhere. Returning true says it has been dealt with: the app carries on.
+  ui.PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('uncaught: $error\n$stack');
+    return true;
+  };
 
   final settings = await SettingsStore.load('${docs.path}/settings.json');
 

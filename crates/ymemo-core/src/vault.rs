@@ -144,7 +144,7 @@ impl Vault {
             recovery_salt: String::new(),
             recovery_key: String::new(),
         };
-        fs::write(&header_path, serde_json::to_vec_pretty(&header)?)?;
+        write_header(dir, &header)?;
 
         Self::open(dir, password, store)
     }
@@ -190,6 +190,11 @@ impl Vault {
             dir.join(LOGS_DIR).join(format!("{device_id}.{LOG_EXT}")),
             key.clone(),
         );
+        // A crash in the middle of an append leaves half a record at the end of our log, and
+        // the next append would land after it. Cut it off before anything is written.
+        if let Err(e) = own_log.repair_tail() {
+            crate::diag!("could not check our log for a torn record: {e}");
+        }
 
         let blobs = BlobStore::open(&dir, key.clone());
         let mut vault = Self {
@@ -759,6 +764,15 @@ impl Vault {
         Ok(true)
     }
 
+    /// Throws away the document in memory, uncommitted edits included, and reads it back
+    /// from the logs — [`Vault::rebuild`] without the shortcut that skips an unchanged
+    /// directory. For a vault a panic interrupted mid-edit: what is in the logs is what was
+    /// really written, and whatever the panic left half-done in memory is not.
+    pub fn reload(&mut self) -> Result<()> {
+        self.built_from = None;
+        self.rebuild().map(|_| ())
+    }
+
     /// Records our own log at its current length as already merged, leaving every other
     /// device's entry alone. See the call in [`Vault::append_local_change`].
     fn mark_own_log_merged(&mut self) {
@@ -1264,10 +1278,7 @@ fn read_header(dir: &Path) -> Result<VaultHeader> {
 /// Writes the header through a temporary file, so a crash mid-write cannot leave a
 /// truncated `vault.json` — the one file without which no device can open the vault.
 fn write_header(dir: &Path, header: &VaultHeader) -> Result<()> {
-    let path = dir.join(HEADER_FILE);
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, serde_json::to_vec_pretty(header)?)?;
-    fs::rename(&tmp, &path)?;
+    crate::fsutil::write_atomic(&dir.join(HEADER_FILE), &serde_json::to_vec_pretty(header)?)?;
     Ok(())
 }
 
@@ -2176,6 +2187,39 @@ mod tests {
             canonical_key,
         );
         assert!(own_log.read_all().is_ok());
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_file(&db).ok();
+    }
+
+    /// A crash mid-append left half a record at the end of our log. Reopening must still
+    /// show every memo before it, and what is written next must be readable — before, the
+    /// whole log was skipped and every later append landed behind the torn bytes.
+    #[test]
+    fn a_torn_own_log_still_opens_and_stays_writable() {
+        let dir = temp_dir();
+        let db = std::env::temp_dir().join(format!("ymemo-cache-{}.db", uuid::Uuid::new_v4()));
+        let kept = Memo::new("kept", "body");
+        let device_id = {
+            let mut v = Vault::create(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+            v.upsert(&kept).unwrap();
+            v.device_id.clone()
+        };
+        let log = dir.join(LOGS_DIR).join(format!("{device_id}.{LOG_EXT}"));
+        let mut raw = fs::read(&log).unwrap();
+        raw.extend_from_slice(&200u32.to_le_bytes());
+        raw.extend_from_slice(b"half a record");
+        fs::write(&log, &raw).unwrap();
+
+        let later = Memo::new("later", "");
+        {
+            let mut v = Vault::open(&dir, b"pw", Store::open(&db).unwrap()).unwrap();
+            assert_eq!(v.store().get(&kept.id).unwrap().unwrap().title, "kept");
+            v.upsert(&later).unwrap();
+        }
+        let v = Vault::open(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+        assert!(v.store().get(&kept.id).unwrap().is_some());
+        assert!(v.store().get(&later.id).unwrap().is_some());
 
         fs::remove_dir_all(&dir).ok();
         fs::remove_file(&db).ok();

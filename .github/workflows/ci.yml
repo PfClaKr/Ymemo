@@ -139,3 +139,31 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # The Dart half. Nothing here needs the Rust library built: `flutter analyze` reads the
+  # committed bindings, and the tests cover the pure-Dart pieces (markdown styling, titles).
+  # Without this job those tests existed and nothing ever ran them.
+  #
+  # Flutter is fetched the same way release.yml fetches it, at the same pinned version,
+  # because third-party setup actions are blocked by policy.
+  mobile:
+    runs-on: ubuntu-latest
+    env:
+      FLUTTER_VERSION: 3.47.0
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Flutter
+        working-directory: .
+        run: |
+          curl -sL -o flutter.tar.xz \
+            "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz"
+          tar xf flutter.tar.xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - run: flutter pub get
+      - name: Analyze
+        run: flutter analyze
+      - name: Test
+        run: flutter test

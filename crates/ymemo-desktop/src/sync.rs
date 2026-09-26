@@ -41,8 +41,8 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
     let interval = Duration::from_secs(ctx.settings.borrow().merge_seconds.max(1) as u64);
     let ctx = ctx.clone();
     timer.start(TimerMode::Repeated, interval, move || {
-        let mut guard = ctx.vault.borrow_mut();
-        let Some(v) = guard.as_mut() else { return };
+        let Some(mut guard) = ctx.vault_mut() else { return };
+        let v = &mut *guard;
         match v.rebuild() {
             // Nothing arrived. Everything below is about carrying a change into the windows,
             // and there is no change: the list already shows it, the open notes already say

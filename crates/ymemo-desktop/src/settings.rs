@@ -16,6 +16,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use ymemo_core::crypto::KEY_LEN;
+
+use ymemo_core::fsutil::{write_atomic, write_atomic_private};
 use ymemo_i18n::Lang;
 
 const SETTINGS_FILE: &str = "settings.json";
@@ -184,7 +186,7 @@ impl Settings {
     pub fn save(&self, dir: &Path) {
         match serde_json::to_vec_pretty(self) {
             Ok(bytes) => {
-                if let Err(e) = fs::write(dir.join(SETTINGS_FILE), bytes) {
+                if let Err(e) = write_atomic(&dir.join(SETTINGS_FILE), &bytes) {
                     diag!("could not save the settings: {e}");
                 }
             }
@@ -413,12 +415,10 @@ pub fn save_session(dir: &Path, key: &[u8; KEY_LEN], days: i32) {
     let Ok(bytes) = serde_json::to_vec(&session) else {
         return;
     };
-    let path = session_path(dir);
-    if let Err(e) = fs::write(&path, bytes) {
+    // Owner-only from the moment it exists on unix; Windows relies on the profile's ACL.
+    if let Err(e) = write_atomic_private(&session_path(dir), &bytes) {
         diag!("could not save the session: {e}");
-        return;
     }
-    restrict_permissions(&path);
 }
 
 /// Discards the session (manual lock, changed window, expiry).
@@ -430,18 +430,6 @@ pub fn clear_session(dir: &Path) {
         }
     }
 }
-
-/// Owner-only permissions. Meaningful on unix; Windows relies on the user profile's ACL.
-#[cfg(unix)]
-fn restrict_permissions(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    if let Err(e) = fs::set_permissions(path, fs::Permissions::from_mode(0o600)) {
-        diag!("could not set the session file permissions: {e}");
-    }
-}
-
-#[cfg(not(unix))]
-fn restrict_permissions(_path: &Path) {}
 
 fn to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()

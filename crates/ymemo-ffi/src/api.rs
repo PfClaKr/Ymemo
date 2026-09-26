@@ -9,7 +9,7 @@
 
 use std::collections::HashSet;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use anyhow::{anyhow, Result};
 use ymemo_core::{
@@ -36,13 +36,41 @@ static LAST_DELETE: Mutex<Option<ymemo_core::vault::Deleted>> = Mutex::new(None)
 
 /// Records what a delete removed, so [`memo_undelete`] can offer it back.
 fn remember_delete(removed: Option<ymemo_core::vault::Deleted>) {
-    if let Ok(mut slot) = LAST_DELETE.lock() {
-        *slot = removed;
-    }
+    *relock(&LAST_DELETE) = removed;
+}
+
+/// Locks one of this file's globals, taking it back if a panic poisoned it.
+///
+/// flutter_rust_bridge turns a panic into a Dart exception and the app carries on, but a
+/// `Mutex` held at that moment stays poisoned — and every call after it failed, for the rest
+/// of the process, until the user thought to restart. None of these hold anything a panic
+/// can leave half-true except the vault, which [`vault_lock`] re-reads.
+fn relock<T>(m: &'static Mutex<T>) -> MutexGuard<'static, T> {
+    m.lock().unwrap_or_else(|poisoned| {
+        diag!("a lock was poisoned by a panic; carrying on with it");
+        m.clear_poison();
+        poisoned.into_inner()
+    })
+}
+
+/// [`relock`] for the vault, which on the way back is re-read from its logs: a panic in the
+/// middle of an edit can leave the document in memory holding half of it.
+fn vault_lock() -> MutexGuard<'static, Option<Vault>> {
+    VAULT.lock().unwrap_or_else(|poisoned| {
+        diag!("the vault lock was poisoned by a panic; re-reading the vault");
+        VAULT.clear_poison();
+        let mut guard = poisoned.into_inner();
+        if let Some(v) = guard.as_mut() {
+            if let Err(e) = v.reload() {
+                diag!("could not re-read the vault after a panic: {e}");
+            }
+        }
+        guard
+    })
 }
 
 fn with_vault<T>(f: impl FnOnce(&mut Vault) -> Result<T>) -> Result<T> {
-    let mut guard = VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))?;
+    let mut guard = vault_lock();
     let vault = guard.as_mut().ok_or_else(|| anyhow!(t!("core.vault_not_open")))?;
     f(vault)
 }
@@ -520,7 +548,7 @@ pub fn mobile_strings() -> FfiStrings {
 pub fn vault_open(vault_dir: String, cache_db_path: String, password: String) -> Result<()> {
     let store = Store::open(&cache_db_path)?;
     let vault = Vault::open_or_create(&vault_dir, password.as_bytes(), store)?;
-    *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = Some(vault);
+    *vault_lock() = Some(vault);
     Ok(())
 }
 
@@ -543,7 +571,7 @@ pub fn vault_set_name(name: String) -> Result<String> {
 
 /// Closes the vault (log out).
 pub fn vault_close() -> Result<()> {
-    *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = None;
+    *vault_lock() = None;
     // A pending undo holds a memo's title and body in memory. A closed vault must leave no
     // memo text behind it, and an undo offered across a lock would put a memo back into a
     // vault the user has just shut.
@@ -609,7 +637,7 @@ pub fn vault_reset(vault_dir: String, cache_db_path: String) -> Result<()> {
     // Scoped so the sync lock is released before the vault lock is taken; the two are
     // reached from different Dart threads and one consistent order is what keeps that safe.
     {
-        let guard = sync_lock()?;
+        let guard = sync_lock();
         if let Some(st) = guard.as_ref() {
             // Wrapped so the message says *nothing was deleted*: a bare REST error here
             // reads like the wipe half-happened, which is the one thing it never does.
@@ -622,7 +650,7 @@ pub fn vault_reset(vault_dir: String, cache_db_path: String) -> Result<()> {
     // The cache is a plaintext copy of everything the vault held, so it goes with it — and so
     // do the sidecars WAL mode keeps beside it, or a reset hands the memos back.
     Store::delete_file(&cache_db_path)?;
-    *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = None;
+    *vault_lock() = None;
     Ok(())
 }
 
@@ -700,7 +728,7 @@ pub fn memo_delete(id: String) -> Result<()> {
 /// ordinary edit on top of it — so two devices acting on the same deletion merge instead of
 /// fighting over it. See `Vault::undelete`.
 pub fn memo_undelete() -> Result<bool> {
-    let Some(deleted) = LAST_DELETE.lock().ok().and_then(|mut slot| slot.take()) else {
+    let Some(deleted) = relock(&LAST_DELETE).take() else {
         return Ok(false);
     };
     with_vault(|v| v.undelete(&deleted))?;
@@ -709,7 +737,7 @@ pub fn memo_undelete() -> Result<bool> {
 
 /// Whether a delete is still waiting to be taken back.
 pub fn memo_can_undelete() -> bool {
-    LAST_DELETE.lock().map(|slot| slot.is_some()).unwrap_or(false)
+    relock(&LAST_DELETE).is_some()
 }
 
 /// One past version of a memo, as the phone's history screen shows it.
@@ -1084,9 +1112,9 @@ pub fn sync_rebuild() -> Result<()> {
 /// Best effort and silent: it runs after every merge, the daemon may be down, and a failure
 /// here is not something the person reading their memos can act on.
 fn apply_revocations() {
-    let Ok(sync_guard) = sync_lock() else { return };
+    let sync_guard = sync_lock();
     let Some(st) = sync_guard.as_ref() else { return };
-    let Ok(vault_guard) = VAULT.lock() else { return };
+    let vault_guard = vault_lock();
     let Some(v) = vault_guard.as_ref() else { return };
 
     match v.is_revoked_here() {
@@ -1131,12 +1159,12 @@ fn apply_revocations() {
 /// The running daemon, one per app process, like [`VAULT`].
 static SYNC: Mutex<Option<Syncthing>> = Mutex::new(None);
 
-fn sync_lock() -> Result<std::sync::MutexGuard<'static, Option<Syncthing>>> {
-    SYNC.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))
+fn sync_lock() -> MutexGuard<'static, Option<Syncthing>> {
+    relock(&SYNC)
 }
 
 fn with_sync<T>(f: impl FnOnce(&Syncthing) -> Result<T>) -> Result<T> {
-    let guard = sync_lock()?;
+    let guard = sync_lock();
     let st = guard.as_ref().ok_or_else(|| anyhow!(t!("core.sync_not_running")))?;
     f(st)
 }
@@ -1156,7 +1184,7 @@ pub struct FfiSharedDevice {
 /// the device key and can take a few seconds; flutter_rust_bridge runs this off the UI thread
 /// on its own.
 pub fn sync_start(binary_path: String, home_dir: String, vault_dir: String) -> Result<String> {
-    let mut guard = sync_lock()?;
+    let mut guard = sync_lock();
 
     // Holding a handle is not the same as having a daemon: Android kills backgrounded child
     // processes under memory pressure, and nothing tells us when it does. Ask the daemon
@@ -1188,7 +1216,7 @@ pub fn sync_start(binary_path: String, home_dir: String, vault_dir: String) -> R
 /// again once it is up. See `Syncthing::set_my_name` for why the name has to be in place
 /// before a peer first connects.
 pub fn sync_set_device_name(name: String) -> Result<()> {
-    let guard = sync_lock()?;
+    let guard = sync_lock();
     let Some(st) = guard.as_ref() else { return Ok(()) };
     st.set_my_name(&name)
 }
@@ -1200,7 +1228,7 @@ pub fn sync_set_device_name(name: String) -> Result<()> {
 /// until the app was next restarted. Doing nothing when the daemon is down is correct: the
 /// next `sync_start` registers it anyway.
 pub fn sync_ensure_folder(vault_dir: String) -> Result<()> {
-    let guard = sync_lock()?;
+    let guard = sync_lock();
     let Some(st) = guard.as_ref() else { return Ok(()) };
     st.ensure_folder(VAULT_FOLDER_ID, "Ymemo Vault", Path::new(&vault_dir))?;
     st.ensure_introducers(VAULT_FOLDER_ID)
@@ -1214,7 +1242,7 @@ pub fn sync_ensure_folder(vault_dir: String) -> Result<()> {
 ///
 /// Doing nothing while the daemon is down is correct; Dart calls this again once it is up.
 pub fn sync_set_timing(watch_delay_seconds: i32, rescan_seconds: i32) -> Result<()> {
-    let guard = sync_lock()?;
+    let guard = sync_lock();
     let Some(st) = guard.as_ref() else { return Ok(()) };
     st.set_folder_timing(VAULT_FOLDER_ID, watch_delay_seconds, rescan_seconds)
 }
@@ -1224,7 +1252,7 @@ pub fn sync_set_timing(watch_delay_seconds: i32, rescan_seconds: i32) -> Result<
 /// Kept apart from [`sync_set_timing`] because the two are different questions — how fast
 /// syncing is versus how much disk it may keep — and a phone is where the second one bites.
 pub fn sync_set_versioning(keep_days: i32) -> Result<()> {
-    let guard = sync_lock()?;
+    let guard = sync_lock();
     let Some(st) = guard.as_ref() else { return Ok(()) };
     st.set_folder_versioning(VAULT_FOLDER_ID, keep_days)
 }
@@ -1235,7 +1263,7 @@ pub fn sync_set_versioning(keep_days: i32) -> Result<()> {
 /// still be paired over mobile data and starts catching up the moment the phone is back on
 /// an unmetered network.
 pub fn sync_set_paused(paused: bool) -> Result<()> {
-    let guard = sync_lock()?;
+    let guard = sync_lock();
     let Some(st) = guard.as_ref() else { return Ok(()) };
     st.set_folder_paused(VAULT_FOLDER_ID, paused)
 }
@@ -1243,13 +1271,13 @@ pub fn sync_set_paused(paused: bool) -> Result<()> {
 /// Stops the daemon. Safe to call when it is not running.
 pub fn sync_stop() -> Result<()> {
     // Dropping it shuts the daemon down over REST, then kills it if it will not go.
-    *sync_lock()? = None;
+    *sync_lock() = None;
     Ok(())
 }
 
 /// Whether the daemon is up. Cheap: it does not talk to it.
 pub fn sync_running() -> bool {
-    sync_lock().map(|g| g.is_some()).unwrap_or(false)
+    sync_lock().is_some()
 }
 
 /// This device's pairing code (`YMEMO1:<device-id>`), for the other device to scan or type.
@@ -1316,8 +1344,8 @@ pub fn sync_unpair(device_id: String) -> Result<()> {
 /// the app again clears it, so a mis-tapped "reject" is never permanent.
 static REJECTED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
-fn rejected_lock() -> Result<std::sync::MutexGuard<'static, Option<HashSet<String>>>> {
-    REJECTED.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))
+fn rejected_lock() -> MutexGuard<'static, Option<HashSet<String>>> {
+    relock(&REJECTED)
 }
 
 /// A device asking to be let in.
@@ -1334,7 +1362,7 @@ pub struct FfiPendingDevice {
 
 /// Requests waiting for an answer, oldest first, minus the ones already rejected.
 pub fn sync_pending_devices() -> Result<Vec<FfiPendingDevice>> {
-    let rejected = rejected_lock()?.clone().unwrap_or_default();
+    let rejected = rejected_lock().clone().unwrap_or_default();
     with_sync(|st| {
         let my_id = st.device_id()?;
         Ok(st
@@ -1356,7 +1384,7 @@ pub fn sync_pending_devices() -> Result<Vec<FfiPendingDevice>> {
 /// nothing to clear afterwards.
 pub fn sync_approve_device(device_id: String) -> Result<()> {
     // An id that was rejected and then approved must not stay filtered out of the list.
-    if let Some(set) = rejected_lock()?.as_mut() {
+    if let Some(set) = rejected_lock().as_mut() {
         set.remove(&device_id);
     }
     with_sync(|st| st.share_folder_with(VAULT_FOLDER_ID, &device_id))?;
@@ -1368,7 +1396,7 @@ pub fn sync_approve_device(device_id: String) -> Result<()> {
 
 /// Turns a device away and stops asking about it for the rest of this run.
 pub fn sync_reject_device(device_id: String) -> Result<()> {
-    rejected_lock()?.get_or_insert_with(HashSet::new).insert(device_id.clone());
+    rejected_lock().get_or_insert_with(HashSet::new).insert(device_id.clone());
     // Best effort: the local answer is what actually silences the prompt, and a daemon that
     // has already gone away has no list to clear.
     let _ = with_sync(|st| st.dismiss_pending_device(&device_id));
@@ -1400,8 +1428,8 @@ pub fn sync_verification_code(peer_device_id: String) -> Result<String> {
 /// The pairing-mode listener, alive only while the screen is open.
 static LAN: Mutex<Option<lan_pair::PairListener>> = Mutex::new(None);
 
-fn lan_lock() -> Result<std::sync::MutexGuard<'static, Option<lan_pair::PairListener>>> {
-    LAN.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))
+fn lan_lock() -> MutexGuard<'static, Option<lan_pair::PairListener>> {
+    relock(&LAN)
 }
 
 /// Registers a peer learnt over LAN with the running daemon.
@@ -1417,7 +1445,7 @@ fn share_with_peer(peer_id: &str) -> Result<()> {
 /// purpose is to hand over its device id.
 pub fn lan_start() -> Result<String> {
     let device_id = with_sync(|st| st.device_id())?;
-    let mut guard = lan_lock()?;
+    let mut guard = lan_lock();
     if guard.is_none() {
         *guard = Some(lan_pair::PairListener::start(device_id)?);
     }
@@ -1426,12 +1454,12 @@ pub fn lan_start() -> Result<String> {
 
 /// The code currently on offer. It rotates every minute, so the screen re-reads it.
 pub fn lan_code() -> Result<Option<String>> {
-    Ok(lan_lock()?.as_ref().map(|l| l.code()))
+    Ok(lan_lock().as_ref().map(|l| l.code()))
 }
 
 /// Leaves pairing mode: the socket closes and the code stops being answered.
 pub fn lan_stop() -> Result<()> {
-    *lan_lock()? = None;
+    *lan_lock() = None;
     Ok(())
 }
 
@@ -1439,7 +1467,7 @@ pub fn lan_stop() -> Result<()> {
 /// each. Returns their ids, for the screen to report. Poll it while pairing mode is on.
 pub fn lan_poll_paired() -> Result<Vec<String>> {
     let peers: Vec<String> = {
-        let guard = lan_lock()?;
+        let guard = lan_lock();
         let Some(listener) = guard.as_ref() else { return Ok(Vec::new()) };
         std::iter::from_fn(|| listener.next_paired_peer()).collect()
     };
@@ -1588,12 +1616,12 @@ mod tests {
     fn rejecting_works_without_a_running_daemon() {
         let id = format!("TESTDEV-{}", uuid_like());
         sync_reject_device(id.clone()).unwrap();
-        assert!(rejected_lock().unwrap().as_ref().is_some_and(|s| s.contains(&id)));
+        assert!(rejected_lock().as_ref().is_some_and(|s| s.contains(&id)));
 
         // Approving the same device has to lift the refusal, or a change of mind would leave
         // it filtered out of the list forever.
         let _ = sync_approve_device(id.clone());
-        assert!(!rejected_lock().unwrap().as_ref().is_some_and(|s| s.contains(&id)));
+        assert!(!rejected_lock().as_ref().is_some_and(|s| s.contains(&id)));
     }
 
     fn uuid_like() -> String {
@@ -1722,7 +1750,7 @@ pub fn settings_load(path: String) -> FfiSettings {
 pub fn settings_save(path: String, settings: FfiSettings) -> Result<FfiSettings> {
     let mut settings = settings;
     settings.sanitize();
-    std::fs::write(&path, serde_json::to_vec_pretty(&settings)?)?;
+    ymemo_core::fsutil::write_atomic(std::path::Path::new(&path), &serde_json::to_vec_pretty(&settings)?)?;
     Ok(settings)
 }
 
@@ -1754,7 +1782,7 @@ pub fn vault_open_with_key(vault_dir: String, cache_db_path: String, key: Vec<u8
         .map_err(|_| anyhow!(t!("core.session_key_bad")))?;
     let store = Store::open(&cache_db_path)?;
     let vault = Vault::open_with_key(&vault_dir, ymemo_core::crypto::MasterKey::from_bytes(&bytes)?, store)?;
-    *VAULT.lock().map_err(|_| anyhow!(t!("core.vault_lock_poisoned")))? = Some(vault);
+    *vault_lock() = Some(vault);
     Ok(())
 }
 

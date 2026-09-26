@@ -11,6 +11,7 @@ pub mod blob;
 pub mod changelog;
 pub mod crypto;
 pub mod diag;
+pub mod fsutil;
 pub mod history;
 pub mod lan_pair;
 pub mod order;

@@ -139,8 +139,8 @@ pub(crate) fn title_for(memo: &Memo, text: &str) -> String {
 /// note, and that is what stops the next tick from painting the last stored version over
 /// what is still being typed.
 pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) -> bool {
-    let mut guard = ctx.vault.borrow_mut();
-    let Some(v) = guard.as_mut() else { return false };
+    let Some(mut guard) = ctx.vault_mut() else { return false };
+    let v = &mut *guard;
     let mut memo = match v.store().get(id) {
         Ok(Some(m)) => m,
         // Deleted: the edits have nowhere to go and nothing is waiting to be written.
@@ -246,8 +246,8 @@ pub(crate) fn new_memo_in(ctx: &Ctx, group_id: &str) {
         memo.opacity = s.default_opacity as i64;
     }
     {
-        let mut guard = ctx.vault.borrow_mut();
-        let Some(v) = guard.as_mut() else { return };
+        let Some(mut guard) = ctx.vault_mut() else { return };
+        let v = &mut *guard;
         if let Err(e) = v.upsert(&memo) {
             diag!("could not create the memo: {e}");
             crate::list::report_write_failure(&e);
@@ -475,8 +475,8 @@ fn decode_image(bytes: &[u8]) -> Option<slint::Image> {
 /// Refills an open sticky's photo lists after an add, a resize, a mode change or a merge.
 pub(crate) fn refresh_photos(ctx: &Ctx, memo_id: &str) {
     let rows = {
-        let guard = ctx.vault.borrow();
-        let Some(v) = guard.as_ref() else { return };
+        let Some(guard) = ctx.vault_ref() else { return };
+        let v = &*guard;
         split_photo_rows(v, memo_id)
     };
     if let Some(entry) = ctx.stickies.borrow().get(memo_id) {
@@ -624,8 +624,7 @@ fn save_photo(ctx: &Ctx, photo_id: &str, title: String, saving: Arc<AtomicBool>)
         return; // a dialog is already open
     }
     let picked = {
-        let guard = ctx.vault.borrow();
-        guard.as_ref().and_then(|v| match v.store().get_attachment(photo_id) {
+        ctx.vault_ref().and_then(|v| match v.store().get_attachment(photo_id) {
             Ok(Some(a)) => match v.attachment_bytes(&a.hash) {
                 Ok(bytes) => Some((a.name, bytes)),
                 // Not on this device yet: there is nothing to write.
@@ -663,8 +662,8 @@ fn attach_photo(memo_id: &str, pick: PhotoPick) {
     let ctx = APP.with(|a| a.borrow().as_ref().map(|app| app.ctx.clone()));
     let Some(ctx) = ctx else { return };
     {
-        let mut guard = ctx.vault.borrow_mut();
-        let Some(v) = guard.as_mut() else { return };
+        let Some(mut guard) = ctx.vault_mut() else { return };
+        let v = &mut *guard;
         if let Err(e) = v.attach(memo_id, &pick.bytes, &pick.name, pick.mime, pick.width, pick.height)
         {
             diag!("could not attach the photo: {e}");
@@ -770,11 +769,8 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     window.set_sticky_opacity(memo.opacity as f32);
     window.set_pinned(ctx.settings.borrow().memo_pinned(&memo.id));
     window.set_created_at(SharedString::from(format_created_at(memo.created_at)));
-    {
-        let guard = ctx.vault.borrow();
-        if let Some(v) = guard.as_ref() {
-            set_photo_models(&window, split_photo_rows(v, &memo.id));
-        }
+    if let Some(v) = ctx.vault_ref() {
+        set_photo_models(&window, split_photo_rows(&v, &memo.id));
     }
 
     // Attach: pick a photo from the file dialog, which runs on a worker thread.
@@ -818,8 +814,8 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         window.on_place_photo(move |photo_id, x_frac, y_frac, width_px| {
             touch(&ctx);
             {
-                let mut guard = ctx.vault.borrow_mut();
-                let Some(v) = guard.as_mut() else { return };
+                let Some(mut guard) = ctx.vault_mut() else { return };
+                let v = &mut *guard;
                 let em_milli = (width_px as f64 / BODY_FONT_PX * 1000.0).round() as i64;
                 if let Err(e) = v.set_attachment_layout(
                     photo_id.as_str(),
@@ -841,8 +837,8 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         window.on_remove_photo(move |photo_id| {
             touch(&ctx);
             {
-                let mut guard = ctx.vault.borrow_mut();
-                let Some(v) = guard.as_mut() else { return };
+                let Some(mut guard) = ctx.vault_mut() else { return };
+                let v = &mut *guard;
                 if let Err(e) = v.detach(photo_id.as_str()) {
                     diag!("could not remove the photo: {e}");
                 }
@@ -881,8 +877,8 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
             // to save costs nothing.
             save_memo(&ctx, &id, w.get_memo_text().as_str());
             {
-                let mut guard = ctx.vault.borrow_mut();
-                let Some(v) = guard.as_mut() else { return };
+                let Some(mut guard) = ctx.vault_mut() else { return };
+                let v = &mut *guard;
                 let res = if into_writing {
                     let body = v.store().get(&id).ok().flatten().map(|m| m.body).unwrap_or_default();
                     let after_line = line_for_caret(&body, w.get_caret_byte().max(0) as usize);
@@ -901,11 +897,9 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
             }
             // The body changed under the note, so the field has to be told; `refresh_photos`
             // only carries the pictures.
-            {
-                let guard = ctx.vault.borrow();
-                if let Some(memo) = guard.as_ref().and_then(|v| v.store().get(&id).ok().flatten()) {
-                    set_body_text(&w, &sticky_text(&memo));
-                }
+            let memo = ctx.vault_ref().and_then(|v| v.store().get(&id).ok().flatten());
+            if let Some(memo) = memo {
+                set_body_text(&w, &sticky_text(&memo));
             }
             refresh_photos(&ctx, &id);
         });
@@ -1028,8 +1022,8 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         window.on_set_color(move |key| {
             touch(&ctx);
             {
-                let mut guard = ctx.vault.borrow_mut();
-                let Some(v) = guard.as_mut() else { return };
+                let Some(mut guard) = ctx.vault_mut() else { return };
+                let v = &mut *guard;
                 let Ok(Some(mut m)) = v.store().get(&id) else { return };
                 if m.color == key.as_str() {
                     return;
@@ -1055,8 +1049,8 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
         window.on_set_opacity(move |pct| {
             touch(&ctx);
             let pct = ymemo_core::clamp_opacity(pct.round() as i64);
-            let mut guard = ctx.vault.borrow_mut();
-            let Some(v) = guard.as_mut() else { return };
+            let Some(mut guard) = ctx.vault_mut() else { return };
+            let v = &mut *guard;
             let Ok(Some(mut m)) = v.store().get(&id) else { return };
             if m.opacity == pct {
                 return;
@@ -1300,8 +1294,8 @@ pub(crate) fn quit_if_last_window(ctx: &Ctx, _list: &crate::ListWindow) {
 /// clutter.
 pub(crate) fn discard_if_blank(ctx: &Ctx, id: &str) {
     {
-        let mut guard = ctx.vault.borrow_mut();
-        let Some(v) = guard.as_mut() else { return };
+        let Some(mut guard) = ctx.vault_mut() else { return };
+        let v = &mut *guard;
         match v.store().get(id) {
             Ok(Some(memo)) if memo.title.is_empty() && memo.body.is_empty() => {
                 // A photo makes it a note, and a cache that cannot be read is not grounds for

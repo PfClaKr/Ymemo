@@ -37,9 +37,62 @@ static PATH: OnceLock<PathBuf> = OnceLock::new();
 /// Serializes writers within the process; two devices never share a file.
 static LOCK: Mutex<()> = Mutex::new(());
 
-/// Points the log at a directory. Safe to call more than once; the first call wins.
+/// Points the log at a directory and starts recording panics there. Safe to call more than
+/// once; the first call wins.
 pub fn init(data_dir: &Path) {
-    let _ = PATH.set(data_dir.join("ymemo.log"));
+    if PATH.set(data_dir.join("ymemo.log")).is_ok() {
+        install_panic_hook();
+    }
+}
+
+/// Writes every panic to the log, then hands it on to whatever hook was there before.
+///
+/// Without it a panic in the console-less Windows build closed the app and left nothing
+/// behind to say why, and on Android the message went to the same `/dev/null` as stderr.
+fn install_panic_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("(no message)");
+        let at = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_default();
+        write(&format!("panic at {at}: {}", scrub_panic_message(payload)));
+        previous(info);
+    }));
+}
+
+/// A panic message cut down to what cannot be memo text.
+///
+/// The standard library quotes the string it was slicing in backticks — "byte index 5 is not
+/// a char boundary; it is inside '다' of \`<the body>\`" — and this file promises to hold no
+/// memo text. So a backtick span survives only when it reads as code (`Result::unwrap()`,
+/// `None`), anything outside ASCII becomes `?`, and the whole is capped.
+fn scrub_panic_message(message: &str) -> String {
+    let code_like = |span: &str| {
+        !span.is_empty()
+            && span.chars().all(|c| c.is_ascii_alphanumeric() || "_:()<>&,".contains(c))
+    };
+    let mut out = String::new();
+    for (i, part) in message.split('`').enumerate() {
+        // Odd parts are inside a pair of backticks.
+        if i % 2 == 1 {
+            out.push('`');
+            out.push_str(if code_like(part) { part } else { "…" });
+            out.push('`');
+        } else {
+            out.extend(part.chars().map(|c| if c.is_ascii() { c } else { '?' }));
+        }
+    }
+    if out.chars().count() > 300 {
+        out = out.chars().take(300).collect::<String>() + " …";
+    }
+    out
 }
 
 /// The current log's path, once [`init`] has run.
@@ -50,7 +103,9 @@ pub fn path() -> Option<&'static Path> {
 /// Appends one line. Silently does nothing before [`init`], and on any I/O failure.
 pub fn write(message: &str) {
     let Some(path) = PATH.get() else { return };
-    let Ok(_guard) = LOCK.lock() else { return };
+    // A panic while another thread was writing must not silence the log for good — least
+    // of all now that panics are written here too.
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     append(path, MAX_BYTES, message);
 }
 
@@ -115,6 +170,20 @@ macro_rules! diag {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_panic_message_loses_the_text_it_quotes() {
+        let quoted = "byte index 4 is not a char boundary; it is inside '다' of `감사합니다 secret`";
+        let kept = scrub_panic_message(quoted);
+        assert!(!kept.contains("secret") && !kept.contains('다'), "{kept}");
+        assert!(kept.starts_with("byte index 4 is not a char boundary"));
+        // What the code itself says is kept: that is the useful half of an unwrap.
+        assert_eq!(
+            scrub_panic_message("called `Result::unwrap()` on an `Err` value: NotFound"),
+            "called `Result::unwrap()` on an `Err` value: NotFound"
+        );
+        assert!(scrub_panic_message(&"x".repeat(1000)).chars().count() < 310);
+    }
 
     /// A directory of our own, since these tests write real files.
     fn scratch() -> PathBuf {

@@ -41,8 +41,8 @@ pub(crate) fn wire(ctx: &Ctx, win: &HistoryWindow, subject: &Subject) {
             // Re-read rather than trusting a list that may be a restore old; the index is
             // into the core's own ordering, so it has to come from the same source.
             let restored = {
-                let mut guard = ctx.vault.borrow_mut();
-                let Some(v) = guard.as_mut() else { return };
+                let Some(mut guard) = ctx.vault_mut() else { return };
+                let v = &mut *guard;
                 match v.history(entity, &id) {
                     Ok(revisions) => match revisions.get(index as usize) {
                         Some(rev) => v.restore(entity, &id, rev),
@@ -84,8 +84,8 @@ pub(crate) fn show(ctx: &Ctx, win: &HistoryWindow, subject: &Subject, entity: En
 fn refresh(ctx: &Ctx, win: &HistoryWindow, entity: Entity, id: &str) {
     // Mutable because reading a memo's past reads the document, and `AutoCommit` settles any
     // pending edit before it hands over its changes.
-    let mut guard = ctx.vault.borrow_mut();
-    let Some(v) = guard.as_mut() else { return };
+    let Some(mut guard) = ctx.vault_mut() else { return };
+    let v = &mut *guard;
 
     let name = match entity {
         Entity::Memo => v.store().get(id).ok().flatten().map(|m| m.title),

@@ -19,6 +19,9 @@ use std::time::{Duration, Instant};
 
 /// How long to wait for a first start, key generation included.
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
+/// Longest any one REST call may take. Generous for a daemon on localhost — a config PUT
+/// can restart parts of it — and short enough that a stuck one is a hiccup, not a hang.
+const REST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Id of the vault folder inside Syncthing.
 ///
@@ -33,6 +36,11 @@ pub struct Syncthing {
     child: Child,
     base_url: String,
     api_key: String,
+    /// Every REST call goes through this, for its timeout. Several of them run on the
+    /// desktop's UI thread (the merge timer applies revocations), so a daemon that stopped
+    /// answering froze the whole app for as long as it stayed stuck — ureq's own default
+    /// has no timeout at all.
+    agent: ureq::Agent,
     /// Windows: the job object that kills the daemon when this process goes away. Nothing
     /// reads it; it only has to stay open. See [`kill_with_parent`].
     #[cfg(windows)]
@@ -152,6 +160,9 @@ impl Syncthing {
             child,
             base_url: format!("http://{gui}"),
             api_key: String::new(),
+            agent: ureq::Agent::new_with_config(
+                ureq::Agent::config_builder().timeout_global(Some(REST_TIMEOUT)).build(),
+            ),
         };
 
         // Wait for config.xml to appear with an <apikey>.
@@ -211,13 +222,13 @@ impl Syncthing {
     /// `config.xml` before the daemon's first start, and the daemon is what creates it.
     fn disable_crash_reporting(&self) -> Result<()> {
         let url = format!("{}/rest/config/options", self.base_url);
-        let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
+        let mut res = self.agent.get(&url).header("X-API-Key", &self.api_key).call()?;
         let mut options: serde_json::Value = res.body_mut().read_json()?;
         if options["crashReportingEnabled"] == serde_json::json!(false) {
             return Ok(()); // already off, and a PUT here restarts more than it needs to
         }
         options["crashReportingEnabled"] = serde_json::json!(false);
-        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&options)?;
+        self.agent.put(&url).header("X-API-Key", &self.api_key).send_json(&options)?;
         Ok(())
     }
 
@@ -231,7 +242,7 @@ impl Syncthing {
     /// the daemon it had spawned running. Reading a field out of the response proves both
     /// halves at once.
     fn ping(&self) -> Result<()> {
-        let mut res = ureq::get(format!("{}/rest/system/status", self.base_url))
+        let mut res = self.agent.get(format!("{}/rest/system/status", self.base_url))
             .header("X-API-Key", &self.api_key)
             .call()?;
         let status: serde_json::Value = res.body_mut().read_json()?;
@@ -243,7 +254,7 @@ impl Syncthing {
 
     /// This daemon's device id — the value a pairing QR carries.
     pub fn device_id(&self) -> Result<String> {
-        let mut res = ureq::get(format!("{}/rest/system/status", self.base_url))
+        let mut res = self.agent.get(format!("{}/rest/system/status", self.base_url))
             .header("X-API-Key", &self.api_key)
             .call()?;
         let status: serde_json::Value = res.body_mut().read_json()?;
@@ -257,10 +268,10 @@ impl Syncthing {
     /// so its peer list is not overwritten.
     pub fn ensure_folder(&self, folder_id: &str, label: &str, path: &Path) -> Result<()> {
         let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
-        if ureq::get(&url).header("X-API-Key", &self.api_key).call().is_ok() {
+        if self.agent.get(&url).header("X-API-Key", &self.api_key).call().is_ok() {
             return Ok(()); // already registered
         }
-        ureq::put(&url)
+        self.agent.put(&url)
             .header("X-API-Key", &self.api_key)
             .send_json(serde_json::json!({
                 "id": folder_id,
@@ -289,7 +300,7 @@ impl Syncthing {
     /// change has to go through to reach a folder that is already registered.
     pub fn set_folder_timing(&self, folder_id: &str, watch_delay_s: i32, rescan_s: i32) -> Result<()> {
         let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
-        let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
+        let mut res = self.agent.get(&url).header("X-API-Key", &self.api_key).call()?;
         let mut folder: serde_json::Value = res.body_mut().read_json()?;
 
         // Nothing to say if the daemon already agrees: a PUT restarts the folder, which
@@ -302,7 +313,7 @@ impl Syncthing {
         folder["fsWatcherEnabled"] = serde_json::json!(true);
         folder["fsWatcherDelayS"] = serde_json::json!(watch_delay_s);
         folder["rescanIntervalS"] = serde_json::json!(rescan_s);
-        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
+        self.agent.put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
         Ok(())
     }
 
@@ -314,13 +325,13 @@ impl Syncthing {
     /// connections and make coming back slow, for a saving of a few keepalive bytes.
     pub fn set_folder_paused(&self, folder_id: &str, paused: bool) -> Result<()> {
         let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
-        let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
+        let mut res = self.agent.get(&url).header("X-API-Key", &self.api_key).call()?;
         let mut folder: serde_json::Value = res.body_mut().read_json()?;
         if folder["paused"] == serde_json::json!(paused) {
             return Ok(()); // a PUT restarts the folder; this is called on every network change
         }
         folder["paused"] = serde_json::json!(paused);
-        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
+        self.agent.put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
         Ok(())
     }
 
@@ -344,7 +355,7 @@ impl Syncthing {
     /// each device keeps its own and nothing new travels between them.
     pub fn set_folder_versioning(&self, folder_id: &str, keep_days: i32) -> Result<()> {
         let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
-        let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
+        let mut res = self.agent.get(&url).header("X-API-Key", &self.api_key).call()?;
         let mut folder: serde_json::Value = res.body_mut().read_json()?;
 
         let want = if keep_days <= 0 {
@@ -365,7 +376,7 @@ impl Syncthing {
             return Ok(());
         }
         folder["versioning"] = want;
-        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
+        self.agent.put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
         Ok(())
     }
 
@@ -376,14 +387,14 @@ impl Syncthing {
 
         // 2. Add it to the folder config.
         let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
-        let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
+        let mut res = self.agent.get(&url).header("X-API-Key", &self.api_key).call()?;
         let mut folder: serde_json::Value = res.body_mut().read_json()?;
         let devices = folder["devices"]
             .as_array_mut()
             .ok_or_else(|| anyhow!(t!("core.syncthing_no_devices")))?;
         if !devices.iter().any(|d| d["deviceID"] == peer_device_id) {
             devices.push(serde_json::json!({ "deviceID": peer_device_id }));
-            ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
+            self.agent.put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
         }
         Ok(())
     }
@@ -408,7 +419,7 @@ impl Syncthing {
     fn upsert_peer(&self, peer_device_id: &str) -> Result<()> {
         let url = format!("{}/rest/config/devices/{peer_device_id}", self.base_url);
         let mut device: serde_json::Value =
-            match ureq::get(&url).header("X-API-Key", &self.api_key).call() {
+            match self.agent.get(&url).header("X-API-Key", &self.api_key).call() {
                 Ok(mut res) => res.body_mut().read_json()?,
                 // Not registered yet, which is the usual case here.
                 Err(_) => serde_json::json!({ "deviceID": peer_device_id }),
@@ -426,7 +437,7 @@ impl Syncthing {
         // it back in the folder and then never dialled it: the reconnection silently did
         // nothing, which is the one thing worse than refusing.
         device["paused"] = serde_json::json!(false);
-        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&device)?;
+        self.agent.put(&url).header("X-API-Key", &self.api_key).send_json(&device)?;
         Ok(())
     }
 
@@ -441,7 +452,7 @@ impl Syncthing {
     /// unlocked a vault yet.
     pub fn ensure_introducers(&self, folder_id: &str) -> Result<()> {
         let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
-        let Ok(mut res) = ureq::get(&url).header("X-API-Key", &self.api_key).call() else {
+        let Ok(mut res) = self.agent.get(&url).header("X-API-Key", &self.api_key).call() else {
             return Ok(());
         };
         let folder: serde_json::Value = res.body_mut().read_json()?;
@@ -475,13 +486,13 @@ impl Syncthing {
         }
         let my_id = self.device_id()?;
         let url = format!("{}/rest/config/devices/{my_id}", self.base_url);
-        let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
+        let mut res = self.agent.get(&url).header("X-API-Key", &self.api_key).call()?;
         let mut device: serde_json::Value = res.body_mut().read_json()?;
         if device["name"] == serde_json::json!(name) {
             return Ok(()); // already so; a PUT would restart the connections
         }
         device["name"] = serde_json::json!(name);
-        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&device)?;
+        self.agent.put(&url).header("X-API-Key", &self.api_key).send_json(&device)?;
         Ok(())
     }
 
@@ -528,7 +539,7 @@ impl Syncthing {
     fn set_device_paused(&self, device_id: &str, paused: bool) -> Result<bool> {
         let url = format!("{}/rest/config/devices/{device_id}", self.base_url);
         let mut device: serde_json::Value =
-            match ureq::get(&url).header("X-API-Key", &self.api_key).call() {
+            match self.agent.get(&url).header("X-API-Key", &self.api_key).call() {
                 Ok(mut res) => res.body_mut().read_json()?,
                 Err(_) => serde_json::json!({ "deviceID": device_id }),
             };
@@ -540,7 +551,7 @@ impl Syncthing {
         if paused {
             device["introducer"] = serde_json::json!(false);
         }
-        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&device)?;
+        self.agent.put(&url).header("X-API-Key", &self.api_key).send_json(&device)?;
         Ok(true)
     }
 
@@ -548,7 +559,7 @@ impl Syncthing {
     /// Returns whether it was there.
     fn drop_from_folder(&self, folder_id: &str, device_id: &str) -> Result<bool> {
         let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
-        let Ok(mut res) = ureq::get(&url).header("X-API-Key", &self.api_key).call() else {
+        let Ok(mut res) = self.agent.get(&url).header("X-API-Key", &self.api_key).call() else {
             return Ok(false); // no folder: nothing shared with anyone
         };
         let mut folder: serde_json::Value = res.body_mut().read_json()?;
@@ -558,7 +569,7 @@ impl Syncthing {
         if devices.len() == before {
             return Ok(false);
         }
-        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
+        self.agent.put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
         Ok(true)
     }
 
@@ -571,7 +582,7 @@ impl Syncthing {
     ///
     /// Empty is the normal state, and this is polled, so it stays a single cheap GET.
     pub fn pending_devices(&self) -> Result<Vec<PendingDevice>> {
-        let mut res = ureq::get(format!("{}/rest/cluster/pending/devices", self.base_url))
+        let mut res = self.agent.get(format!("{}/rest/cluster/pending/devices", self.base_url))
             .header("X-API-Key", &self.api_key)
             .call()?;
         let body: serde_json::Value = res.body_mut().read_json()?;
@@ -598,7 +609,7 @@ impl Syncthing {
     /// again on its next attempt, so a front end that does not want to ask twice has to
     /// remember the answer itself.
     pub fn dismiss_pending_device(&self, device_id: &str) -> Result<()> {
-        ureq::delete(format!(
+        self.agent.delete(format!(
             "{}/rest/cluster/pending/devices?device={device_id}",
             self.base_url
         ))
@@ -613,7 +624,7 @@ impl Syncthing {
         let my_id = self.device_id()?;
 
         // Device ids attached to the folder.
-        let mut res = ureq::get(format!("{}/rest/config/folders/{folder_id}", self.base_url))
+        let mut res = self.agent.get(format!("{}/rest/config/folders/{folder_id}", self.base_url))
             .header("X-API-Key", &self.api_key)
             .call()?;
         let folder: serde_json::Value = res.body_mut().read_json()?;
@@ -627,7 +638,7 @@ impl Syncthing {
             .unwrap_or_default();
 
         // User-assigned labels, if any.
-        let mut res = ureq::get(format!("{}/rest/config/devices", self.base_url))
+        let mut res = self.agent.get(format!("{}/rest/config/devices", self.base_url))
             .header("X-API-Key", &self.api_key)
             .call()?;
         let devices: serde_json::Value = res.body_mut().read_json()?;
@@ -652,7 +663,7 @@ impl Syncthing {
         };
 
         // Current connection state.
-        let mut res = ureq::get(format!("{}/rest/system/connections", self.base_url))
+        let mut res = self.agent.get(format!("{}/rest/system/connections", self.base_url))
             .header("X-API-Key", &self.api_key)
             .call()?;
         let conns: serde_json::Value = res.body_mut().read_json()?;
@@ -679,15 +690,15 @@ impl Syncthing {
         }
         // 1. Remove it from the folder's device list.
         let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
-        let mut res = ureq::get(&url).header("X-API-Key", &self.api_key).call()?;
+        let mut res = self.agent.get(&url).header("X-API-Key", &self.api_key).call()?;
         let mut folder: serde_json::Value = res.body_mut().read_json()?;
         if let Some(devices) = folder["devices"].as_array_mut() {
             devices.retain(|d| d["deviceID"] != peer_device_id);
         }
-        ureq::put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
+        self.agent.put(&url).header("X-API-Key", &self.api_key).send_json(&folder)?;
 
         // 2. Remove the device config too (harmless if absent).
-        let _ = ureq::delete(format!("{}/rest/config/devices/{peer_device_id}", self.base_url))
+        let _ = self.agent.delete(format!("{}/rest/config/devices/{peer_device_id}", self.base_url))
             .header("X-API-Key", &self.api_key)
             .call();
         Ok(())
@@ -703,7 +714,7 @@ impl Syncthing {
     /// leave this device configured to receive it back the moment a new one is created.
     pub fn remove_folder(&self, folder_id: &str) -> Result<()> {
         let url = format!("{}/rest/config/folders/{folder_id}", self.base_url);
-        let peers: Vec<String> = match ureq::get(&url).header("X-API-Key", &self.api_key).call() {
+        let peers: Vec<String> = match self.agent.get(&url).header("X-API-Key", &self.api_key).call() {
             Ok(mut res) => {
                 let folder: serde_json::Value = res.body_mut().read_json()?;
                 folder["devices"]
@@ -714,12 +725,12 @@ impl Syncthing {
             Err(_) => return Ok(()), // never registered, nothing to remove
         };
 
-        ureq::delete(&url).header("X-API-Key", &self.api_key).call()?;
+        self.agent.delete(&url).header("X-API-Key", &self.api_key).call()?;
 
         // Best effort: an undeletable peer must not stop the folder from going away.
         let my_id = self.device_id().unwrap_or_default();
         for id in peers.iter().filter(|id| **id != my_id) {
-            let _ = ureq::delete(format!("{}/rest/config/devices/{id}", self.base_url))
+            let _ = self.agent.delete(format!("{}/rest/config/devices/{id}", self.base_url))
                 .header("X-API-Key", &self.api_key)
                 .call();
         }
@@ -732,7 +743,7 @@ impl Syncthing {
     }
 
     fn shutdown_inner(&mut self) -> Result<()> {
-        let _ = ureq::post(format!("{}/rest/system/shutdown", self.base_url))
+        let _ = self.agent.post(format!("{}/rest/system/shutdown", self.base_url))
             .header("X-API-Key", &self.api_key)
             .send_empty();
         // Give it a moment, then kill.

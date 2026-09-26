@@ -171,8 +171,8 @@ fn reopen_desk(ctx: &Ctx) {
     let mut gone = Vec::new();
     for id in &wanted {
         let memo = {
-            let guard = ctx.vault.borrow();
-            let Some(v) = guard.as_ref() else { return };
+            let Some(guard) = ctx.vault_ref() else { return };
+            let v = &*guard;
             match v.store().get(id) {
                 Ok(Some(m)) => m,
                 _ => {

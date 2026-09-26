@@ -121,8 +121,8 @@ fn lift_revocation(peer_id: &str) {
     APP.with(|a| {
         let borrow = a.borrow();
         let Some(app) = borrow.as_ref() else { return };
-        let mut guard = app.ctx.vault.borrow_mut();
-        let Some(v) = guard.as_mut() else { return };
+        let Some(mut guard) = app.ctx.vault_mut() else { return };
+        let v = &mut *guard;
         if let Err(e) = v.unrevoke_device(peer_id) {
             diag!("could not clear the removed device in the vault: {e}");
         }
@@ -410,8 +410,8 @@ pub(crate) fn wire(
             APP.with(|a| {
                 let borrow = a.borrow();
                 let Some(app) = borrow.as_ref() else { return };
-                let mut guard = app.ctx.vault.borrow_mut();
-                let Some(v) = guard.as_mut() else { return };
+                let Some(mut guard) = app.ctx.vault_mut() else { return };
+                let v = &mut *guard;
                 if let Err(e) = v.revoke_device(id.as_str()) {
                     diag!("could not record the removed device in the vault: {e}");
                 }

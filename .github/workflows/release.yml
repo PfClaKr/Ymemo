@@ -37,7 +37,8 @@ on:
 env:
   # syncthing version bundled with the desktop packages
   SYNCTHING_VERSION: v2.1.2
-  # Flutter for the Android build, pinned to the version verified locally
+  # Flutter for the Android build, pinned to the version verified locally.
+  # ci.yml's mobile job pins the same one; move them together.
   FLUTTER_VERSION: 3.47.0
   # **Must match ndkVersion in apps/mobile/android/app/build.gradle.kts.**
   # Different NDKs in gradle and cargo-ndk produce link errors that are hard to trace.

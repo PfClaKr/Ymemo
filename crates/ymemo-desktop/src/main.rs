@@ -558,8 +558,8 @@ fn main() -> Result<()> {
         list.on_open_memo(move |id| {
             touch(&ctx);
             let memo = {
-                let guard = ctx.vault.borrow();
-                let Some(v) = guard.as_ref() else { return };
+                let Some(guard) = ctx.vault_ref() else { return };
+                let v = &*guard;
                 match v.store().get(&id) {
                     Ok(Some(m)) => m,
                     _ => return,
@@ -593,8 +593,8 @@ fn main() -> Result<()> {
         list.on_delete_row(move |id, is_group| {
             touch(&ctx);
             let removed = {
-                let mut guard = ctx.vault.borrow_mut();
-                let Some(v) = guard.as_mut() else { return };
+                let Some(mut guard) = ctx.vault_mut() else { return };
+                let v = &mut *guard;
                 // Deleting a group lifts its contents instead of removing them.
                 let res = if is_group { v.delete_group(&id) } else { v.delete(&id) };
                 let removed = match res {
@@ -654,8 +654,8 @@ fn main() -> Result<()> {
             if let Some(list) = list_weak.upgrade() {
                 list.set_undo_message(SharedString::new());
             }
-            let mut guard = ctx.vault.borrow_mut();
-            let Some(v) = guard.as_mut() else { return };
+            let Some(mut guard) = ctx.vault_mut() else { return };
+            let v = &mut *guard;
             if let Err(e) = v.undelete(&deleted) {
                 diag!("undo failed: {e}");
                 list::report_write_failure(&e);
@@ -671,8 +671,8 @@ fn main() -> Result<()> {
         list.on_search(move |query| {
             touch(&ctx);
             *ctx.query.borrow_mut() = query.to_string();
-            let mut guard = ctx.vault.borrow_mut();
-            let Some(v) = guard.as_mut() else { return };
+            let Some(mut guard) = ctx.vault_mut() else { return };
+            let v = &mut *guard;
             refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
         });
     }
@@ -686,8 +686,8 @@ fn main() -> Result<()> {
             list::clear_search(&ctx);
             let group = ymemo_core::Group::new(t!("msg.new_group_name"));
             {
-                let mut guard = ctx.vault.borrow_mut();
-                let Some(v) = guard.as_mut() else { return };
+                let Some(mut guard) = ctx.vault_mut() else { return };
+                let v = &mut *guard;
                 if let Err(e) = v.upsert_group(&group) {
                     diag!("could not create the group: {e}");
                     list::report_write_failure(&e);
@@ -715,8 +715,8 @@ fn main() -> Result<()> {
             // generated code. Same reason `close_sticky` defers dropping a window.
             let ctx = ctx.clone();
             slint::Timer::single_shot(Duration::ZERO, move || {
-                let mut guard = ctx.vault.borrow_mut();
-                let Some(v) = guard.as_mut() else { return };
+                let Some(mut guard) = ctx.vault_mut() else { return };
+                let v = &mut *guard;
                 // A failure is worth a line but not a notice: nothing the user wrote is at
                 // stake and the folder is empty.
                 if let Err(e) = v.delete_group(id.as_str()) {
@@ -737,8 +737,8 @@ fn main() -> Result<()> {
                     collapsed.insert(id.to_string());
                 }
             }
-            let guard = ctx.vault.borrow();
-            let Some(v) = guard.as_ref() else { return };
+            let Some(guard) = ctx.vault_ref() else { return };
+            let v = &*guard;
             refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
         });
     }
@@ -749,8 +749,8 @@ fn main() -> Result<()> {
             // The box was seeded from the row, which is drawn in the shape Slint can render;
             // what gets stored is the shape everything else uses. See `hangul.rs`.
             let name = SharedString::from(crate::hangul::from_slint(&name));
-            let mut guard = ctx.vault.borrow_mut();
-            let Some(v) = guard.as_mut() else { return };
+            let Some(mut guard) = ctx.vault_mut() else { return };
+            let v = &mut *guard;
             let Ok(Some(mut g)) = v.store().get_group(&id) else { return };
             if g.name == name.as_str() {
                 return;
@@ -774,8 +774,8 @@ fn main() -> Result<()> {
             touch(&ctx);
             let name = SharedString::from(crate::hangul::from_slint(&name));
             let stored = {
-                let mut guard = ctx.vault.borrow_mut();
-                let Some(v) = guard.as_mut() else { return };
+                let Some(mut guard) = ctx.vault_mut() else { return };
+                let v = &mut *guard;
                 if let Err(e) = v.set_name(name.as_str()) {
                     diag!("could not rename the vault: {e}");
                     return;

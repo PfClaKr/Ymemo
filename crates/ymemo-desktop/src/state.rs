@@ -3,13 +3,14 @@
 //! Slint callbacks are registered independently, so everything they need is bundled into
 //! one `Ctx` and cloned into each of them; it is all `Rc`, so cloning is cheap.
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Instant;
 
 use slint::VecModel;
+use ymemo_core::diag;
 use ymemo_core::vault::Vault;
 
 use crate::settings::Settings;
@@ -33,6 +34,32 @@ pub(crate) struct StickyEntry {
 }
 
 pub(crate) type Stickies = Rc<RefCell<HashMap<String, StickyEntry>>>;
+
+impl Ctx {
+    /// The open vault, or `None` when it is locked — **or already borrowed further up the
+    /// stack**. Slint can run a callback from inside another one, and a second
+    /// `borrow_mut` there is a panic: that is what used to kill the app on the first merge
+    /// after a sticky was opened (see the merge timer). Asking through here turns the same
+    /// mistake into a skipped action and a line in the log.
+    #[track_caller]
+    pub(crate) fn vault_mut(&self) -> Option<RefMut<'_, Vault>> {
+        let Ok(guard) = self.vault.try_borrow_mut() else {
+            diag!("the vault was already in use; skipped a write at {}", std::panic::Location::caller());
+            return None;
+        };
+        RefMut::filter_map(guard, Option::as_mut).ok()
+    }
+
+    /// [`Ctx::vault_mut`] for reading.
+    #[track_caller]
+    pub(crate) fn vault_ref(&self) -> Option<Ref<'_, Vault>> {
+        let Ok(guard) = self.vault.try_borrow() else {
+            diag!("the vault was already in use; skipped a read at {}", std::panic::Location::caller());
+            return None;
+        };
+        Ref::filter_map(guard, Option::as_ref).ok()
+    }
+}
 
 /// The bundle of shared app state.
 #[derive(Clone)]

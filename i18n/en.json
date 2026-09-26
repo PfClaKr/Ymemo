@@ -37,7 +37,6 @@
   "core.update_check_failed": "Could not check for updates",
   "core.vault_exists": "A vault already exists: {path}",
   "core.vault_key_changed": "The password was changed on another device — lock and open it again",
-  "core.vault_lock_poisoned": "The vault lock is poisoned — please restart the app",
   "core.vault_not_open": "The vault is not open",
   "core.wrapped_key_length_bad": "Wrapped key has the wrong length (damaged header?)",
   "core.wrong_password": "Wrong password — please try again",
