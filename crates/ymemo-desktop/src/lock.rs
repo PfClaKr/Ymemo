@@ -255,7 +255,10 @@ fn wire_unlock(ctx: &Ctx, ui: &Ui, unlocked: &Rc<Cell<bool>>) {
                 start_unlock_session(&ctx, &v);
                 apply_opened_vault(v, &ctx, &lock, &list_weak, &unlocked);
             }
-            Err(e) => lock.set_lock_message(SharedString::from(format!("{e}"))),
+            Err(e) => {
+                lock.set_lock_message(SharedString::from(format!("{e}")));
+                lock.set_wrong_tries(lock.get_wrong_tries() + 1);
+            }
         }
     });
 }

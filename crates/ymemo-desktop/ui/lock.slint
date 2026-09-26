@@ -43,6 +43,8 @@ export component LockWindow inherits Window {
     // Whether vault.json exists: true is an existing vault (unlock), false a new device
     // (choice screen). Rust flips it once pairing delivers vault.json.
     in property <bool> vault-exists: false;
+    // Goes up by one on every wrong password; see the unlock field.
+    in property <int> wrong-tries: 0;
     // Shortest new password accepted; set from `ymemo_core::crypto::MIN_PASSWORD_CHARS`.
     in property <int> min-password: 8;
     in property <[SharedDeviceRow]> shared-devices;
@@ -174,6 +176,11 @@ export component LockWindow inherits Window {
                         // straight away went into the void.
                         init => { self.focus(); }
                         accepted => { root.unlock(self.text); }
+                        // A wrong password is selected, so the retry is typed straight over
+                        // it. Counted from Rust (`wrong-tries`): the field is inside an `if`,
+                        // where nothing outside can reach it by name.
+                        property <int> tries: root.wrong-tries;
+                        changed tries => { self.focus(); self.select-all(); }
                     }
                     Button {
                         text: Strings.ui_lock_open;

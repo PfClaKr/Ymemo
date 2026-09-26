@@ -375,7 +375,8 @@ export component ListWindow inherits Window {
                     height: 100%;
                     text: b-lock.hovering ? Strings.ui_list_tip_lock
                         : b-gear.hovering ? Strings.ui_list_tip_settings
-                        : b-link.hovering ? (root.linked-devices == 0 ? Strings.ui_list_tip_sync
+                        : b-link.hovering ? (!root.sync-available ? Strings.ui_list_sync_off
+                            : root.linked-devices == 0 ? Strings.ui_list_tip_sync
                             : Strings.ui_list_sync_online + " " + root.online-devices + "/"
                                 + root.linked-devices)
                         : b-folder.hovering ? Strings.ui_list_tip_new_group
@@ -418,7 +419,10 @@ export component ListWindow inherits Window {
                 label: Strings.ui_list_tip_sync;
                 // Whether syncing is actually happening, without opening the panel: green
                 // while some device is connected, hollow while every paired one is away.
-                badge: root.linked-devices == 0 ? 0 : root.online-devices > 0 ? 1 : 2;
+                // And red when there is no sync program at all: the panel says why, but only
+                // to someone who opens it.
+                badge: !root.sync-available ? 3
+                    : root.linked-devices == 0 ? 0 : root.online-devices > 0 ? 1 : 2;
                 clicked => { root.show-sync = !root.show-sync; }
             }
             b-folder := IconButton {
