@@ -17,6 +17,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'home_widgets.dart' as widgets;
 import 'host.dart' as host;
+import 'pending_edits.dart';
 import 'screens/lock_screen.dart';
 import 'screens/memo_list_screen.dart';
 import 'settings.dart';
@@ -153,11 +154,18 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
     final leaving = state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached ||
         state == AppLifecycleState.hidden;
-    if (leaving && _unlocked && widget.settings.value.lockOnBackground) {
+    if (leaving) unawaited(_leaving());
+  }
+
+  Future<void> _leaving() async {
+    // Written first, whatever else happens: Android may kill a process in the background,
+    // and an open editor otherwise only saves on the way back.
+    await PendingEdits.flush();
+    if (_unlocked && widget.settings.value.lockOnBackground) {
       // The session is deliberately **kept**: this closes the vault so the memos are not
       // sitting open behind the app switcher, but it is not the user saying "ask me again".
       // Manual lock is what clears the session, exactly as on the desktop.
-      _closeVault();
+      await _closeVault();
     }
   }
 
@@ -208,6 +216,9 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
   }
 
   Future<void> _closeVault() async {
+    // Whatever the open editor holds goes into the vault before the vault goes. Closing it
+    // first, then popping the editor, lost every word typed since the editor opened.
+    await PendingEdits.flush();
     try {
       await vaultClose();
     } catch (e) {

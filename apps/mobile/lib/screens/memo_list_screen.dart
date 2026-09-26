@@ -708,6 +708,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
           body: '',
           color: defaultColor,
           pickPhotoOnOpen: withPhoto,
+          isNew: true,
         ),
       ),
     );

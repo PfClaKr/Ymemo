@@ -12,6 +12,7 @@ import 'package:image_picker/image_picker.dart';
 import '../markdown_style.dart';
 import '../memo_title.dart';
 import '../palette.dart';
+import '../pending_edits.dart';
 import '../src/rust/api.dart';
 import '../ui_util.dart';
 import '../widgets/note_photo.dart';
@@ -26,6 +27,7 @@ class MemoEditScreen extends StatefulWidget {
     required this.body,
     required this.color,
     this.pickPhotoOnOpen = false,
+    this.isNew = false,
   });
 
   final FfiStrings strings;
@@ -36,6 +38,10 @@ class MemoEditScreen extends StatefulWidget {
   /// Opens the photo picker as soon as the editor is up, for the two ways of starting a
   /// memo that are about a photo rather than about text.
   final bool pickPhotoOnOpen;
+
+  /// The list created this memo for the editor. Left blank, it is discarded on the way out —
+  /// also when the way out is the app being left, which never comes back through the list.
+  final bool isNew;
 
   /// Palette key the memo arrived with; the editor wears it the way the desktop's sticky
   /// does, so the same memo looks like the same memo on either device.
@@ -144,9 +150,36 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
     if (chosen != null) await _setColor(chosen);
   }
 
+  /// Saves a moment after typing stops, the way the desktop's sticky does: the editor used to
+  /// write only on the way back, so anything that took the app away first took the text too.
+  Timer? _autosave;
+
+  /// What `YmemoApp` calls before it takes the vault away; see [PendingEdits].
+  late final Future<void> Function() _flushHook = _flushBeforeLeaving;
+
+  Future<void> _flushBeforeLeaving() async {
+    _autosave?.cancel();
+    await _save();
+    // The same as backing out of a new memo left blank (the list's `_add`), for the way out
+    // that never returns to the list.
+    if (widget.isNew && _title.text.trim().isEmpty && _body.text.trim().isEmpty) {
+      await memoDiscardIfBlank(id: widget.id);
+    }
+  }
+
+  void _scheduleAutosave() {
+    _autosave?.cancel();
+    _autosave = Timer(const Duration(milliseconds: 800), () {
+      if (mounted) _save();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
+    PendingEdits.attach(_flushHook);
+    _title.addListener(_scheduleAutosave);
+    _body.addListener(_scheduleAutosave);
     // A photo standing in the writing is drawn at a height measured from the top of the text,
     // so it has to be redrawn when the text scrolls under it — otherwise it stays where it is
     // while its words move away.
@@ -303,6 +336,8 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
 
   @override
   void dispose() {
+    PendingEdits.detach(_flushHook);
+    _autosave?.cancel();
     _followTimer?.cancel();
     _title.dispose();
     _body.dispose();
