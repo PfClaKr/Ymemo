@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../palette.dart';
 import '../src/rust/api.dart';
+import '../theme.dart';
 import '../ui_util.dart';
 
 /// Every past version of one memo, and the way back to any of them.
@@ -87,7 +88,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PaperTheme(builder: _page);
+
+  Widget _page(BuildContext context) {
     final ink = paletteInk(widget.color);
     return PopScope(
       canPop: false,

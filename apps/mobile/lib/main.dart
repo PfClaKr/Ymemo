@@ -24,6 +24,7 @@ import 'settings.dart';
 import 'src/rust/api.dart';
 import 'src/rust/frb_generated.dart';
 import 'sync.dart';
+import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -235,26 +236,19 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     // The status bar is the system's, drawn over our own background because the app is edge
-    // to edge. Flutter's default leaves its clock and icons **light**, which on this cream
-    // paper is white on off-white — unreadable on every screen that has no AppBar to set the
-    // style for it, which is every screen before the vault is open. Setting it on the theme
-    // covers those too. **Always dark icons**: the app has one, light, look, and following the
-    // phone's dark mode put white icons on the cream and yellow — the clock vanished, seen on
-    // the emulator. `systemNavigationBar` is left alone: the gesture bar draws its own contrast.
-    const overlay = SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.dark,
-      statusBarBrightness: Brightness.light,
-    );
-    SystemChrome.setSystemUIOverlayStyle(overlay);
+    // to edge. Its icons have to follow whatever is under them: every AppBar sets them from its
+    // theme (see `theme.dart`), and this covers the screens without one. Left to Flutter's
+    // default they were light on the cream paper, where the clock vanished — and a note's
+    // screens stay light in dark mode, which is why this is not simply the phone's setting.
+    // `systemNavigationBar` is left alone: the gesture bar draws its own contrast.
+    SystemChrome.setSystemUIOverlayStyle(
+        overlayFor(WidgetsBinding.instance.platformDispatcher.platformBrightness));
     return MaterialApp(
       title: 'Ymemo',
       navigatorKey: _navigator,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFE6D24A)),
-        useMaterial3: true,
-        appBarTheme: const AppBarTheme(systemOverlayStyle: overlay),
-      ),
+      theme: ymemoTheme(Brightness.light),
+      darkTheme: ymemoTheme(Brightness.dark),
+      themeMode: ThemeMode.system,
       home: _restoring
           // Brief: reading one key out of the keystore. Showing the lock screen first would
           // make an auto-unlock look like a password prompt that flashed past.

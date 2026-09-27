@@ -13,6 +13,7 @@ import '../memo_title.dart';
 import '../palette.dart';
 import '../pending_edits.dart';
 import '../src/rust/api.dart';
+import '../theme.dart';
 import '../ui_util.dart';
 import '../widgets/note_photo.dart';
 import 'history_screen.dart';
@@ -423,7 +424,9 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PaperTheme(builder: _page);
+
+  Widget _page(BuildContext context) {
     final base = Theme.of(context);
     final ink = paletteInk(_color);
     // What the body is really set in, for the measuring above.

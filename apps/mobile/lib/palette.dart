@@ -58,6 +58,13 @@ Color paletteSwatch(String key) => switch (key) {
       _ => const Color(0xFFFFE15C),
     };
 
+/// The small marks on a list row — its drag handle, the photo sign, a folder's arrow — which
+/// take the colour's dark ink on a light list and its bright swatch on a dark one, where the
+/// ink all but disappears.
+Color paletteMark(String key, Brightness brightness) => brightness == Brightness.dark
+    ? paletteSwatch(key).withValues(alpha: 0.75)
+    : paletteInk(key).withValues(alpha: 0.55);
+
 /// Background for one row of the memo list.
 ///
 /// Mixed from [paletteSwatch] rather than [paletteBg]: the paper is near-white by design, and
@@ -79,6 +86,7 @@ class ColorSwatches extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
@@ -95,7 +103,11 @@ class ColorSwatches extends StatelessWidget {
                   color: paletteSwatch(key),
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: key == selected ? paletteInk(key) : Colors.black26,
+                    // The ink ring vanishes on a dark sheet; white is what "chosen" looks like
+                    // there. The light theme keeps the colour's own ink.
+                    color: key == selected
+                        ? (dark ? Colors.white : paletteInk(key))
+                        : (dark ? Colors.white24 : Colors.black26),
                     width: key == selected ? 3 : 1,
                   ),
                 ),

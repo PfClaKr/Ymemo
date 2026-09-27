@@ -453,7 +453,8 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
               title: Text(folder.name, style: const TextStyle(fontWeight: FontWeight.w600)),
               // A folder is the one row here that goes somewhere rather than opening an
               // editor, and nothing on it said so.
-              trailing: Icon(Icons.chevron_right, color: paletteInk(folder.color)),
+              trailing: Icon(Icons.chevron_right,
+                  color: paletteMark(folder.color, Theme.of(context).brightness)),
               onTap: () => _openFolder(folder),
               onLongPress: () => _folderMenu(folder),
             ),
@@ -491,7 +492,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
                     if (memo.hasPhoto) ...[
                       const SizedBox(width: 6),
                       Icon(Icons.image_outlined,
-                          size: 15, color: paletteInk(memo.color).withValues(alpha: 0.55)),
+                          size: 15, color: paletteMark(memo.color, Theme.of(context).brightness)),
                     ],
                   ],
                 ),
@@ -510,7 +511,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
                         index: dragIndex,
                         child: Icon(
                           Icons.drag_handle,
-                          color: paletteInk(memo.color).withValues(alpha: 0.55),
+                          color: paletteMark(memo.color, Theme.of(context).brightness),
                         ),
                       ),
               ),
