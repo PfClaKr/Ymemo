@@ -21,6 +21,7 @@
   "core.hex_odd_length": "Hex string has an odd length",
   "core.hex_parse_failed": "Failed to parse hex: {error}",
   "core.key_check_mismatch": "key_check mismatch (corrupted header?)",
+  "core.log_unreadable": "This key cannot read the change log: {path}",
   "core.memo_not_found": "Memo not found: {id}",
   "core.no_local_change": "No local change right after a commit",
   "core.no_recovery_code": "This vault has no recovery code",

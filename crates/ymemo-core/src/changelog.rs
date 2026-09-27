@@ -15,10 +15,20 @@
 use anyhow::{anyhow, Result};
 use ymemo_i18n::t;
 use std::fs::{File, OpenOptions};
-use std::io::{BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use crate::crypto::MasterKey;
+use crate::crypto::{MasterKey, NONCE_LEN};
+
+/// The shortest record [`ChangeLog::append`] can write: a nonce and the AEAD tag around an
+/// empty plaintext. Anything shorter is not a record.
+///
+/// It matters because of what a power cut leaves behind. A file system that had already
+/// grown the file but not yet written its data hands back **zeros** — measured on an
+/// Android emulator killed mid-session — and zeros read as a record of length 0: a whole,
+/// well-framed record by the length alone, which then failed to decrypt and took every memo
+/// in the log down with it.
+const MIN_RECORD: u64 = NONCE_LEN as u64 + 16;
 
 /// An encrypted append-only record log file. Owns the key and en/decrypts on the fly.
 pub struct ChangeLog {
@@ -84,35 +94,94 @@ impl ChangeLog {
     }
 
     /// Reads and decrypts every record in order. Missing file yields an empty vec.
+    ///
+    /// A record that will not decrypt is **skipped, not fatal**, as long as others do: one
+    /// damaged record must not cost the device every memo it ever wrote. Only when none at
+    /// all decrypts is it an error — that is a different key, not a damaged record, and the
+    /// caller has to hear it.
     pub fn read_all(&self) -> Result<Vec<Vec<u8>>> {
-        if !self.path.exists() {
-            return Ok(Vec::new());
-        }
-        let file = File::open(&self.path)?;
-        let mut left = file.metadata()?.len();
-        let mut reader = BufReader::new(file);
-        let mut records = Vec::new();
+        self.read(false)
+    }
 
-        // A torn tail — a record the file ends in the middle of — ends the read instead of
-        // failing it. Failing it threw the whole log away, every memo that device ever wrote,
-        // over the last few bytes of one keystroke.
-        while left >= 4 {
-            let mut len_buf = [0u8; 4];
-            reader.read_exact(&mut len_buf)?;
-            left -= 4;
-            let len = u64::from(u32::from_le_bytes(len_buf));
-            // Checked against what is actually there before anything is allocated: a garbled
-            // length would otherwise ask for up to 4 GB and abort the process.
-            if len > left {
-                break;
+    /// Like [`ChangeLog::read_all`], but **any** record that will not decrypt is an error.
+    ///
+    /// For asking whether a key is *the* key of this log — the healing of a diverged key.
+    /// There, a log that half opens under the new key must still count as not opening, or
+    /// its older records would be skipped for good instead of re-encrypted.
+    pub fn read_all_strict(&self) -> Result<Vec<Vec<u8>>> {
+        self.read(true)
+    }
+
+    fn read(&self, strict: bool) -> Result<Vec<Vec<u8>>> {
+        let data = match std::fs::read(&self.path) {
+            Ok(d) => d,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
+        let mut records = Vec::new();
+        let mut damaged = 0usize;
+        let mut skipped_bytes = 0usize;
+        let mut unopened = 0usize;
+        let opens = |p: usize| -> Option<(usize, Vec<u8>)> {
+            let len = frame_at(&data, p)?;
+            self.key.decrypt(&data[p + 4..p + 4 + len]).ok().map(|plain| (len, plain))
+        };
+
+        let mut pos = 0usize;
+        while pos + 4 <= data.len() {
+            if let Some((len, plain)) = opens(pos) {
+                records.push(plain);
+                pos += 4 + len;
+                continue;
             }
-            let mut record = vec![0u8; len as usize];
-            reader.read_exact(&mut record)?;
-            left -= len;
-            records.push(self.key.decrypt(&record)?);
+            // A record whose framing is sound but which will not open: damage, or another key.
+            let framed = frame_at(&data, pos).is_some();
+            if framed {
+                if strict {
+                    anyhow::bail!(t!("core.log_unreadable", path = self.path.display()));
+                }
+                unopened += 1;
+            }
+            // Not a record that opens. Usually a torn tail — a record the file ends in the
+            // middle of — and then there is nothing after it. But a record can be damaged in
+            // place, and a power cut can leave a run of zeros that an older version then
+            // wrote on past, with real records after it. So look for the next place a record
+            // really begins, and trust only one that decrypts: AEAD makes a false start
+            // effectively impossible, and a garbled length is never followed blindly.
+            let next = (pos + 1..=data.len() - 4).find(|&p| opens(p).is_some());
+            // Strict wants every byte accounted for, except a torn tail: a record the file
+            // simply ends in the middle of was never written, so it is no sign of a wrong key.
+            // (A well-framed record that did not open has already failed it, above.)
+            if strict && next.is_some() {
+                anyhow::bail!(t!("core.log_unreadable", path = self.path.display()));
+            }
+            let Some(next) = next else { break };
+            damaged += 1;
+            skipped_bytes += next - pos;
+            pos = next;
+        }
+        if records.is_empty() && unopened > 0 {
+            // Nothing opens at all: a different key, not a damaged record.
+            anyhow::bail!(t!("core.log_unreadable", path = self.path.display()));
+        }
+        if damaged > 0 {
+            crate::diag!(
+                "read past damage in {}: {skipped_bytes} byte(s) in {damaged} place(s) skipped, {} record(s) kept",
+                self.path.display(),
+                records.len()
+            );
         }
         Ok(records)
     }
+}
+
+/// The length of the record framed at `pos`, if a plausible one is: its length prefix is all
+/// there, it is at least [`MIN_RECORD`], and the record fits in what is left. Checked before
+/// anything is allocated, since a garbled length can ask for up to 4 GB.
+fn frame_at(data: &[u8], pos: usize) -> Option<usize> {
+    let prefix: [u8; 4] = data.get(pos..pos + 4)?.try_into().ok()?;
+    let len = u32::from_le_bytes(prefix) as usize;
+    (len as u64 >= MIN_RECORD && len <= data.len() - pos - 4).then_some(len)
 }
 
 /// How many leading bytes of a `total`-byte log are whole records, walking the length
@@ -129,6 +198,15 @@ fn complete_len(f: &mut File, total: u64) -> Result<u64> {
         let len = u64::from(u32::from_le_bytes(len_buf));
         if len > total - pos - 4 {
             return Ok(pos);
+        }
+        // Too short to be a record: the zeros a power cut leaves. Cut only if nothing but
+        // zeros follows. A device on an older version may have written real records after
+        // them, and those are the user's writing — the reader steps over the zeros instead.
+        if len < MIN_RECORD {
+            let mut rest = Vec::new();
+            f.seek(SeekFrom::Start(pos))?;
+            f.read_to_end(&mut rest)?;
+            return Ok(if rest.iter().all(|b| *b == 0) { pos } else { total });
         }
         pos += 4 + len;
     }
@@ -218,6 +296,72 @@ mod tests {
         assert_eq!(log.read_all().unwrap(), vec![b"kept".to_vec()]);
         assert!(log.repair_tail().unwrap());
         assert!(!log.repair_tail().unwrap());
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// What a power cut left on a real (emulated) phone: the file grown, its new bytes zeros.
+    /// The records before them are kept, the zeros are cut off our own log, and what is
+    /// written next is readable.
+    #[test]
+    fn a_zero_filled_tail_keeps_the_records_before_it() {
+        let salt = generate_salt();
+        let key = MasterKey::derive(b"pw", &salt).unwrap();
+        let path = temp_path();
+        let log = ChangeLog::open(&path, key);
+        log.append(b"first").unwrap();
+        log.append(b"second").unwrap();
+        let whole = std::fs::read(&path).unwrap();
+        let mut raw = whole.clone();
+        raw.extend_from_slice(&[0u8; 300]);
+        std::fs::write(&path, &raw).unwrap();
+
+        assert_eq!(log.read_all().unwrap(), vec![b"first".to_vec(), b"second".to_vec()]);
+        assert!(log.repair_tail().unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), whole);
+        log.append(b"after").unwrap();
+        assert_eq!(log.read_all().unwrap().last().unwrap(), b"after");
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// A record damaged in the middle costs that record, not the log.
+    #[test]
+    fn one_damaged_record_is_skipped_not_fatal() {
+        let salt = generate_salt();
+        let key = MasterKey::derive(b"pw", &salt).unwrap();
+        let path = temp_path();
+        let log = ChangeLog::open(&path, key);
+        log.append(b"first").unwrap();
+        let first_len = std::fs::metadata(&path).unwrap().len() as usize;
+        log.append(b"second").unwrap();
+        log.append(b"third").unwrap();
+        let mut raw = std::fs::read(&path).unwrap();
+        raw[first_len + 4 + 30] ^= 0xFF; // inside the second record's ciphertext
+        std::fs::write(&path, &raw).unwrap();
+
+        assert_eq!(log.read_all().unwrap(), vec![b"first".to_vec(), b"third".to_vec()]);
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// Zeros in the **middle** — a power cut, then an older version writing on past it. The
+    /// records after them are the user's writing: read, and never cut off.
+    #[test]
+    fn records_after_a_run_of_zeros_are_kept() {
+        let salt = generate_salt();
+        let key = MasterKey::derive(b"pw", &salt).unwrap();
+        let path = temp_path();
+        let log = ChangeLog::open(&path, key.clone());
+        log.append(b"before").unwrap();
+        let mut raw = std::fs::read(&path).unwrap();
+        raw.extend_from_slice(&[0u8; 77]);
+        std::fs::write(&path, &raw).unwrap();
+        log.append(b"after one").unwrap();
+        log.append(b"after two").unwrap();
+
+        let want = vec![b"before".to_vec(), b"after one".to_vec(), b"after two".to_vec()];
+        assert_eq!(log.read_all().unwrap(), want);
+        assert!(!log.repair_tail().unwrap(), "nothing of the user's is cut");
+        assert_eq!(log.read_all().unwrap(), want);
+        assert!(log.read_all_strict().is_err(), "strict still calls it damaged");
         std::fs::remove_file(&path).ok();
     }
 
