@@ -769,14 +769,14 @@ export component StickyWindow inherits Window {
         // the point of the setting and useless the moment you are trying to read your own
         // sentence through it, so the caret takes the fade off and leaving puts it back.
         //
-        // The trigger is the caret and not the pointer or the window's own focus: dragging
-        // the title bar or reaching for the palette is not writing, and the opacity slider
-        // sits below with the focus on itself, so it still previews what it is setting.
+        // The trigger is the window being the one in use — clicked anywhere, folded or not —
+        // and clicking anywhere else puts the fade back. It used to be the caret alone, so an
+        // unfolded note stayed faint until a click happened to land in its writing, while a
+        // folded one cleared the moment it was clicked; the two now behave alike.
         //
-        // **Except when folded.** A folded note has no body to put a caret in, so clicking it
-        // left it as faint as ever — and the bar is all there is to read. There the window
-        // being the active one takes the fade off, and clicking anywhere else puts it back.
-        opacity: body.has-focus || (root.collapsed && root.window-active) ? 1.0 : root.sticky-opacity / 100;
+        // **Except while the colour panel is open**: that is where the opacity is set, and
+        // the slider has to show what it is setting as it moves.
+        opacity: body.has-focus || (root.window-active && !root.show-palette) ? 1.0 : root.sticky-opacity / 100;
         animate opacity { duration: 120ms; }
 
         VerticalLayout {
