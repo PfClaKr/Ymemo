@@ -1,4 +1,4 @@
-import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox, ScrollView } from "std-widgets.slint";
+import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox, ScrollView, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
 import { Palette, Scroll, TabButton } from "theme.slint";
 
@@ -46,6 +46,10 @@ component SectionHeader inherits VerticalLayout {
 }
 
 export component SettingsWindow inherits Window {
+    // This window is always dark, so the standard controls in it are too. Left to follow the
+    // system they came out light on a light-mode desktop — pale grey boxes set into a dark
+    // window, and a disabled primary button drawn darker than an enabled one beside it.
+    init => { StdPalette.color-scheme = ColorScheme.dark; }
     title: Strings.ui_settings_window_title;
     preferred-width: 400px;
     preferred-height: 600px;

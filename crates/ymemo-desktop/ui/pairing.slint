@@ -169,13 +169,20 @@ export component PairingPanel inherits VerticalLayout {
                     wrap: char-wrap;
                     horizontal-stretch: 1;
                 }
-                Button {
-                    text: root.copied ? Strings.ui_pair_copied : Strings.ui_pair_copy;
-                    clicked => {
-                        code.select-all();
-                        code.copy();
-                        code.clear-selection();
-                        root.copied = true;
+                // Top-aligned and one width for both labels: stretched to the code's two lines
+                // it stood taller than every other button, and widening to say "copied"
+                // re-wrapped the code beside it mid-glance.
+                VerticalLayout {
+                    alignment: start;
+                    Button {
+                        width: 96px;
+                        text: root.copied ? Strings.ui_pair_copied : Strings.ui_pair_copy;
+                        clicked => {
+                            code.select-all();
+                            code.copy();
+                            code.clear-selection();
+                            root.copied = true;
+                        }
                     }
                 }
             }

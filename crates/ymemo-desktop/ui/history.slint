@@ -1,4 +1,4 @@
-import { Button, ListView, ScrollView } from "std-widgets.slint";
+import { Button, ListView, ScrollView, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
 
 // ---------------------------------------------------------------------------
@@ -29,6 +29,10 @@ export struct RevisionRow {
 }
 
 export component HistoryWindow inherits Window {
+    // This window is always dark, so the standard controls in it are too. Left to follow the
+    // system they came out light on a light-mode desktop — pale grey boxes set into a dark
+    // window, and a disabled primary button drawn darker than an enabled one beside it.
+    init => { StdPalette.color-scheme = ColorScheme.dark; }
     title: Strings.ui_history_title;
     preferred-width: 560px;
     preferred-height: 480px;

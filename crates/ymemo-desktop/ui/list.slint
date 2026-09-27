@@ -1,4 +1,4 @@
-import { LineEdit, Button, TextEdit, ListView, ScrollView, Slider, SpinBox } from "std-widgets.slint";
+import { LineEdit, Button, TextEdit, ListView, ScrollView, Slider, SpinBox, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
 import { Palette, IconButton, Glyph } from "theme.slint";
 import { PairingPanel, SharedDeviceRow } from "pairing.slint";
@@ -36,6 +36,10 @@ export struct ListRow {
 // accent shows the sticky's color.
 // ---------------------------------------------------------------------------
 export component ListWindow inherits Window {
+    // This window is always dark, so the standard controls in it are too. Left to follow the
+    // system they came out light on a light-mode desktop — pale grey boxes set into a dark
+    // window, and a disabled primary button drawn darker than an enabled one beside it.
+    init => { StdPalette.color-scheme = ColorScheme.dark; }
     // Where the focus goes when nothing else has asked for it — which is not only at
     // startup. A text field that takes the caret and is then torn down (the heading's rename
     // box, a folder's, the find box) leaves the focus nowhere at all, and a `FocusScope` that
@@ -989,13 +993,6 @@ export component ListWindow inherits Window {
                         }
                     }
 
-                    if row.is-group: Text {
-                        text: row.child-count > 0 ? row.child-count : "";
-                        font-size: 11px;
-                        color: #8d8778;
-                        vertical-alignment: center;
-                    }
-
                     // Past versions and delete, for folders and memos alike. Both appear on
                     // hover only, so neither competes with the name for room — and, more to
                     // the point, so they behave alike: delete used to be the one icon always
@@ -1078,6 +1075,21 @@ export component ListWindow inherits Window {
                                 opacity: !(ta.has-hover || hist-ta.has-hover || del-ta.has-hover
                                     || add-ta.has-hover) ? 0
                                     : del-ta.has-hover ? 1 : 0.4;
+                            }
+                            // A folder's count, at the row's right edge while the row is at
+                            // rest, in the slot the delete icon takes on hover. It used to sit
+                            // left of the whole hidden icon strip, so every count floated a
+                            // thumb's width in from the edge with nothing beside it.
+                            if row.is-group && row.child-count > 0: Text {
+                                width: parent.width - 8px;
+                                height: parent.height;
+                                text: row.child-count;
+                                font-size: 11px;
+                                color: #8d8778;
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                                visible: !(ta.has-hover || hist-ta.has-hover || del-ta.has-hover
+                                    || add-ta.has-hover);
                             }
                             clicked => { root.commit-edit(); root.delete-row(row.id, row.is-group); }
                         }

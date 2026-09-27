@@ -1,4 +1,4 @@
-import { LineEdit, Button, ScrollView } from "std-widgets.slint";
+import { LineEdit, Button, ScrollView, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
 import { Scroll } from "theme.slint";
 
@@ -37,6 +37,10 @@ component Section inherits VerticalLayout {
 }
 
 export component SecurityWindow inherits Window {
+    // This window is always dark, so the standard controls in it are too. Left to follow the
+    // system they came out light on a light-mode desktop — pale grey boxes set into a dark
+    // window, and a disabled primary button drawn darker than an enabled one beside it.
+    init => { StdPalette.color-scheme = ColorScheme.dark; }
     title: Strings.ui_security_title;
     preferred-width: 400px;
     preferred-height: 480px;

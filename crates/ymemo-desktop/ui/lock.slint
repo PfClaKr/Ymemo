@@ -1,4 +1,4 @@
-import { LineEdit, Button, TextEdit, ListView, ScrollView, Slider, SpinBox } from "std-widgets.slint";
+import { LineEdit, Button, TextEdit, ListView, ScrollView, Slider, SpinBox, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
 import { PairingPanel, SharedDeviceRow } from "pairing.slint";
 import { IconButton, SetupChoice } from "theme.slint";
@@ -17,6 +17,10 @@ component FieldLabel inherits Text {
 // Lock window: the master password prompt, hidden once unlocked.
 // ---------------------------------------------------------------------------
 export component LockWindow inherits Window {
+    // This window is always dark, so the standard controls in it are too. Left to follow the
+    // system they came out light on a light-mode desktop — pale grey boxes set into a dark
+    // window, and a disabled primary button drawn darker than an enabled one beside it.
+    init => { StdPalette.color-scheme = ColorScheme.dark; }
     // "Locked" only once there is something to be locked: a device setting up for the first
     // time has no vault yet, and a title calling it locked reads like a door it cannot open.
     title: root.vault-exists ? Strings.ui_lock_title : "Ymemo";
@@ -194,13 +198,22 @@ export component LockWindow inherits Window {
                 }
                 HorizontalLayout {
                     alignment: start;
+                    // Drawn as a link — the list's accent blue, underlined under the pointer —
+                    // because it is one. In the hint grey it read as a remark, and the way back
+                    // from a forgotten password went unnoticed on the one screen that needs it.
                     Text {
                         text: Strings.ui_lock_forgot;
                         font-size: 11px;
-                        color: #a8a294;
-                        TouchArea {
+                        color: forgot-ta.has-hover ? #a9d0f5 : #7db8ec;
+                        forgot-ta := TouchArea {
                             mouse-cursor: pointer;
                             clicked => { root.recovering = true; }
+                        }
+                        Rectangle {
+                            y: parent.height - 1px;
+                            height: 1px;
+                            background: parent.color;
+                            visible: forgot-ta.has-hover;
                         }
                     }
                 }
@@ -447,7 +460,10 @@ export component LockWindow inherits Window {
             }
         }
 
-        Rectangle { vertical-stretch: 1; }
+        // Pushes the prompt to the top. Not while the pairing panel is open: that is a
+        // stretching ScrollView, and this took half the window from it — the panel was cut off
+        // halfway down, with nothing below it but this.
+        if !root.show-sync: Rectangle { vertical-stretch: 1; }
     }
 }
 

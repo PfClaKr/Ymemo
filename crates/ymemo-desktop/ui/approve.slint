@@ -1,4 +1,4 @@
-import { Button } from "std-widgets.slint";
+import { Button, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
 
 // ---------------------------------------------------------------------------
@@ -35,6 +35,10 @@ component Field inherits VerticalLayout {
 }
 
 export component ApproveWindow inherits Window {
+    // This window is always dark, so the standard controls in it are too. Left to follow the
+    // system they came out light on a light-mode desktop — pale grey boxes set into a dark
+    // window, and a disabled primary button drawn darker than an enabled one beside it.
+    init => { StdPalette.color-scheme = ColorScheme.dark; }
     title: Strings.ui_approve_title;
     preferred-width: 400px;
     preferred-height: 420px;
