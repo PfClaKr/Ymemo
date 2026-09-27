@@ -519,6 +519,7 @@ component NotePad {
 }
 
 export component StickyWindow inherits Window {
+    default-font-family: "Pretendard";
     // Where the focus goes when nothing else has asked for it — which is not only at
     // startup. A text field that takes the caret and is then torn down (the heading's rename
     // box, a folder's, the find box) leaves the focus nowhere at all, and a `FocusScope` that
@@ -557,6 +558,10 @@ export component StickyWindow inherits Window {
     in property <bool> collapsed: false;
     // Whether this note's window is the active one; set from Rust on winit's `Focused`.
     in property <bool> window-active: false;
+    // The pointer is over this window; from winit's CursorEntered/CursorLeft, in `desk.rs`.
+    in property <bool> pointer-inside: false;
+    // Whether the title bar's buttons are showing; see where they are drawn.
+    private property <bool> chrome: root.pointer-inside || root.window-active || root.show-palette;
     // A note pulled narrow gives its title room before its buttons: at the minimum width six
     // buttons left the title as a lone "…". What goes first is what has another way in — a
     // photo can be dropped on the note, its history opened from the list, a new note made
@@ -773,136 +778,148 @@ export component StickyWindow inherits Window {
                         overflow: elide;
                         horizontal-stretch: 1;
                     }
-                    // Folded, the window is one bar tall and everything these buttons open —
-                    // the file dialog, the history window, the colour panel — either lands on
-                    // a note that is not there or reopens it behind the user's back. Only the
-                    // unfold (double-click), the pin and the close stay.
-                    if !root.collapsed && !root.narrow: photo-ta := TouchArea {
-                        width: 20px;
-                        mouse-cursor: pointer;
-                        accessible-role: button;
-                        accessible-label: Strings.ui_sticky_pick_photo;
-                        changed has-hover => {
-                            if (self.has-hover) { root.tip = Strings.ui_sticky_pick_photo; }
-                            else if (root.tip == Strings.ui_sticky_pick_photo) { root.tip = ""; }
-                        }
-                        // Drawn, not 📎: an emoji needs an emoji font, and where there is
-                        // none the glyph falls back to the default text colour and is all
-                        // but invisible on these pastel bars — the same reason the colour
-                        // chip below is a shape rather than a character.
-                        Rectangle {
-                            width: 16px;
-                            height: 13px;
-                            border-width: 1.5px;
-                            border-color: Palette.ink(root.sticky-color);
-                            clip: true;
-                            opacity: photo-ta.has-hover ? 1 : 0.75;
-                            Rectangle {
-                                x: 2.5px;
-                                y: 2px;
-                                width: 4px;
-                                height: 4px;
-                                border-radius: 2px;
-                                background: Palette.ink(root.sticky-color);
+                    // The buttons, only while the note is being used — under the pointer, the
+                    // window in front, or its colour panel open. At rest a note is its title
+                    // and its writing, as a sticky on a desk should be; six small pictograms on
+                    // every note of a full desk were most of what made it look like a tool.
+                    // Faded, not removed: nothing in the bar moves when they come and go.
+                    Rectangle {
+                        opacity: root.chrome ? 1 : 0;
+                        animate opacity { duration: 140ms; easing: ease-out; }
+                        HorizontalLayout {
+                            spacing: 0px;
+                            // Folded, the window is one bar tall and everything these buttons open —
+                            // the file dialog, the history window, the colour panel — either lands on
+                            // a note that is not there or reopens it behind the user's back. Only the
+                            // unfold (double-click), the pin and the close stay.
+                            if !root.collapsed && !root.narrow: photo-ta := TouchArea {
+                                width: 20px;
+                                mouse-cursor: pointer;
+                                accessible-role: button;
+                                accessible-label: Strings.ui_sticky_pick_photo;
+                                changed has-hover => {
+                                    if (self.has-hover) { root.tip = Strings.ui_sticky_pick_photo; }
+                                    else if (root.tip == Strings.ui_sticky_pick_photo) { root.tip = ""; }
+                                }
+                                // Drawn, not 📎: an emoji needs an emoji font, and where there is
+                                // none the glyph falls back to the default text colour and is all
+                                // but invisible on these pastel bars — the same reason the colour
+                                // chip below is a shape rather than a character.
+                                Rectangle {
+                                    width: 16px;
+                                    height: 13px;
+                                    border-width: 1.5px;
+                                    border-color: Palette.ink(root.sticky-color);
+                                    clip: true;
+                                    opacity: photo-ta.has-hover ? 1 : 0.75;
+                                    Rectangle {
+                                        x: 2.5px;
+                                        y: 2px;
+                                        width: 4px;
+                                        height: 4px;
+                                        border-radius: 2px;
+                                        background: Palette.ink(root.sticky-color);
+                                    }
+                                    Path {
+                                        x: 1.5px;
+                                        y: 4px;
+                                        width: 13px;
+                                        height: 7px;
+                                        viewbox-width: 12;
+                                        viewbox-height: 6;
+                                        commands: "M 0 6 L 4 1 L 6.5 3.5 L 8.5 2 L 12 6 Z";
+                                        fill: Palette.ink(root.sticky-color);
+                                    }
+                                }
+                                clicked => { root.add-photo(); }
                             }
-                            Path {
-                                x: 1.5px;
-                                y: 4px;
-                                width: 13px;
-                                height: 7px;
-                                viewbox-width: 12;
-                                viewbox-height: 6;
-                                commands: "M 0 6 L 4 1 L 6.5 3.5 L 8.5 2 L 12 6 Z";
-                                fill: Palette.ink(root.sticky-color);
+                            if !root.collapsed && !root.narrow: b-history := BarButton {
+                                tip <=> root.tip;
+                                icon: "history";
+                                color-key: root.sticky-color;
+                                label: Strings.ui_sticky_history;
+                                clicked => { root.show-history(); }
+                            }
+                            if !root.collapsed: palette-ta := TouchArea {
+                                width: 20px;
+                                mouse-cursor: pointer;
+                                accessible-role: button;
+                                accessible-label: Strings.ui_sticky_color;
+                                changed has-hover => {
+                                    if (self.has-hover) { root.tip = Strings.ui_sticky_color; }
+                                    else if (root.tip == Strings.ui_sticky_color) { root.tip = ""; }
+                                }
+                                // A chip of the memo's own colour, not an emoji: an emoji that falls
+                                // back to a monochrome glyph is drawn in the default text colour,
+                                // which on these pastel bars is all but invisible. A filled circle
+                                // with the title bar's ink around it reads at any colour, and says
+                                // what it will change at the same time.
+                                Rectangle {
+                                    width: 13px;
+                                    height: 13px;
+                                    border-radius: 7px;
+                                    background: Palette.swatch(root.sticky-color);
+                                    border-width: 1.5px;
+                                    border-color: Palette.ink(root.sticky-color);
+                                    opacity: palette-ta.has-hover ? 1 : 0.85;
+                                }
+                                clicked => { root.show-palette = !root.show-palette; }
+                            }
+                            if !root.collapsed && !root.very-narrow: b-new := BarButton {
+                                tip <=> root.tip;
+                                icon: "plus";
+                                color-key: root.sticky-color;
+                                label: Strings.ui_sticky_new_memo;
+                                rest-opacity: 0.55;
+                                clicked => { root.new-memo(); }
+                            }
+                            // Stay on top, or drop back among the ordinary windows. Kept while
+                            // folded, unlike the buttons above: a folded sticky is exactly the one
+                            // that is being left in view, and this opens nothing that a note which
+                            // is not on screen could be missing. The struck-through pin is the
+                            // state, not the action — it shows what the window is doing now.
+                            b-pin := BarButton {
+                                tip <=> root.tip;
+                                icon: root.pinned ? "pin" : "pin-off";
+                                color-key: root.sticky-color;
+                                label: root.pinned ? Strings.ui_sticky_unpin : Strings.ui_sticky_pin;
+                                icon-size: 13px;
+                                rest-opacity: root.pinned ? 0.85 : 0.45;
+                                clicked => { root.toggle-pin(); }
+                            }
+                            // Close. It used to sit on a chip of the title bar's own ink, which on a
+                            // pale note is a near-black dot and the loudest thing in the window — on
+                            // a scrap of paper this small, louder than the writing. It is the bar's
+                            // colour at rest now, drawn like its neighbours, and only turns into a
+                            // red chip under the pointer, where the warning is worth something.
+                            close-ta := TouchArea {
+                                width: 22px;
+                                mouse-cursor: pointer;
+                                accessible-role: button;
+                                accessible-label: Strings.ui_sticky_close;
+                                changed has-hover => {
+                                    if (self.has-hover) { root.tip = Strings.ui_sticky_close; }
+                                    else if (root.tip == Strings.ui_sticky_close) { root.tip = ""; }
+                                }
+                                Rectangle {
+                                    width: 17px;
+                                    height: 17px;
+                                    border-radius: 9px;
+                                    background: close-ta.has-hover ? #d64541 : Palette.bar(root.sticky-color);
+                                    Glyph {
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                        width: 11px;
+                                        height: 11px;
+                                        name: "close";
+                                        stroke: close-ta.has-hover ? #ffffff : Palette.ink(root.sticky-color);
+                                        stroke-width: 1.6px;
+                                        opacity: close-ta.has-hover ? 1 : 0.6;
+                                    }
+                                }
+                                clicked => { root.close-requested(); }
                             }
                         }
-                        clicked => { root.add-photo(); }
-                    }
-                    if !root.collapsed && !root.narrow: b-history := BarButton {
-                        tip <=> root.tip;
-                        icon: "history";
-                        color-key: root.sticky-color;
-                        label: Strings.ui_sticky_history;
-                        clicked => { root.show-history(); }
-                    }
-                    if !root.collapsed: palette-ta := TouchArea {
-                        width: 20px;
-                        mouse-cursor: pointer;
-                        accessible-role: button;
-                        accessible-label: Strings.ui_sticky_color;
-                        changed has-hover => {
-                            if (self.has-hover) { root.tip = Strings.ui_sticky_color; }
-                            else if (root.tip == Strings.ui_sticky_color) { root.tip = ""; }
-                        }
-                        // A chip of the memo's own colour, not an emoji: an emoji that falls
-                        // back to a monochrome glyph is drawn in the default text colour,
-                        // which on these pastel bars is all but invisible. A filled circle
-                        // with the title bar's ink around it reads at any colour, and says
-                        // what it will change at the same time.
-                        Rectangle {
-                            width: 13px;
-                            height: 13px;
-                            border-radius: 7px;
-                            background: Palette.swatch(root.sticky-color);
-                            border-width: 1.5px;
-                            border-color: Palette.ink(root.sticky-color);
-                            opacity: palette-ta.has-hover ? 1 : 0.85;
-                        }
-                        clicked => { root.show-palette = !root.show-palette; }
-                    }
-                    if !root.collapsed && !root.very-narrow: b-new := BarButton {
-                        tip <=> root.tip;
-                        icon: "plus";
-                        color-key: root.sticky-color;
-                        label: Strings.ui_sticky_new_memo;
-                        rest-opacity: 0.55;
-                        clicked => { root.new-memo(); }
-                    }
-                    // Stay on top, or drop back among the ordinary windows. Kept while
-                    // folded, unlike the buttons above: a folded sticky is exactly the one
-                    // that is being left in view, and this opens nothing that a note which
-                    // is not on screen could be missing. The struck-through pin is the
-                    // state, not the action — it shows what the window is doing now.
-                    b-pin := BarButton {
-                        tip <=> root.tip;
-                        icon: root.pinned ? "pin" : "pin-off";
-                        color-key: root.sticky-color;
-                        label: root.pinned ? Strings.ui_sticky_unpin : Strings.ui_sticky_pin;
-                        icon-size: 13px;
-                        rest-opacity: root.pinned ? 0.85 : 0.45;
-                        clicked => { root.toggle-pin(); }
-                    }
-                    // Close. It used to sit on a chip of the title bar's own ink, which on a
-                    // pale note is a near-black dot and the loudest thing in the window — on
-                    // a scrap of paper this small, louder than the writing. It is the bar's
-                    // colour at rest now, drawn like its neighbours, and only turns into a
-                    // red chip under the pointer, where the warning is worth something.
-                    close-ta := TouchArea {
-                        width: 22px;
-                        mouse-cursor: pointer;
-                        accessible-role: button;
-                        accessible-label: Strings.ui_sticky_close;
-                        changed has-hover => {
-                            if (self.has-hover) { root.tip = Strings.ui_sticky_close; }
-                            else if (root.tip == Strings.ui_sticky_close) { root.tip = ""; }
-                        }
-                        Rectangle {
-                            width: 17px;
-                            height: 17px;
-                            border-radius: 9px;
-                            background: close-ta.has-hover ? #d64541 : Palette.bar(root.sticky-color);
-                            Glyph {
-                                x: (parent.width - self.width) / 2;
-                                y: (parent.height - self.height) / 2;
-                                width: 11px;
-                                height: 11px;
-                                name: "close";
-                                stroke: close-ta.has-hover ? #ffffff : Palette.ink(root.sticky-color);
-                                stroke-width: 1.6px;
-                                opacity: close-ta.has-hover ? 1 : 0.6;
-                            }
-                        }
-                        clicked => { root.close-requested(); }
                     }
                 }
             }
@@ -1125,7 +1142,7 @@ export component StickyWindow inherits Window {
                         // printed across the picture. ----
                         if root.created-at != "": Text {
                             text: root.created-at;
-                            font-size: 8px;
+                            font-size: 9px;
                             color: Palette.ink(root.sticky-color);
                             // Fades out of the way while the note is being written in, and
                             // comes back once the caret leaves. On a sticky this small it is

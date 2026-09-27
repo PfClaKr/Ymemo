@@ -409,6 +409,8 @@ pub(crate) fn group_row(
         expanded,
         child_count,
         folder: SharedString::new(),
+        preview: SharedString::new(),
+        when: SharedString::new(),
     }
 }
 
@@ -435,6 +437,75 @@ pub(crate) fn memo_row(memo: &Memo, depth: i32, has_photo: bool) -> ListRow {
         child_count: 0,
         has_photo,
         folder: SharedString::new(),
+        preview: SharedString::from(crate::hangul::for_slint(&preview_of(memo, &title))),
+        when: SharedString::from(crate::hangul::for_slint(&relative_time(
+            memo.updated_at,
+            chrono::Local::now(),
+        ))),
+    }
+}
+
+/// The writing after a memo's title, on one line: what tells two notes called "회의" apart.
+/// Fence lines are skipped (they are markup, not writing), and so is the line the title was
+/// taken from, when it was.
+fn preview_of(memo: &Memo, title: &str) -> String {
+    let mut out = String::new();
+    let mut first = true;
+    for line in memo.body.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("```") {
+            continue;
+        }
+        if std::mem::take(&mut first) {
+            let named = line.trim_start_matches('#').trim();
+            if memo.title.is_empty() || (!title.is_empty() && named.starts_with(title.trim())) {
+                continue;
+            }
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&plain_line(line));
+        if out.chars().count() >= 80 {
+            break;
+        }
+    }
+    out.chars().take(80).collect()
+}
+
+/// One line of a memo as a preview reads it: a heading's hashes, a list's bullet and the
+/// emphasis marks are markup, and in a line of grey text beside the title they are noise.
+fn plain_line(line: &str) -> String {
+    let line = line.trim_start_matches('#').trim_start();
+    let line = ["- ", "* ", "+ ", "> "]
+        .iter()
+        .find_map(|m| line.strip_prefix(m))
+        .unwrap_or(line);
+    line.replace("**", "").replace("__", "").replace('`', "")
+}
+
+/// When a memo was last written, the way a person would say it: "방금", "5분 전", "3시간 전",
+/// "어제", then the date — with the year only once it is not this one.
+pub(crate) fn relative_time<Tz: chrono::TimeZone>(millis: i64, now: chrono::DateTime<Tz>) -> String {
+    use chrono::Datelike;
+    let tz = now.timezone();
+    let Some(then) = tz.timestamp_millis_opt(millis).single() else {
+        return String::new();
+    };
+    let secs = (now.timestamp_millis() - millis) / 1000;
+    let days = now.date_naive().signed_duration_since(then.date_naive()).num_days();
+    if secs < 60 {
+        t!("msg.time_now")
+    } else if secs < 3600 {
+        t!("msg.time_minutes", n = secs / 60)
+    } else if days == 0 {
+        t!("msg.time_hours", n = secs / 3600)
+    } else if days == 1 {
+        t!("msg.time_yesterday")
+    } else if then.year() == now.year() {
+        t!("msg.time_date", month = then.month(), day = then.day())
+    } else {
+        t!("msg.time_date_year", year = then.year(), month = then.month(), day = then.day())
     }
 }
 
@@ -456,6 +527,29 @@ fn in_folder(row: ListRow, parent_id: &str, groups: &[ymemo_core::Group]) -> Lis
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn times_read_the_way_people_say_them() {
+        use chrono::{TimeZone, Utc};
+        let now = Utc.with_ymd_and_hms(2026, 9, 27, 15, 0, 0).unwrap();
+        let ago = |secs: i64| now.timestamp_millis() - secs * 1000;
+        assert_eq!(relative_time(ago(10), now), t!("msg.time_now"));
+        assert_eq!(relative_time(ago(5 * 60), now), t!("msg.time_minutes", n = 5));
+        assert_eq!(relative_time(ago(3 * 3600), now), t!("msg.time_hours", n = 3));
+        assert_eq!(relative_time(ago(20 * 3600), now), t!("msg.time_yesterday"));
+        let march = Utc.with_ymd_and_hms(2026, 3, 1, 9, 0, 0).unwrap().timestamp_millis();
+        assert_eq!(relative_time(march, now), t!("msg.time_date", month = 3, day = 1));
+        let old = Utc.with_ymd_and_hms(2024, 12, 31, 9, 0, 0).unwrap().timestamp_millis();
+        assert_eq!(relative_time(old, now), t!("msg.time_date_year", year = 2024, month = 12, day = 31));
+    }
+
+    #[test]
+    fn the_preview_is_what_follows_the_title() {
+        let memo = Memo::new("", "장보기\n- 우유\n\n```\n- 계란\n```");
+        assert_eq!(preview_of(&memo, "장보기"), "우유 계란");
+        let titled = Memo::new("회의", "결정 사항\n배포는 금요일");
+        assert_eq!(preview_of(&titled, "회의"), "결정 사항 배포는 금요일");
+    }
 
     use std::cell::{Cell, RefCell};
     use std::collections::{HashMap, HashSet};

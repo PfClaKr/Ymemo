@@ -208,6 +208,12 @@ pub(super) fn wire_window_events(
                     settings.save(&ctx.dir);
                 }
             }
+            // The title bar's buttons show while the pointer is over the note.
+            WindowEvent::CursorEntered { .. } | WindowEvent::CursorLeft { .. } => {
+                if let Some(w) = weak.upgrade() {
+                    w.set_pointer_inside(matches!(event, WindowEvent::CursorEntered { .. }));
+                }
+            }
             WindowEvent::Moved(_) => {
                 motion.moved_at.set(Some(Instant::now()));
                 motion.geometry_dirty.set(true);

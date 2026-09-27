@@ -14,7 +14,9 @@ fn main() {
     // while everything generated stays in OUT_DIR.
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     let config = slint_build::CompilerConfiguration::new()
-        .with_library_paths(HashMap::from([("i18n".to_string(), out.join("i18n.slint"))]));
+        .with_library_paths(HashMap::from([("i18n".to_string(), out.join("i18n.slint"))]))
+        // The fonts go into the binary, not beside it: an installed app has no `fonts/`.
+        .embed_resources(slint_build::EmbedResourcesKind::EmbedFiles);
     slint_build::compile_with_config("ui/app.slint", config).expect("slint compile failed");
 
     // Windows: embed the icon resource so Explorer, the taskbar and the installer show it.

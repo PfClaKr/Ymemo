@@ -17,6 +17,7 @@ component FieldLabel inherits Text {
 // Lock window: the master password prompt, hidden once unlocked.
 // ---------------------------------------------------------------------------
 export component LockWindow inherits Window {
+    default-font-family: "Pretendard";
     // This window is always dark, so the standard controls in it are too. Left to follow the
     // system they came out light on a light-mode desktop — pale grey boxes set into a dark
     // window, and a disabled primary button drawn darker than an enabled one beside it.
@@ -118,7 +119,15 @@ export component LockWindow inherits Window {
         padding: 16px;
         spacing: 10px;
         HorizontalLayout {
-            spacing: 6px;
+            spacing: 8px;
+            // The app's mark beside its name: the same picture as the tray and the taskbar
+            // (packaging/gen_icons.py), so the window reads as Ymemo, not as a dialog.
+            Image {
+                source: @image-url("../../../packaging/assets/ymemo-64.png");
+                width: 22px;
+                height: 22px;
+                y: (parent.height - self.height) / 2;
+            }
             Text {
                 text: Strings.ui_list_heading;
                 font-size: 16px;
