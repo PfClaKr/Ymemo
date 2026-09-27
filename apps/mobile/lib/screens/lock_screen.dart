@@ -452,7 +452,13 @@ class _LockScreenState extends State<LockScreen> {
             child: Text(_notice!, textAlign: TextAlign.center),
           ),
         const SizedBox(height: 16),
+        // As wide as the field above it and as tall as a thumb: the one thing to press on
+        // this screen, which sat as a small pill in the middle under a full-width field.
         FilledButton(
+          style: FilledButton.styleFrom(
+            minimumSize: const Size.fromHeight(52),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
           onPressed: _busy || !_canSubmit ? null : _unlock,
           child: Text(_busy
               ? s.opening
@@ -529,6 +535,10 @@ class _LockScreenState extends State<LockScreen> {
             ),
           const SizedBox(height: 12),
           FilledButton(
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(52),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
             onPressed: _busy ? null : _recover,
             child: Text(s.resetPassword),
           ),

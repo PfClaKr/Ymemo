@@ -17,4 +17,6 @@
     <color name="widget_muted">#FF6E6B5E</color>
     <color name="widget_divider">#1F000000</color>
     <color name="widget_accent">#FF8C7B1E</color>
+    <!-- The list's background in the light theme (theme.dart's surface), for the start-up window. -->
+    <color name="app_background">#FFF9EB</color>
 </resources>

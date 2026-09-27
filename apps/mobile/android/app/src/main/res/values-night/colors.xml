@@ -7,4 +7,6 @@
     <color name="widget_muted">#FFA5A296</color>
     <color name="widget_divider">#26FFFFFF</color>
     <color name="widget_accent">#FFE6D24A</color>
+    <!-- The list's background in the dark theme, for the start-up window. -->
+    <color name="app_background">#15130C</color>
 </resources>
