@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../palette.dart';
 import '../src/rust/api.dart';
+import '../memo_title.dart';
 import '../theme.dart';
 import '../ui_util.dart';
 
@@ -54,7 +55,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Future<void> _load() async {
     try {
       final revisions = await memoHistory(id: widget.memoId);
-      if (mounted) setState(() { _revisions = revisions; _loading = false; });
+      // The newest open from the start, as the desktop window opens on it: the screen
+      // otherwise began as a column of closed dates.
+      if (mounted) {
+        setState(() {
+          _revisions = revisions;
+          _loading = false;
+          _selected ??= revisions.isEmpty ? null : 0;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
       _say('$e');
@@ -79,13 +88,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
   }
 
-  /// `yyyy-MM-dd HH:mm` in local time. Written out rather than pulled from `intl`: it is one
-  /// line, and the app has no other formatted date to justify the dependency.
-  String _when(int millis) {
-    final t = DateTime.fromMillisecondsSinceEpoch(millis).toLocal();
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${t.year}-${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}';
-  }
+  String _when(int millis) => revisionTime(millis, widget.strings);
 
   @override
   Widget build(BuildContext context) => PaperTheme(builder: _page);

@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../host.dart' as host;
+import '../memo_title.dart';
 import '../markdown_style.dart';
 import '../palette.dart';
 import '../pending_edits.dart';
@@ -179,7 +180,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       builder: (_) => HistoryScreen(
         strings: widget.strings,
         memoId: widget.id,
-        title: _title.text,
+        title: headingFor(_title.text, _body.text, widget.strings.newMemo),
         color: _color,
       ),
     ));

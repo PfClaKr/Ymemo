@@ -2826,6 +2826,11 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_timeYesterday = <String>::sse_decode(deserializer);
         let mut var_timeDate = <String>::sse_decode(deserializer);
         let mut var_timeDateYear = <String>::sse_decode(deserializer);
+        let mut var_whenToday = <String>::sse_decode(deserializer);
+        let mut var_whenYesterday = <String>::sse_decode(deserializer);
+        let mut var_whenDate = <String>::sse_decode(deserializer);
+        let mut var_whenDateYear = <String>::sse_decode(deserializer);
+        let mut var_otherNetwork = <String>::sse_decode(deserializer);
         let mut var_reorder = <String>::sse_decode(deserializer);
         let mut var_reorderDone = <String>::sse_decode(deserializer);
         let mut var_firstMemo = <String>::sse_decode(deserializer);
@@ -3004,6 +3009,11 @@ impl SseDecode for crate::api::FfiStrings {
             time_yesterday: var_timeYesterday,
             time_date: var_timeDate,
             time_date_year: var_timeDateYear,
+            when_today: var_whenToday,
+            when_yesterday: var_whenYesterday,
+            when_date: var_whenDate,
+            when_date_year: var_whenDateYear,
+            other_network: var_otherNetwork,
             reorder: var_reorder,
             reorder_done: var_reorderDone,
             first_memo: var_firstMemo,
@@ -3642,6 +3652,11 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.time_yesterday.into_into_dart().into_dart(),
             self.time_date.into_into_dart().into_dart(),
             self.time_date_year.into_into_dart().into_dart(),
+            self.when_today.into_into_dart().into_dart(),
+            self.when_yesterday.into_into_dart().into_dart(),
+            self.when_date.into_into_dart().into_dart(),
+            self.when_date_year.into_into_dart().into_dart(),
+            self.other_network.into_into_dart().into_dart(),
             self.reorder.into_into_dart().into_dart(),
             self.reorder_done.into_into_dart().into_dart(),
             self.first_memo.into_into_dart().into_dart(),
@@ -3977,6 +3992,11 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.time_yesterday, serializer);
         <String>::sse_encode(self.time_date, serializer);
         <String>::sse_encode(self.time_date_year, serializer);
+        <String>::sse_encode(self.when_today, serializer);
+        <String>::sse_encode(self.when_yesterday, serializer);
+        <String>::sse_encode(self.when_date, serializer);
+        <String>::sse_encode(self.when_date_year, serializer);
+        <String>::sse_encode(self.other_network, serializer);
         <String>::sse_encode(self.reorder, serializer);
         <String>::sse_encode(self.reorder_done, serializer);
         <String>::sse_encode(self.first_memo, serializer);

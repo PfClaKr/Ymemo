@@ -353,16 +353,32 @@ class _SyncScreenState extends State<SyncScreen> {
               _requestCard(context, request),
               const SizedBox(height: 12),
             ],
+            // Not ready (starting, off, failed) says so first; ready, it is at most a note that
+            // Wi-Fi-only is holding things back.
             _status(context),
             if (_waitingPeer != null) ...[
               const Divider(height: 32),
               _waitingSection(context),
             ],
+            // The easy way first — six digits on the same Wi-Fi — in a card of its own; the
+            // long code for other networks after it. The desktop's panel is in the same
+            // order, same-Wi-Fi tab first.
             if (_lanCode != null || _lanMessage != null) ...[
-              const Divider(height: 32),
-              _lanSection(context),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: _lanSection(context),
+              ),
             ],
-            const Divider(height: 32),
+            if (widget.sync.pairingCode != null) ...[
+              const Divider(height: 40),
+              _remoteSection(context, widget.sync.pairingCode!),
+            ],
+            const Divider(height: 40),
             // Not `syncDevices` — that is this screen's own title, and the same words twice
             // on one screen read as a heading that lost its section. This one is the list of
             // devices already paired.
@@ -410,9 +426,16 @@ class _SyncScreenState extends State<SyncScreen> {
           Text(widget.strings.lanMyCode, style: Theme.of(context).textTheme.bodySmall),
           const SizedBox(height: 4),
           Text(
-            // Spaced out, because this gets read aloud across a room.
-            _lanCode!.split('').join(' '),
-            style: const TextStyle(fontSize: 30, letterSpacing: 2, fontFeatures: [ui.FontFeature.tabularFigures()]),
+            // In two groups of three, the way a code is read aloud across a room.
+            _lanCode!.length == 6
+                ? '${_lanCode!.substring(0, 3)} ${_lanCode!.substring(3)}'
+                : _lanCode!,
+            style: const TextStyle(
+              fontSize: 40,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 4,
+              fontFeatures: [ui.FontFeature.tabularFigures()],
+            ),
           ),
         ],
         const SizedBox(height: 12),
@@ -427,6 +450,8 @@ class _SyncScreenState extends State<SyncScreen> {
                 decoration: InputDecoration(
                   labelText: widget.strings.lanEnterCode,
                   counterText: '',
+                  // The card behind is the fields' own fill colour; this one sits on it.
+                  fillColor: Theme.of(context).colorScheme.surface,
                 ),
                 onSubmitted: (_) => _joinLan(),
               ),
@@ -596,21 +621,28 @@ class _SyncScreenState extends State<SyncScreen> {
         ],
       );
     }
+    // A folder held back by "Wi-Fi only" looks exactly like sync being broken, so the
+    // reason is said here rather than left to be guessed at.
+    if (sync.pausedForMetered) {
+      return Row(children: [
+        const Icon(Icons.pause_circle_outline, size: 18),
+        const SizedBox(width: 8),
+        Expanded(child: Text(widget.strings.pausedMetered)),
+      ]);
+    }
+    return const SizedBox.shrink();
+  }
+
+  /// Pairing across networks: this device's long code (to copy or show as QR), a scanner for
+  /// the other's, and a field to paste it into. Below the same-network way, which is the one
+  /// most people want and was a screen further down.
+  Widget _remoteSection(BuildContext context, String code) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // A folder held back by "Wi-Fi only" looks exactly like sync being broken, so the
-        // reason is said here rather than left to be guessed at.
-        if (sync.pausedForMetered)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Row(children: [
-              const Icon(Icons.pause_circle_outline, size: 18),
-              const SizedBox(width: 8),
-              Expanded(child: Text(widget.strings.pausedMetered)),
-            ]),
-          ),
-        Text(widget.strings.myCode, style: Theme.of(context).textTheme.titleMedium),
+        Text(widget.strings.otherNetwork, style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Text(widget.strings.myCode, style: Theme.of(context).textTheme.bodySmall),
         const SizedBox(height: 8),
         SelectableText(code, style: const TextStyle(fontFamily: 'monospace')),
         const SizedBox(height: 8),

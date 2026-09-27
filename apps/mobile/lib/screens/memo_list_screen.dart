@@ -620,7 +620,9 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
         builder: (_) => HistoryScreen(
           strings: widget.strings,
           memoId: memo.id,
-          title: memo.title,
+          // The name the row shows, first line and all: a memo with no title of its own was
+          // headed "New memo" in its own history.
+          title: rowTitle(memo, widget.strings.newMemo),
           color: memo.color,
         ),
       ));

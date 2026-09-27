@@ -1026,6 +1026,11 @@ class FfiStrings {
   final String timeYesterday;
   final String timeDate;
   final String timeDateYear;
+  final String whenToday;
+  final String whenYesterday;
+  final String whenDate;
+  final String whenDateYear;
+  final String otherNetwork;
   final String reorder;
   final String reorderDone;
   final String firstMemo;
@@ -1207,6 +1212,11 @@ class FfiStrings {
     required this.timeYesterday,
     required this.timeDate,
     required this.timeDateYear,
+    required this.whenToday,
+    required this.whenYesterday,
+    required this.whenDate,
+    required this.whenDateYear,
+    required this.otherNetwork,
     required this.reorder,
     required this.reorderDone,
     required this.firstMemo,
@@ -1388,6 +1398,11 @@ class FfiStrings {
       timeYesterday.hashCode ^
       timeDate.hashCode ^
       timeDateYear.hashCode ^
+      whenToday.hashCode ^
+      whenYesterday.hashCode ^
+      whenDate.hashCode ^
+      whenDateYear.hashCode ^
+      otherNetwork.hashCode ^
       reorder.hashCode ^
       reorderDone.hashCode ^
       firstMemo.hashCode ^
@@ -1571,6 +1586,11 @@ class FfiStrings {
           timeYesterday == other.timeYesterday &&
           timeDate == other.timeDate &&
           timeDateYear == other.timeDateYear &&
+          whenToday == other.whenToday &&
+          whenYesterday == other.whenYesterday &&
+          whenDate == other.whenDate &&
+          whenDateYear == other.whenDateYear &&
+          otherNetwork == other.otherNetwork &&
           reorder == other.reorder &&
           reorderDone == other.reorderDone &&
           firstMemo == other.firstMemo &&

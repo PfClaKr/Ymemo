@@ -109,3 +109,19 @@ String relativeTime(int millis, FfiStrings s, {DateTime? now}) {
   if (t.year == at.year) return fill(s.timeDate, {'month': t.month, 'day': t.day});
   return fill(s.timeDateYear, {'year': t.year, 'month': t.month, 'day': t.day});
 }
+
+/// When a revision was made: "오늘 13:04", "어제 18:20", "9월 27일 13:04", with the year only
+/// once it is not this one — the desktop history window's phrasing (`revision_time`).
+String revisionTime(int millis, FfiStrings s, {DateTime? now}) {
+  final t = DateTime.fromMillisecondsSinceEpoch(millis);
+  final at = now ?? DateTime.now();
+  String two(int n) => n.toString().padLeft(2, '0');
+  final time = '${two(t.hour)}:${two(t.minute)}';
+  final days = DateTime(at.year, at.month, at.day).difference(DateTime(t.year, t.month, t.day)).inDays;
+  String fill(String template, Map<String, Object> values) =>
+      values.entries.fold(template, (out, e) => out.replaceAll('{${e.key}}', '${e.value}'));
+  if (days == 0) return fill(s.whenToday, {'time': time});
+  if (days == 1) return fill(s.whenYesterday, {'time': time});
+  if (t.year == at.year) return fill(s.whenDate, {'month': t.month, 'day': t.day, 'time': time});
+  return fill(s.whenDateYear, {'year': t.year, 'month': t.month, 'day': t.day, 'time': time});
+}
