@@ -78,6 +78,14 @@ fn generate_i18n() {
         rust.push_str(&format!(
             "    g.set_{ident}(crate::hangul::for_slint(&ymemo_i18n::t!(\"{key}\")).into());\n"
         ));
+        // Every hint also comes in its first sentence alone, for where the whole of it is
+        // behind an ⓘ (settings.slint's SettingRow). See src/hint.rs.
+        if key.ends_with("_hint") {
+            slint.push_str(&format!("    in-out property <string> {ident}_short;\n"));
+            rust.push_str(&format!(
+                "    g.set_{ident}_short(crate::hangul::for_slint(&crate::hint::first_sentence(&ymemo_i18n::t!(\"{key}\"))).into());\n"
+            ));
+        }
     }
     slint.push_str("}\n");
     rust.push_str("}\n");

@@ -32,6 +32,10 @@ export struct ListRow {
     // phrased ("3시간 전"). Both empty on a folder.
     preview: string,
     when: string,
+    // While searching, where in the body the words were found, with them in bold;
+    // `has-snippet` says whether there is one (a match only in the title has none).
+    snippet: styled-text,
+    has-snippet: bool,
 }
 
 
@@ -433,16 +437,25 @@ export component ListWindow inherits Window {
                 }
             }
             b-lock := IconButton {
+                // Out of the way while the vault's name is being typed, so the field has the
+                // heading's width rather than what five buttons left of it. Zero-wide, not
+                // removed: the heading reads these buttons' hover by name.
+                width: root.naming ? 0px : 30px;
+                visible: !root.naming;
                 icon: "lock";
                 label: Strings.ui_list_tip_lock;
                 clicked => { root.commit-edit(); root.lock-now(); }
             }
             b-gear := IconButton {
+                width: root.naming ? 0px : 30px;
+                visible: !root.naming;
                 icon: "gear";
                 label: Strings.ui_list_tip_settings;
                 clicked => { root.commit-edit(); root.open-settings(); }
             }
             b-link := IconButton {
+                width: root.naming ? 0px : 30px;
+                visible: !root.naming;
                 icon: "link";
                 label: Strings.ui_list_tip_sync;
                 // Whether syncing is actually happening, without opening the panel: green
@@ -454,11 +467,15 @@ export component ListWindow inherits Window {
                 clicked => { root.show-sync = !root.show-sync; }
             }
             b-folder := IconButton {
+                width: root.naming ? 0px : 30px;
+                visible: !root.naming;
                 icon: "folder";
                 label: Strings.ui_list_tip_new_group;
                 clicked => { root.commit-edit(); root.new-group(); }
             }
             b-plus := IconButton {
+                width: root.naming ? 0px : 30px;
+                visible: !root.naming;
                 icon: "plus";
                 primary: true;
                 label: Strings.ui_list_tip_new_memo;
@@ -1018,8 +1035,23 @@ export component ListWindow inherits Window {
                     // one line of it, so a list of titles tells two similar notes apart.
                     // Nothing, rather than a lone "…", when the title needs the line: see
                     // `preview-fits` on the row.
+                    if root.coloring-id != row.id && root.editing-id != row.id && row.has-snippet
+                        && row-box.preview-fits: Rectangle {
+                        horizontal-stretch: 1;
+                        // StyledText has no ellipsis; the snippet is short and this cuts the rest.
+                        clip: true;
+                        StyledText {
+                            x: 8px;
+                            width: 100000px;
+                            height: parent.height;
+                            text: row.snippet;
+                            default-font-size: 12px;
+                            default-color: #8d8778;
+                            vertical-alignment: center;
+                        }
+                    }
                     if root.coloring-id != row.id && root.editing-id != row.id && row.preview != ""
-                        && row-box.preview-fits: Text {
+                        && !row.has-snippet && row-box.preview-fits: Text {
                         text: "  " + row.preview;
                         font-size: 12px;
                         color: #8d8778;

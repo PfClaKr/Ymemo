@@ -100,7 +100,8 @@ pub(crate) fn refresh_list(
                         || m.body.to_lowercase().contains(&needle)
                 })
                 .map(|m| {
-                    in_folder(memo_row(m, 0, with_photo.contains(&m.id)), &m.group_id, &groups)
+                    let row = memo_row(m, 0, with_photo.contains(&m.id));
+                    in_folder(with_snippet(row, &m.body, &needle), &m.group_id, &groups)
                 }),
         );
         model.set_vec(rows);
@@ -411,6 +412,8 @@ pub(crate) fn group_row(
         folder: SharedString::new(),
         preview: SharedString::new(),
         when: SharedString::new(),
+        snippet: Default::default(),
+        has_snippet: false,
     }
 }
 
@@ -442,7 +445,65 @@ pub(crate) fn memo_row(memo: &Memo, depth: i32, has_photo: bool) -> ListRow {
             memo.updated_at,
             chrono::Local::now(),
         ))),
+        snippet: Default::default(),
+        has_snippet: false,
     }
+}
+
+/// A search hit's row, showing **where** in the body the words were found rather than how
+/// the body begins — which said nothing about why the memo was on the list. Left as it was
+/// when the match is only in the title, which the row already shows.
+fn with_snippet(row: ListRow, body: &str, needle: &str) -> ListRow {
+    let Some(markdown) = search_snippet(body, needle) else { return row };
+    let markdown = crate::hangul::for_slint(&markdown);
+    match slint::StyledText::from_markdown(&markdown) {
+        Ok(snippet) => ListRow { snippet, has_snippet: true, ..row },
+        Err(_) => row,
+    }
+}
+
+/// The stretch of `text` around the first match of `needle` (already lower-cased), as
+/// markdown with the match in bold: a few words before it, more after, on one line, with "…"
+/// where it was cut. `None` when `text` does not contain it.
+///
+/// Compared a character at a time rather than by slicing the lower-cased copy, because
+/// lower-casing can change a character's length in bytes and the two strings would no
+/// longer line up.
+pub(crate) fn search_snippet(text: &str, needle: &str) -> Option<String> {
+    const BEFORE: usize = 12;
+    const AFTER: usize = 40;
+    let chars: Vec<char> = text.chars().map(|c| if c == '\n' { ' ' } else { c }).collect();
+    let lower: Vec<char> = chars.iter().map(|c| c.to_lowercase().next().unwrap_or(*c)).collect();
+    let want: Vec<char> = needle.chars().collect();
+    if want.is_empty() {
+        return None;
+    }
+    let at = lower.windows(want.len()).position(|w| w == want.as_slice())?;
+    let end = at + want.len();
+    let from = at.saturating_sub(BEFORE);
+    let to = (end + AFTER).min(chars.len());
+    let piece = |a: usize, b: usize| escape_markdown(&chars[a..b].iter().collect::<String>());
+    Some(format!(
+        "{}{}**{}**{}{}",
+        if from > 0 { "…" } else { "" },
+        piece(from, at).trim_start(),
+        piece(at, end),
+        piece(end, to),
+        if to < chars.len() { "…" } else { "" },
+    ))
+}
+
+/// `text` with every character markdown would read as markup escaped, so a snippet is drawn
+/// as written — a `*` in a shopping list is a star here too.
+fn escape_markdown(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if "\\`*_{}[]()<>#+-.!|~".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// The writing after a memo's title, on one line: what tells two notes called "회의" apart.
@@ -541,6 +602,23 @@ mod tests {
         assert_eq!(relative_time(march, now), t!("msg.time_date", month = 3, day = 1));
         let old = Utc.with_ymd_and_hms(2024, 12, 31, 9, 0, 0).unwrap().timestamp_millis();
         assert_eq!(relative_time(old, now), t!("msg.time_date_year", year = 2024, month = 12, day = 31));
+    }
+
+    #[test]
+    fn a_search_snippet_is_the_match_in_its_words() {
+        let body = "회의록\n결정 사항\n배포는 금요일에 합니다. fn main() { println!(\"hi\"); }";
+        let got = search_snippet(body, "금요일").unwrap();
+        assert!(got.contains("**금요일**"), "{got}");
+        assert!(got.starts_with('…'), "cut before: {got}");
+        // Markup in the body is escaped, not drawn.
+        let got = search_snippet("a *star* and hi", "hi").unwrap();
+        assert!(got.contains("\\*star\\*"), "{got}");
+        assert!(got.ends_with("**hi**"), "{got}");
+        // Case does not matter, and no match is no snippet.
+        assert!(search_snippet("Hello World", "world").unwrap().contains("**World**"));
+        assert!(search_snippet("nothing here", "zzz").is_none());
+        // Every snippet parses as the markdown Slint reads.
+        assert!(slint::StyledText::from_markdown(&search_snippet(body, "hi").unwrap()).is_ok());
     }
 
     #[test]

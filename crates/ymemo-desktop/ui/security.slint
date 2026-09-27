@@ -17,23 +17,30 @@ component FieldLabel inherits Text {
     color: #a8a294;
 }
 
-component Section inherits VerticalLayout {
+// One of the window's two jobs, as a card — the same panels the settings window it opens
+// from is made of, so the two read as one place rather than a form behind a dashboard.
+component Section inherits Rectangle {
     in property <string> label;
     in property <string> hint;
-    spacing: 4px;
-    Text {
-        text: root.label;
-        font-size: 13px;
-        font-weight: 700;
-        color: #f0ead6;
+    background: #36322d;
+    border-radius: 10px;
+    VerticalLayout {
+        padding: 12px;
+        spacing: 6px;
+        Text {
+            text: root.label;
+            font-size: 11px;
+            font-weight: 700;
+            color: #d8c765;
+        }
+        if root.hint != "": Text {
+            text: root.hint;
+            font-size: 10px;
+            color: #a8a294;
+            wrap: word-wrap;
+        }
+        @children
     }
-    if root.hint != "": Text {
-        text: root.hint;
-        font-size: 10px;
-        color: #a8a294;
-        wrap: word-wrap;
-    }
-    @children
 }
 
 export component SecurityWindow inherits Window {
@@ -44,12 +51,12 @@ export component SecurityWindow inherits Window {
     init => { StdPalette.color-scheme = ColorScheme.dark; }
     title: Strings.ui_security_title;
     preferred-width: 400px;
-    preferred-height: 480px;
+    preferred-height: 530px;
     min-width: 340px;
     // See settings.slint: a Window whose root is a layout takes that layout's size, and the
     // wrapping hints measure themselves against no width while it is being decided. This
     // window opened 1472px tall, with the close button below the bottom of the screen.
-    min-height: 460px;
+    min-height: 510px;
     background: #2e2b27;
 
     // Whether a recovery code was ever issued for this vault.
