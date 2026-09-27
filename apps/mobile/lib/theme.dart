@@ -24,6 +24,16 @@ SystemUiOverlayStyle overlayFor(Brightness brightness) => SystemUiOverlayStyle(
 ThemeData ymemoTheme(Brightness brightness) => ThemeData(
       colorScheme: ColorScheme.fromSeed(seedColor: _seed, brightness: brightness),
       useMaterial3: true,
+      fontFamily: 'Pretendard',
+      // Rounded, filled fields with no outline — the search box and the dialogs' inputs —
+      // rather than Material's default boxed underline.
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+      ),
       appBarTheme: AppBarTheme(systemOverlayStyle: overlayFor(brightness)),
     );
 

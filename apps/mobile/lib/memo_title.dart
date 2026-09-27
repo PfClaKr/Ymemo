@@ -91,3 +91,21 @@ String _rawTitleLine(String text) {
   }
   return '';
 }
+
+/// When a memo was last written, the way a person would say it: "방금", "5분 전", "3시간 전",
+/// "어제", then the date, with the year only once it is not this one. The phrasing is the
+/// catalog's, shared with the desktop's list (`relative_time` in its list module).
+String relativeTime(int millis, FfiStrings s, {DateTime? now}) {
+  final t = DateTime.fromMillisecondsSinceEpoch(millis);
+  final at = now ?? DateTime.now();
+  final secs = at.difference(t).inSeconds;
+  final days = DateTime(at.year, at.month, at.day).difference(DateTime(t.year, t.month, t.day)).inDays;
+  String fill(String template, Map<String, int> values) =>
+      values.entries.fold(template, (out, e) => out.replaceAll('{${e.key}}', '${e.value}'));
+  if (secs < 60) return s.timeNow;
+  if (secs < 3600) return fill(s.timeMinutes, {'n': secs ~/ 60});
+  if (days == 0) return fill(s.timeHours, {'n': secs ~/ 3600});
+  if (days == 1) return s.timeYesterday;
+  if (t.year == at.year) return fill(s.timeDate, {'month': t.month, 'day': t.day});
+  return fill(s.timeDateYear, {'year': t.year, 'month': t.month, 'day': t.day});
+}

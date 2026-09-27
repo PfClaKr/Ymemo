@@ -2820,6 +2820,15 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_history = <String>::sse_decode(deserializer);
         let mut var_historyEmpty = <String>::sse_decode(deserializer);
         let mut var_photoRemoved = <String>::sse_decode(deserializer);
+        let mut var_timeNow = <String>::sse_decode(deserializer);
+        let mut var_timeMinutes = <String>::sse_decode(deserializer);
+        let mut var_timeHours = <String>::sse_decode(deserializer);
+        let mut var_timeYesterday = <String>::sse_decode(deserializer);
+        let mut var_timeDate = <String>::sse_decode(deserializer);
+        let mut var_timeDateYear = <String>::sse_decode(deserializer);
+        let mut var_reorder = <String>::sse_decode(deserializer);
+        let mut var_reorderDone = <String>::sse_decode(deserializer);
+        let mut var_firstMemo = <String>::sse_decode(deserializer);
         let mut var_showPassword = <String>::sse_decode(deserializer);
         let mut var_hidePassword = <String>::sse_decode(deserializer);
         let mut var_clearSearch = <String>::sse_decode(deserializer);
@@ -2989,6 +2998,15 @@ impl SseDecode for crate::api::FfiStrings {
             history: var_history,
             history_empty: var_historyEmpty,
             photo_removed: var_photoRemoved,
+            time_now: var_timeNow,
+            time_minutes: var_timeMinutes,
+            time_hours: var_timeHours,
+            time_yesterday: var_timeYesterday,
+            time_date: var_timeDate,
+            time_date_year: var_timeDateYear,
+            reorder: var_reorder,
+            reorder_done: var_reorderDone,
+            first_memo: var_firstMemo,
             show_password: var_showPassword,
             hide_password: var_hidePassword,
             clear_search: var_clearSearch,
@@ -3618,6 +3636,15 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.history.into_into_dart().into_dart(),
             self.history_empty.into_into_dart().into_dart(),
             self.photo_removed.into_into_dart().into_dart(),
+            self.time_now.into_into_dart().into_dart(),
+            self.time_minutes.into_into_dart().into_dart(),
+            self.time_hours.into_into_dart().into_dart(),
+            self.time_yesterday.into_into_dart().into_dart(),
+            self.time_date.into_into_dart().into_dart(),
+            self.time_date_year.into_into_dart().into_dart(),
+            self.reorder.into_into_dart().into_dart(),
+            self.reorder_done.into_into_dart().into_dart(),
+            self.first_memo.into_into_dart().into_dart(),
             self.show_password.into_into_dart().into_dart(),
             self.hide_password.into_into_dart().into_dart(),
             self.clear_search.into_into_dart().into_dart(),
@@ -3944,6 +3971,15 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.history, serializer);
         <String>::sse_encode(self.history_empty, serializer);
         <String>::sse_encode(self.photo_removed, serializer);
+        <String>::sse_encode(self.time_now, serializer);
+        <String>::sse_encode(self.time_minutes, serializer);
+        <String>::sse_encode(self.time_hours, serializer);
+        <String>::sse_encode(self.time_yesterday, serializer);
+        <String>::sse_encode(self.time_date, serializer);
+        <String>::sse_encode(self.time_date_year, serializer);
+        <String>::sse_encode(self.reorder, serializer);
+        <String>::sse_encode(self.reorder_done, serializer);
+        <String>::sse_encode(self.first_memo, serializer);
         <String>::sse_encode(self.show_password, serializer);
         <String>::sse_encode(self.hide_password, serializer);
         <String>::sse_encode(self.clear_search, serializer);

@@ -9,7 +9,6 @@ import 'package:image_picker/image_picker.dart';
 
 import '../host.dart' as host;
 import '../markdown_style.dart';
-import '../memo_title.dart';
 import '../palette.dart';
 import '../pending_edits.dart';
 import '../src/rust/api.dart';
@@ -461,19 +460,26 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       child: Scaffold(
         backgroundColor: paletteBg(_color),
         appBar: AppBar(
-          // The memo's own title, as the list shows it — the bar said "New memo" over every
-          // memo ever opened, including ones written months ago. Fixed at the title it
-          // arrived with rather than following the field below it, which is right there.
-          // A memo with no title of its own reads by its first line, the same fallback the
-          // list uses, or the two would name the same memo differently.
-          title: Text(headingFor(widget.title, widget.body, widget.strings.newMemo)),
-          backgroundColor: paletteBar(_color),
+          // The bar is the paper: one sheet from the top of the screen down, with the title
+          // written large on it below rather than printed in a coloured strip above it. The
+          // note's colour is carried by the paper and by the chip that changes it.
+          backgroundColor: paletteBg(_color),
+          surfaceTintColor: Colors.transparent,
+          scrolledUnderElevation: 0,
           foregroundColor: ink,
           actions: [
             IconButton(
-              icon: const Icon(Icons.palette_outlined),
               tooltip: widget.strings.color,
               onPressed: _pickColor,
+              icon: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: paletteSwatch(_color),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: ink.withValues(alpha: 0.6), width: 1.5),
+                ),
+              ),
             ),
             IconButton(
               icon: const Icon(Icons.add_photo_alternate),
@@ -514,13 +520,24 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
           ],
         ),
         body: Padding(
-          padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset(context)),
+          padding: EdgeInsets.fromLTRB(20, 4, 20, 16 + bottomInset(context)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // The title, written large on the paper — not a labelled, underlined field,
+              // which made a note look like a form to fill in.
               TextField(
                 controller: _title,
-                decoration: InputDecoration(labelText: widget.strings.titleHint),
+                style: base.textTheme.headlineSmall
+                    ?.copyWith(fontWeight: FontWeight.w700, color: const Color(0xFF2B2B22)),
+                decoration: InputDecoration(
+                  hintText: widget.strings.titleHint,
+                  hintStyle: base.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w700, color: ink.withValues(alpha: 0.35)),
+                  filled: false,
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                ),
                 textInputAction: TextInputAction.next,
                 // A memo that has not been written yet opens ready to be written in — the
                 // keyboard used to need a tap of its own before a new note could be started.
@@ -573,6 +590,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                                         // The hint is also the only place the app says what
                                         // ``` does, so it has room to say it.
                                         hintMaxLines: 3,
+                                        filled: false,
                                         border: InputBorder.none,
                                       ),
                                       maxLines: null,

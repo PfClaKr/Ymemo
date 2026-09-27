@@ -1017,6 +1017,18 @@ class FfiStrings {
   final String history;
   final String historyEmpty;
   final String photoRemoved;
+
+  /// Relative times as templates, `{n}`/`{month}`/`{day}`/`{year}` left in for Dart to
+  /// fill — the desktop's own phrasing, so the two lists say "3시간 전" the same way.
+  final String timeNow;
+  final String timeMinutes;
+  final String timeHours;
+  final String timeYesterday;
+  final String timeDate;
+  final String timeDateYear;
+  final String reorder;
+  final String reorderDone;
+  final String firstMemo;
   final String showPassword;
   final String hidePassword;
   final String clearSearch;
@@ -1189,6 +1201,15 @@ class FfiStrings {
     required this.history,
     required this.historyEmpty,
     required this.photoRemoved,
+    required this.timeNow,
+    required this.timeMinutes,
+    required this.timeHours,
+    required this.timeYesterday,
+    required this.timeDate,
+    required this.timeDateYear,
+    required this.reorder,
+    required this.reorderDone,
+    required this.firstMemo,
     required this.showPassword,
     required this.hidePassword,
     required this.clearSearch,
@@ -1361,6 +1382,15 @@ class FfiStrings {
       history.hashCode ^
       historyEmpty.hashCode ^
       photoRemoved.hashCode ^
+      timeNow.hashCode ^
+      timeMinutes.hashCode ^
+      timeHours.hashCode ^
+      timeYesterday.hashCode ^
+      timeDate.hashCode ^
+      timeDateYear.hashCode ^
+      reorder.hashCode ^
+      reorderDone.hashCode ^
+      firstMemo.hashCode ^
       showPassword.hashCode ^
       hidePassword.hashCode ^
       clearSearch.hashCode ^
@@ -1535,6 +1565,15 @@ class FfiStrings {
           history == other.history &&
           historyEmpty == other.historyEmpty &&
           photoRemoved == other.photoRemoved &&
+          timeNow == other.timeNow &&
+          timeMinutes == other.timeMinutes &&
+          timeHours == other.timeHours &&
+          timeYesterday == other.timeYesterday &&
+          timeDate == other.timeDate &&
+          timeDateYear == other.timeDateYear &&
+          reorder == other.reorder &&
+          reorderDone == other.reorderDone &&
+          firstMemo == other.firstMemo &&
           showPassword == other.showPassword &&
           hidePassword == other.hidePassword &&
           clearSearch == other.clearSearch &&

@@ -48,3 +48,16 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # The app's mark, as packaging/gen_icons.py renders it (copied from packaging/assets).
+  assets:
+    - assets/logo.png
+  # Pretendard (SIL OFL, assets/fonts/OFL.txt), the face the desktop app uses too, so the
+  # two read as one product rather than as whatever each system falls back to for Korean.
+  fonts:
+    - family: Pretendard
+      fonts:
+        - asset: assets/fonts/Pretendard-Regular.otf
+        - asset: assets/fonts/Pretendard-SemiBold.otf
+          weight: 600
+        - asset: assets/fonts/Pretendard-Bold.otf
+          weight: 700

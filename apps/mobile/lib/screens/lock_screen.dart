@@ -571,15 +571,28 @@ class _Wordmark extends StatelessWidget {
   /// first time it said "locked" about nothing, the same thing the desktop's title said.
   final bool locked;
 
+  /// The app's mark over its name: the first thing on the first screen, where a name in
+  /// plain text looked like a placeholder for a logo that was never put in.
   @override
-  Widget build(BuildContext context) => Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+  Widget build(BuildContext context) => Column(
         children: [
-          const Text('Ymemo', style: TextStyle(fontSize: 24)),
-          if (locked) ...[
-            const SizedBox(width: 8),
-            const Icon(Icons.lock_outline, size: 22),
-          ],
+          Image.asset('assets/logo.png', width: 88, height: 88),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text('Ymemo',
+                  style: Theme.of(context)
+                      .textTheme
+                      .headlineSmall
+                      ?.copyWith(fontWeight: FontWeight.w700)),
+              if (locked) ...[
+                const SizedBox(width: 8),
+                Icon(Icons.lock_outline,
+                    size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ],
+            ],
+          ),
         ],
       );
 }
