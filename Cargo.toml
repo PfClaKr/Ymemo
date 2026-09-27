@@ -79,6 +79,8 @@ windows-sys = { version = "0.61", features = [
     # WS_EX_TOOLWINDOW on the sticky windows: the shell's own "not an application", and the
     # only way to keep it from handing one a taskbar button in the first place.
     "Win32_UI_WindowsAndMessaging",
+    # The title bar's colour on the dark windows (DWMWA_CAPTION_COLOR). See window/windows_impl.rs.
+    "Win32_Graphics_Dwm",
 ] }
 
 # Flutter binding runtime. The runtime, the codegen CLI and the Dart package must all be

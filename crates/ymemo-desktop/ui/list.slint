@@ -693,6 +693,18 @@ export component ListWindow inherits Window {
             spacing: 6px;
             padding-left: 12px;
             padding-right: 12px;
+            // The app's mark and the one thing to do next, as the phone's empty list has:
+            // what someone opening Ymemo for the first time sees.
+            if root.query == "": HorizontalLayout {
+                alignment: center;
+                Image {
+                    source: @image-url("../../../packaging/assets/ymemo-128.png");
+                    width: 72px;
+                    height: 72px;
+                    opacity: 0.9;
+                }
+            }
+            if root.query == "": Rectangle { height: 6px; }
             Text {
                 text: root.query == "" ? Strings.ui_list_empty : Strings.ui_list_search_none;
                 horizontal-alignment: center;
@@ -708,6 +720,15 @@ export component ListWindow inherits Window {
                 font-size: 11px;
                 color: #8f887a;
                 wrap: word-wrap;
+            }
+            if root.query == "": HorizontalLayout {
+                alignment: center;
+                padding-top: 8px;
+                Button {
+                    text: Strings.ui_list_first_memo;
+                    primary: true;
+                    clicked => { root.commit-edit(); root.new-memo(); }
+                }
             }
         }
 
@@ -730,8 +751,19 @@ export component ListWindow inherits Window {
                     }
                 }
             }
-            for row[idx] in root.rows: Rectangle {
+            for row[idx] in root.rows: row-box := Rectangle {
                 height: root.row-h;
+                // Whether the memo's preview gets the rest of the line. Not when the title
+                // alone is most of it: squeezed, the preview is a lone "…", and the layout
+                // shrinks the title to its ellipsis first to make room for it. Measured here,
+                // at the row, because both the title and the preview sit in `if`s of their
+                // own and neither can see into the other.
+                property <bool> preview-fits: title-measure.preferred-width <= self.width * 0.62;
+                title-measure := Text {
+                    visible: false;
+                    text: row.title;
+                    font-size: 14px;
+                }
                 border-radius: 6px;
                 // The dragged row dims, a folder about to swallow it highlights.
                 opacity: root.drag-source == idx ? 0.45 : 1;
@@ -971,11 +1003,14 @@ export component ListWindow inherits Window {
                         overflow: elide;
                         // A memo's title shares the line with its preview, which takes the
                         // slack; a folder's name has the line to itself.
-                        horizontal-stretch: row.preview == "" ? 1 : 0;
+                        horizontal-stretch: row.preview == "" || !row-box.preview-fits ? 1 : 0;
                     }
                     // What the memo goes on to say, after its title, in the quiet colour —
                     // one line of it, so a list of titles tells two similar notes apart.
-                    if root.coloring-id != row.id && root.editing-id != row.id && row.preview != "": Text {
+                    // Nothing, rather than a lone "…", when the title needs the line: see
+                    // `preview-fits` on the row.
+                    if root.coloring-id != row.id && root.editing-id != row.id && row.preview != ""
+                        && row-box.preview-fits: Text {
                         text: "  " + row.preview;
                         font-size: 12px;
                         color: #8d8778;

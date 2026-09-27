@@ -220,6 +220,23 @@ pub(crate) fn close_sticky(stickies: &Stickies, id: &str) {
 /// Local time, not UTC: the stamp exists to answer "when did I write this", and an offset
 /// answer is worse than none. The layout is the same in both languages, so it needs no
 /// catalog entry.
+/// When a note was made, as its corner says it: the time if it was today, the day if it was
+/// this year, the full date otherwise — the list's phrasing (`msg.time_date*`), fixed rather
+/// than relative, because a note stays open for days and "5분 전" would go on saying so.
+pub(crate) fn note_date(millis: i64) -> String {
+    use chrono::{Datelike, Local, TimeZone};
+    let Some(t) = Local.timestamp_millis_opt(millis).single() else { return String::new() };
+    let now = Local::now();
+    if t.date_naive() == now.date_naive() {
+        t.format("%H:%M").to_string()
+    } else if t.year() == now.year() {
+        t!("msg.time_date", month = t.month(), day = t.day())
+    } else {
+        t!("msg.time_date_year", year = t.year(), month = t.month(), day = t.day())
+    }
+}
+
+/// A full timestamp, `YYYY-MM-DD HH:MM`: the history window's revisions.
 pub(crate) fn format_created_at(millis: i64) -> String {
     use chrono::{Local, TimeZone};
     match Local.timestamp_millis_opt(millis) {
@@ -262,7 +279,7 @@ fn build_window(ctx: &Ctx, memo: &Memo) -> Result<StickyWindow> {
     window.set_sticky_opacity(memo.opacity as f32);
     window.set_pinned(ctx.settings.borrow().memo_pinned(&memo.id));
     window.set_text_scale(text_scale(ctx));
-    window.set_created_at(SharedString::from(format_created_at(memo.created_at)));
+    window.set_created_at(SharedString::from(note_date(memo.created_at)));
     if let Some(v) = ctx.vault_ref() {
         set_photo_models(&window, split_photo_rows(&v, &memo.id));
     }

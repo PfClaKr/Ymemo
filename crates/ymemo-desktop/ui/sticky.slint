@@ -773,7 +773,14 @@ export component StickyWindow inherits Window {
                         font-size: 11px;
                         font-weight: root.tip-showing ? 400 : 700;
                         color: Palette.ink(root.sticky-color);
-                        opacity: root.tip-showing ? 0.75 : 1;
+                        // At rest the bar is a strip of colour: the title is the note's first
+                        // line, which is right there under it, and reading it twice is what
+                        // made a desk of notes look like a column of forms. It comes back
+                        // with the buttons, and stays when the note is folded (the bar is all
+                        // there is then) or has nothing written to show instead.
+                        opacity: root.tip-showing ? 0.75
+                            : root.chrome || root.collapsed || root.memo-text == "" ? 1 : 0;
+                        animate opacity { duration: 140ms; easing: ease-out; }
                         vertical-alignment: center;
                         overflow: elide;
                         horizontal-stretch: 1;
@@ -1144,10 +1151,10 @@ export component StickyWindow inherits Window {
                             text: root.created-at;
                             font-size: 9px;
                             color: Palette.ink(root.sticky-color);
-                            // Fades out of the way while the note is being written in, and
-                            // comes back once the caret leaves. On a sticky this small it is
-                            // the corner the last line wants.
-                            opacity: body.has-focus ? 0.0 : 0.5;
+                            // Only while the note is in use, like the bar's buttons, and out of
+                            // the way while it is being written in: on a sticky this small it
+                            // is the corner the last line wants.
+                            opacity: body.has-focus || !root.chrome ? 0.0 : 0.5;
                             animate opacity { duration: 150ms; }
                             x: parent.width - self.width - 7px;
                             y: parent.height - self.height - 3px;

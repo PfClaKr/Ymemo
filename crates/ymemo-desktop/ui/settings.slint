@@ -63,9 +63,11 @@ export component SettingsWindow inherits Window {
     // window, and a disabled primary button drawn darker than an enabled one beside it.
     init => { StdPalette.color-scheme = ColorScheme.dark; }
     title: Strings.ui_settings_window_title;
-    preferred-width: 400px;
+    preferred-width: 420px;
     preferred-height: 600px;
-    min-width: 340px;
+    // The window opens at its layout's width, and that settled on the minimum: at 340px
+    // every hint wrapped each few words into a column. 400 is where they read as sentences.
+    min-width: 400px;
     // A Window whose root is a layout is sized by that layout, not by `preferred-height`,
     // so this is what the window actually opens at. Everything above the buttons scrolls,
     // so it is a comfortable height rather than a required one.

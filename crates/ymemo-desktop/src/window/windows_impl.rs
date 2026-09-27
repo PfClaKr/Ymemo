@@ -56,3 +56,22 @@ pub(super) fn tool_window(window: &Window) {
         }
     }
 }
+
+/// Colours a window's title bar (Windows 11; ignored by Windows 10, which keeps the dark bar
+/// winit's theme gave it). See [`super::dark_title_bar`].
+pub(super) fn caption_color(window: &Window, (r, g, b): (u8, u8, u8)) {
+    use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_CAPTION_COLOR};
+    let Some(hwnd) = hwnd(window) else { return };
+    // COLORREF is 0x00BBGGRR.
+    let color: u32 = u32::from(r) | (u32::from(g) << 8) | (u32::from(b) << 16);
+    // SAFETY: the handle comes from the winit window we are holding, live for the call, and
+    // the attribute is a 4-byte COLORREF read from a local that outlives it.
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CAPTION_COLOR as u32,
+            &color as *const u32 as *const core::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+    }
+}
