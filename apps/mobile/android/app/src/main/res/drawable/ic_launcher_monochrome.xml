@@ -1,18 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Themed-icon layer (Android 13+): the same sticky note as one silhouette, since the
-     system recolors whatever is here with the user's wallpaper colors and keeps only the
-     alpha. The writing is *knocked out* of the paper rather than drawn on it — with one
-     colour to work with, holes are the only way to keep the lines visible. -->
+<!-- Android 13's themed icon: the launcher tints this one colour, so only the silhouette
+     speaks. The same two notes as ic_launcher_foreground.xml; the writing and the peel are
+     cut out of the front note (even-odd), and the front note is cut out of the one behind by
+     drawing it over a gap, so the two sheets still read as two. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillType="evenOdd"
-        android:fillColor="#000000"
-        android:pathData="M40,32 L63,32 L76,45 L76,68 A8,8 0 0 1 68,76 L40,76 A8,8 0 0 1 32,68 L32,40 A8,8 0 0 1 40,32 Z
-                          M40.75,50 L61.25,50 A2.75,2.75 0 0 1 61.25,55.5 L40.75,55.5 A2.75,2.75 0 0 1 40.75,50 Z
-                          M40.75,58.5 L67.25,58.5 A2.75,2.75 0 0 1 67.25,64 L40.75,64 A2.75,2.75 0 0 1 40.75,58.5 Z
-                          M40.75,67 L52.25,67 A2.75,2.75 0 0 1 52.25,72.5 L40.75,72.5 A2.75,2.75 0 0 1 40.75,67 Z" />
+
+    <group
+        android:translateX="18"
+        android:translateY="18"
+        android:scaleX="0.0703125"
+        android:scaleY="0.0703125">
+
+        <group android:rotation="10" android:pivotX="550" android:pivotY="470">
+            <path
+                android:pathData="M370,170 L730,170 A120,120 0 0 1 850,290 L850,650 A120,120 0 0 1 730,770 L370,770 A120,120 0 0 1 250,650 L250,290 A120,120 0 0 1 370,170 Z"
+                android:fillColor="#000000"
+                android:fillAlpha="0.55" />
+        </group>
+
+        <path
+            android:fillType="evenOdd"
+            android:pathData="M290,290 L650,290 A120,120 0 0 1 770,410 L770,700 L580,890 L290,890 A120,120 0 0 1 170,770 L170,410 A120,120 0 0 1 290,290 Z M290,448 L640,448 A32,32 0 0 1 640,512 L290,512 A32,32 0 0 1 290,448 Z M290,568 L580,568 A32,32 0 0 1 580,632 L290,632 A32,32 0 0 1 290,568 Z"
+            android:fillColor="#000000" />
+    </group>
 </vector>

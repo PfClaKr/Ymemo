@@ -44,30 +44,29 @@ def bar(d, x, y, w, h, color, radius=None):
 def note_glyph(d, x, y, size, body=PAPER, edge=ACCENT):
     """The app's note, small enough to stand in for the icon.
 
-    The same square sheet with a lifted top-right corner the launcher icon draws (see
-    `packaging/gen_icons.py`), as an outline: this one sits among the widget's line icons.
+    The same square sheet with its bottom-right corner peeled up that the launcher icon
+    draws (see `packaging/gen_icons.py`), as an outline: this one sits among the widget's
+    line icons.
     """
     u = size / 24.0
     fold = 5.5 * u
     page = [
         (x + 4 * u, y + 4 * u),
-        (x + 20 * u - fold, y + 4 * u),
-        (x + 20 * u, y + 4 * u + fold),
-        (x + 20 * u, y + 20 * u),
+        (x + 20 * u, y + 4 * u),
+        (x + 20 * u, y + 20 * u - fold),
+        (x + 20 * u - fold, y + 20 * u),
         (x + 4 * u, y + 20 * u),
     ]
-    d.polygon([(px * SS, py * SS) for px, py in page], fill=body, outline=edge,
-              width=max(1, round(1.3 * u * SS)))
-    # The two straight sides of the lifted corner.
-    d.line([((x + 20 * u - fold) * SS, (y + 4 * u) * SS),
-            ((x + 20 * u - fold) * SS, (y + 4 * u + fold) * SS),
-            ((x + 20 * u) * SS, (y + 4 * u + fold) * SS)],
-           fill=edge, width=max(1, round(1.3 * u * SS)))
-    for i, right in enumerate((14, 16.5, 12)):
-        ly = y + (12.5 + i * 2.8) * u
+    w = max(1, round(1.3 * u * SS))
+    d.polygon([(px * SS, py * SS) for px, py in page], fill=body, outline=edge, width=w)
+    # The two straight sides of the peeled corner.
+    d.line([((x + 20 * u) * SS, (y + 20 * u - fold) * SS),
+            ((x + 20 * u - fold) * SS, (y + 20 * u - fold) * SS),
+            ((x + 20 * u - fold) * SS, (y + 20 * u) * SS)], fill=edge, width=w)
+    for i, right in enumerate((15.5, 13)):
+        ly = y + (9 + i * 3.5) * u
         d.line([((x + 7.5 * u) * SS, ly * SS), ((x + right * u) * SS, ly * SS)],
                fill=edge, width=max(1, round(1.2 * u * SS)))
-
 
 def pencil_glyph(d, x, y, size):
     """A pencil, nib pointing down-left, as on the widget's edit button."""

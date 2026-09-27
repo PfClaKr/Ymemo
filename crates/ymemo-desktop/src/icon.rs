@@ -1,141 +1,38 @@
-//! App and tray icons, drawn pixel by pixel: no decoder dependency and no file that has to
-//! sit next to the executable.
+//! App and tray icons: two sticky notes, gold in front and blue behind.
 //!
-//! The picture is the same one every other platform shows — a sticky note on the app's gold,
-//! one corner lifted — and the geometry below is the same 108-unit viewport
-//! `packaging/gen_icons.py` draws, so the tray, the taskbar, the `.desktop` entry, the
-//! Windows `.ico` and the Android launcher are one icon. **Change one, change all three:**
-//! this file, that script, and `apps/mobile/.../res/drawable/ic_launcher_foreground.xml`
-//! (plus its monochrome twin).
+//! The pictures are the ones `packaging/gen_icons.py` renders into `packaging/assets/`,
+//! **embedded** in the binary rather than drawn here. The icon used to be drawn pixel by pixel
+//! in this file, a third copy of the geometry beside the script and the Android vector that
+//! had to be kept in step by hand; the notes are turned and their corner peeled, and one
+//! renderer for all of it is the only way the tray, the taskbar, the `.desktop` entry, the
+//! `.ico` and the launcher stay one icon. Change the picture in the script (and the Android
+//! vector it names), run it, and this follows.
 //!
-//! Flat, and with no outline at all. This is the size the icon is judged at — 22px in a tray
-//! — and a stroke there is under a pixel: the old outlined note washed out into a smudge on
-//! gold. What carries it now is the silhouette and the contrast of white paper on a
-//! saturated badge.
-//!
-//! The one difference is framing. Android hands its icon to a launcher that will mask it, so
-//! the note there sits small and centred; nothing masks a tray or taskbar icon, so here the
-//! note fills the badge — [`NOTE_SCALE`], the same factor the script's desktop pass uses.
+//! Each size is the script's own rendering of that size, not a scale of another: at 22px in
+//! a tray every pixel of the peel and the writing was placed for that size.
 
 use i_slint_backend_winit::WinitWindowAccessor;
 
+const ICON_22: &[u8] = include_bytes!("../../../packaging/assets/ymemo-22.png");
+const ICON_64: &[u8] = include_bytes!("../../../packaging/assets/ymemo-64.png");
+
 /// The 22x22 tray icon as (rgba, width, height); the backend converts as needed.
 pub(crate) fn tray_icon_rgba() -> (Vec<u8>, u32, u32) {
-    note_icon_rgba(22)
+    decode(ICON_22)
 }
 
-const GOLD: [u8; 3] = [0xE2, 0xC2, 0x2A]; // the badge
-const PAPER: [u8; 3] = [0xFF, 0xFD, 0xF5]; // the note
-const INK: [u8; 3] = [0x5C, 0x50, 0x10]; // the writing
-const UNDER: [u8; 3] = [0xBA, 0x9E, 0x1E]; // the underside of the lifted corner
-
-/// How much bigger the note is drawn than in the Android viewport, where a launcher mask
-/// keeps it small.
-const NOTE_SCALE: f32 = 1.30;
-
-/// The paper, in viewport units: a square, and the radius of its three intact corners.
-const PAGE: (f32, f32, f32, f32) = (32.0, 32.0, 76.0, 76.0);
-const PAGE_R: f32 = 8.0;
-/// The legs of the corner the fold takes off the top right.
-const FOLD: f32 = 13.0;
-/// The lines of writing: left edge, top, right edge — and how thick they are.
-const RULES: [(f32, f32, f32); 3] = [(38.0, 50.0, 64.0), (38.0, 58.5, 70.0), (38.0, 67.0, 55.0)];
-const RULE_H: f32 = 5.5;
-
-/// Subpixel samples per axis. The fold's diagonal and the rounded corners are unreadable
-/// without them at 22px, which is the size that matters most.
-const SS: usize = 4;
-
-/// Draws the icon at `size`x`size` in RGBA (straight, not premultiplied).
-///
-/// Only the size varies, so the tray (22px) and window (64px) icons are the same picture.
-pub(crate) fn note_icon_rgba(size: usize) -> (Vec<u8>, u32, u32) {
-    let mut data = vec![0u8; size * size * 4]; // RGBA, transparent
-    let unit = size as f32 / 108.0; // one viewport unit in pixels
-    let samples = (SS * SS) as f32;
-    for y in 0..size {
-        for x in 0..size {
-            let (mut sum, mut covered) = ([0f32; 3], 0f32);
-            for sy in 0..SS {
-                for sx in 0..SS {
-                    let px = (x as f32 + (sx as f32 + 0.5) / SS as f32) / unit;
-                    let py = (y as f32 + (sy as f32 + 0.5) / SS as f32) / unit;
-                    if let Some(c) = sample(px, py) {
-                        for i in 0..3 {
-                            sum[i] += c[i] as f32;
-                        }
-                        covered += 1.0;
-                    }
-                }
-            }
-            if covered == 0.0 {
-                continue; // outside the badge's rounded corner
-            }
-            // Averaged over the covered samples only, so an edge pixel keeps its own colour
-            // and carries the coverage in alpha instead of fading towards black.
-            let i = (y * size + x) * 4;
-            for c in 0..3 {
-                data[i + c] = (sum[c] / covered).round() as u8;
-            }
-            data[i + 3] = (255.0 * covered / samples).round() as u8;
+/// Straight (not premultiplied) RGBA, which is what both winit and the tray backends take.
+fn decode(png: &[u8]) -> (Vec<u8>, u32, u32) {
+    match image::load_from_memory_with_format(png, image::ImageFormat::Png) {
+        Ok(img) => {
+            let rgba = img.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            (rgba.into_raw(), w, h)
         }
+        // Built in, so this cannot fail on a build that got this far; a blank icon beats a
+        // panic in the one code path every window goes through.
+        Err(_) => (vec![0; 4], 1, 1),
     }
-    (data, size as u32, size as u32)
-}
-
-/// The colour at one point of the 108-unit viewport, or `None` outside the badge.
-fn sample(x: f32, y: f32) -> Option<[u8; 3]> {
-    if !rounded_rect(x, y, 0.0, 0.0, 108.0, 108.0, 22.0) {
-        return None;
-    }
-    // Back into the note's own coordinates, so every constant below is the one the vector
-    // and the Python use; scaling the sample point beats scaling every shape.
-    let nx = 54.0 + (x - 54.0) / NOTE_SCALE;
-    let ny = 54.0 + (y - 54.0) / NOTE_SCALE;
-
-    let (x0, y0, x1, y1) = PAGE;
-    // The paper, with its top-right corner taken off by the fold. The fold's diagonal runs
-    // through (x1 - FOLD, y0) and (x1, y0 + FOLD) at 45 degrees, so it is the line
-    // nx - ny = x1 - FOLD - y0, and the corner is everything past it.
-    let cut = x1 - FOLD - y0;
-    if !rounded_rect(nx, ny, x0, y0, x1, y1, PAGE_R) || nx - ny > cut {
-        return Some(GOLD);
-    }
-    // The lifted corner is the square the diagonal cuts across, below the diagonal itself.
-    if nx >= x1 - FOLD && ny <= y0 + FOLD {
-        return Some(UNDER);
-    }
-    for (left, top, right) in RULES {
-        let r = RULE_H / 2.0;
-        if capsule(nx, ny, left + r, top + r, right - r, top + r, r) {
-            return Some(INK);
-        }
-    }
-    Some(PAPER)
-}
-
-/// Whether the point is inside the rounded rectangle `(x0,y0)-(x1,y1)` with radius `r`.
-fn rounded_rect(px: f32, py: f32, x0: f32, y0: f32, x1: f32, y1: f32, r: f32) -> bool {
-    if px < x0 || px > x1 || py < y0 || py > y1 {
-        return false;
-    }
-    // Nearest point of the inner rectangle the corner circles are centred on: inside it the
-    // distance is zero, and only in the corners does it become a circle test.
-    let cx = px.clamp(x0 + r, x1 - r);
-    let cy = py.clamp(y0 + r, y1 - r);
-    (px - cx).powi(2) + (py - cy).powi(2) <= r * r
-}
-
-/// Whether the point is within `r` of the segment `(ax,ay)-(bx,by)`: a line with round caps.
-fn capsule(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32, r: f32) -> bool {
-    let (dx, dy) = (bx - ax, by - ay);
-    let len2 = dx * dx + dy * dy;
-    let t = if len2 == 0.0 {
-        0.0
-    } else {
-        (((px - ax) * dx + (py - ay) * dy) / len2).clamp(0.0, 1.0)
-    };
-    (px - (ax + t * dx)).powi(2) + (py - (ay + t * dy)).powi(2) <= r * r
 }
 
 /// Sets the app icon on a winit window (X11 `_NET_WM_ICON`, Windows window icon), which
@@ -143,7 +40,7 @@ fn capsule(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32, r: f32) -> bool
 /// and is silently ignored otherwise — native Wayland has no window-icon protocol, the same
 /// limitation as snapping.
 pub(crate) fn set_window_icon(win: &slint::Window) {
-    let (rgba, w, h) = note_icon_rgba(64);
+    let (rgba, w, h) = decode(ICON_64);
     let Ok(icon) = i_slint_backend_winit::winit::window::Icon::from_rgba(rgba, w, h) else {
         return;
     };
@@ -155,37 +52,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn note_icon_buffer_is_well_formed() {
-        // winit::Icon::from_rgba requires len == 4*w*h at every size.
-        for size in [16usize, 22, 32, 64] {
-            let (rgba, w, h) = note_icon_rgba(size);
-            assert_eq!(w, size as u32);
-            assert_eq!(h, size as u32);
-            assert_eq!(rgba.len(), size * size * 4);
-            // The badge is there at every size...
-            let opaque = |c: [u8; 3]| [c[0], c[1], c[2], 0xff];
-            assert!(
-                rgba.chunks(4).any(|p| p == opaque(GOLD)),
-                "no background at {size}px"
-            );
-            // ...and so is the note, which is what a blank icon would be missing.
-            assert!(
-                rgba.chunks(4).any(|p| p == opaque(PAPER)),
-                "no note at {size}px"
-            );
-        }
-    }
-
-    #[test]
-    fn note_icon_corners_are_transparent() {
-        // The badge is a rounded square, so the very corner is outside it. A fully opaque
-        // corner would mean the rounding was lost and the icon is a hard square.
-        let (rgba, size, _) = note_icon_rgba(64);
-        let size = size as usize;
-        for (x, y) in [(0, 0), (size - 1, 0), (0, size - 1), (size - 1, size - 1)] {
-            assert_eq!(rgba[(y * size + x) * 4 + 3], 0, "corner ({x},{y}) is opaque");
+    fn the_embedded_icons_decode_to_what_winit_takes() {
+        // winit::Icon::from_rgba requires len == 4*w*h.
+        for (png, size) in [(ICON_22, 22u32), (ICON_64, 64)] {
+            let (rgba, w, h) = decode(png);
+            assert_eq!((w, h), (size, size));
+            assert_eq!(rgba.len(), (size * size * 4) as usize);
+            // Both notes are there: some gold and some blue, which a blank or a wrong file
+            // would be missing.
+            let has = |f: fn(&[u8]) -> bool| rgba.chunks(4).any(|p| p[3] > 200 && f(p));
+            assert!(has(|p| p[0] > 200 && p[1] > 160 && p[2] < 140), "no gold at {size}px");
+            assert!(has(|p| p[2] > 200 && p[0] < 120), "no blue at {size}px");
+            // And it stands on nothing: the corner is transparent.
+            assert_eq!(rgba[3], 0, "corner is opaque at {size}px");
         }
     }
 }
-
-
