@@ -21,8 +21,10 @@ SystemUiOverlayStyle overlayFor(Brightness brightness) => SystemUiOverlayStyle(
       statusBarBrightness: brightness,
     );
 
-ThemeData ymemoTheme(Brightness brightness) => ThemeData(
-      colorScheme: ColorScheme.fromSeed(seedColor: _seed, brightness: brightness),
+ThemeData ymemoTheme(Brightness brightness) {
+  final scheme = ColorScheme.fromSeed(seedColor: _seed, brightness: brightness);
+  return ThemeData(
+      colorScheme: scheme,
       useMaterial3: true,
       fontFamily: 'Pretendard',
       // Rounded, filled fields with no outline — the search box and the dialogs' inputs —
@@ -34,8 +36,18 @@ ThemeData ymemoTheme(Brightness brightness) => ThemeData(
           borderSide: BorderSide.none,
         ),
       ),
-      appBarTheme: AppBarTheme(systemOverlayStyle: overlayFor(brightness)),
+      appBarTheme: AppBarTheme(
+        systemOverlayStyle: overlayFor(brightness),
+        // No change of colour when the list scrolls under the bar. Material 3 swaps the bar
+        // to a darker container colour (and a tint) the moment content passes beneath it,
+        // which read as the header turning a different colour halfway down the memos. The
+        // background is pinned to the page's own, in both states.
+        backgroundColor: scheme.surface,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+      ),
     );
+}
 
 /// A note's own screens: always the light theme, whatever the phone is set to.
 ///
