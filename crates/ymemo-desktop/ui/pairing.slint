@@ -40,6 +40,12 @@ export component PairingPanel inherits VerticalLayout {
 
     // Active tab: false is same Wi-Fi (6 digits), true is another network (QR, device id).
     private property <bool> remote: false;
+    // The device whose removal is waiting for a second click; empty when none is. A removal
+    // is written into the synced document and only a fresh pairing undoes it, so one stray
+    // click must not be enough.
+    private property <string> confirm-id;
+    // Whether the pairing code was just put on the clipboard.
+    private property <bool> copied: false;
 
     spacing: 8px;
 
@@ -104,10 +110,18 @@ export component PairingPanel inherits VerticalLayout {
                 lan := LineEdit {
                     placeholder-text: Strings.ui_pair_lan_placeholder;
                     input-type: InputType.number;
-                    accepted => { root.lan-join(self.text); self.text = ""; }
+                    // Six digits or nothing: anything else only failed after the whole
+                    // network wait, with nothing on screen saying why.
+                    accepted => {
+                        if (self.text.character-count == 6) {
+                            root.lan-join(self.text);
+                            self.text = "";
+                        }
+                    }
                 }
                 Button {
                     text: Strings.ui_pair_lan_connect;
+                    enabled: lan.text.character-count == 6;
                     clicked => { root.lan-join(lan.text); lan.text = ""; }
                 }
             }
@@ -135,12 +149,29 @@ export component PairingPanel inherits VerticalLayout {
                 height: 120px;
                 image-rendering: pixelated;
             }
-            Text {
-                text: root.my-code;
-                font-size: 9px;
-                color: root.ink;
-                opacity: 0.75;
-                wrap: char-wrap;
+            // A read-only field rather than a Text, so the code can be selected — and the
+            // button copies it whole, since it is only useful pasted somewhere else.
+            HorizontalLayout {
+                spacing: 6px;
+                code := TextInput {
+                    text: root.my-code;
+                    read-only: true;
+                    single-line: false;
+                    font-size: 9px;
+                    color: root.ink;
+                    opacity: 0.75;
+                    wrap: char-wrap;
+                    horizontal-stretch: 1;
+                }
+                Button {
+                    text: root.copied ? Strings.ui_pair_copied : Strings.ui_pair_copy;
+                    clicked => {
+                        code.select-all();
+                        code.copy();
+                        code.clear-selection();
+                        root.copied = true;
+                    }
+                }
             }
             HorizontalLayout {
                 spacing: 6px;
@@ -209,31 +240,52 @@ export component PairingPanel inherits VerticalLayout {
             color: root.ink;
             opacity: 0.7;
         }
-        for dev in root.devices: HorizontalLayout {
-            spacing: 6px;
-            // Connection dot: filled while the device is reachable, an outline while it is
-            // not. A shape rather than ●/○, so it cannot depend on the font the platform
-            // happens to fall back to.
-            Rectangle {
-                width: 9px;
-                height: 9px;
-                y: (parent.height - self.height) / 2;
-                border-radius: 5px;
-                background: dev.connected ? #6fae6f : #0000;
-                border-width: dev.connected ? 0px : 1.5px;
-                border-color: root.ink;
+        for dev in root.devices: VerticalLayout {
+            spacing: 4px;
+            HorizontalLayout {
+                spacing: 6px;
+                // Connection dot: filled while the device is reachable, an outline while it
+                // is not. A shape rather than ●/○, so it cannot depend on the font the
+                // platform happens to fall back to.
+                Rectangle {
+                    width: 9px;
+                    height: 9px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 5px;
+                    background: dev.connected ? #6fae6f : #0000;
+                    border-width: dev.connected ? 0px : 1.5px;
+                    border-color: root.ink;
+                }
+                Text {
+                    text: dev.name;
+                    font-size: 11px;
+                    color: root.ink;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                if root.can-unshare && root.confirm-id != dev.id: Button {
+                    text: Strings.ui_pair_unshare;
+                    clicked => { root.confirm-id = dev.id; }
+                }
+                if root.can-unshare && root.confirm-id == dev.id: Button {
+                    text: Strings.ui_pair_unshare_cancel;
+                    clicked => { root.confirm-id = ""; }
+                }
+                if root.can-unshare && root.confirm-id == dev.id: Button {
+                    text: Strings.ui_pair_unshare;
+                    primary: true;
+                    clicked => {
+                        root.confirm-id = "";
+                        root.unshare(dev.id);
+                    }
+                }
             }
-            Text {
-                text: dev.name;
-                font-size: 11px;
-                color: root.ink;
-                overflow: elide;
-                horizontal-stretch: 1;
-                vertical-alignment: center;
-            }
-            if root.can-unshare: Button {
-                text: Strings.ui_pair_unshare;
-                clicked => { root.unshare(dev.id); }
+            if root.confirm-id == dev.id: Text {
+                text: Strings.ui_pair_unshare_warning;
+                font-size: 10px;
+                color: #d98a8a;
+                wrap: word-wrap;
             }
         }
     }

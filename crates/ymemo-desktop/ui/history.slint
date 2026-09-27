@@ -63,6 +63,30 @@ export component HistoryWindow inherits Window {
                 root.close-requested();
                 return accept;
             }
+            // Up/Down step through the versions and Return puts the chosen one back, the way
+            // the list window's keys work. Nothing chosen yet, either arrow starts at the top.
+            if (root.revisions.length > 0) {
+                if (ev.text == Key.DownArrow) {
+                    root.selected = min(root.selected + 1, root.revisions.length - 1);
+                    return accept;
+                }
+                if (ev.text == Key.UpArrow) {
+                    root.selected = max(root.selected - 1, 0);
+                    return accept;
+                }
+                if (ev.text == Key.Home) {
+                    root.selected = 0;
+                    return accept;
+                }
+                if (ev.text == Key.End) {
+                    root.selected = root.revisions.length - 1;
+                    return accept;
+                }
+            }
+            if (ev.text == Key.Return && root.selected >= 0 && root.current.restorable) {
+                root.restore(root.current.index);
+                return accept;
+            }
             return reject;
         }
 
@@ -92,6 +116,20 @@ export component HistoryWindow inherits Window {
                 // ---- The revisions themselves ----
                 ListView {
                     width: 235px;
+                    // Scrolls the chosen row into sight; a local mirror because this view is
+                    // inside an `if` (see the same thing in list.slint). Written only when the
+                    // row is out of view, so the wheel still belongs to the user.
+                    property <int> sel: root.selected;
+                    property <length> row-h: 52px;
+                    changed sel => {
+                        if (self.sel >= 0) {
+                            if (self.sel * self.row-h + self.row-h > -self.viewport-y + self.visible-height) {
+                                self.viewport-y = self.visible-height - (self.sel + 1) * self.row-h;
+                            } else if (self.sel * self.row-h < -self.viewport-y) {
+                                self.viewport-y = -self.sel * self.row-h;
+                            }
+                        }
+                    }
                     for row[idx] in root.revisions: Rectangle {
                         height: 52px;
                         border-radius: 6px;
@@ -100,7 +138,10 @@ export component HistoryWindow inherits Window {
                                   : transparent;
                         row-ta := TouchArea {
                             mouse-cursor: pointer;
-                            clicked => { root.selected = idx; }
+                            clicked => {
+                                root.selected = idx;
+                                keys.focus();
+                            }
                         }
                         HorizontalLayout {
                             padding: 7px;

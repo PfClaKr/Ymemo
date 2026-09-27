@@ -118,22 +118,28 @@ fn refresh(ctx: &Ctx, win: &HistoryWindow, entity: Entity, id: &str) {
     };
     let device_id = v.device_id().to_string();
     // Newest first: the version you want back is nearly always a recent one.
+    let newest = revisions.len().saturating_sub(1);
     let rows: Vec<RevisionRow> = revisions
         .iter()
         .enumerate()
         .rev()
-        .map(|(i, r)| row(i, r, entity, &device_id))
+        .map(|(i, r)| row(i, r, entity, &device_id, i == newest))
         .collect();
     win.set_revisions(ModelRc::new(VecModel::from(rows)));
 }
 
-/// One core revision as a display row.
-fn row(index: usize, rev: &Revision, entity: Entity, this_device: &str) -> RevisionRow {
-    let kind = match rev.kind {
+/// One core revision as a display row. `current` is the newest one, which is what the memo
+/// already holds: putting it back would change nothing and only add a row, so it is marked
+/// rather than offered.
+fn row(index: usize, rev: &Revision, entity: Entity, this_device: &str, current: bool) -> RevisionRow {
+    let mut kind = match rev.kind {
         RevisionKind::Created => t!("ui.history_created"),
         RevisionKind::Edited => t!("ui.history_edited"),
         RevisionKind::Deleted => t!("ui.history_deleted"),
     };
+    if current && rev.kind != RevisionKind::Deleted {
+        kind = format!("{kind} · {}", t!("ui.history_current"));
+    }
     // Field names are the document's, so they are translated for display here. `created_at`
     // is left out: it only moves when a deleted memo is brought back, and listing it beside
     // the fields the user actually changed is noise.
@@ -160,7 +166,7 @@ fn row(index: usize, rev: &Revision, entity: Entity, this_device: &str) -> Revis
         heading: SharedString::from(crate::hangul::for_slint(&heading)),
         body: SharedString::from(crate::hangul::for_slint(&body)),
         color: SharedString::from(rev.field("color")),
-        restorable: rev.kind != RevisionKind::Deleted,
+        restorable: !current && rev.kind != RevisionKind::Deleted,
     }
 }
 

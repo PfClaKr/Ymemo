@@ -109,6 +109,27 @@ pub(crate) fn request_show() {
     });
 }
 
+/// Tray "new memo": a blank note on the desk without going through the list first. While
+/// locked it brings up the lock window instead — there is no vault to write the memo into.
+pub(crate) fn request_new_memo() {
+    let _ = slint::invoke_from_event_loop(|| {
+        APP.with(|a| {
+            let borrow = a.borrow();
+            let Some(app) = borrow.as_ref() else { return };
+            touch(&app.ctx);
+            // A quiet start puts nothing on screen; being asked for is what ends it.
+            if app.ctx.quiet_start.get() {
+                crate::lock::show_desk(&app.ctx, &app.list.as_weak());
+            }
+            if !app.unlocked.get() {
+                present(&app.lock);
+                return;
+            }
+            crate::sticky::new_memo(&app.ctx);
+        });
+    });
+}
+
 /// Tray "lock": same as the list window's lock button.
 pub(crate) fn request_lock() {
     let _ = slint::invoke_from_event_loop(|| {
@@ -142,7 +163,7 @@ pub(crate) fn request_quit() {
 // ===========================================================================
 #[cfg(target_os = "linux")]
 mod imp {
-    use super::{request_lock, request_quit, request_raise_notes, request_toggle};
+    use super::{request_lock, request_new_memo, request_quit, request_raise_notes, request_toggle};
     use crate::icon::tray_icon_rgba;
     use ymemo_i18n::t;
 
@@ -191,6 +212,12 @@ mod imp {
                 StandardItem {
                     label: t!("tray.raise_notes"),
                     activate: Box::new(|_| request_raise_notes()),
+                    ..Default::default()
+                }
+                .into(),
+                StandardItem {
+                    label: t!("tray.new_memo"),
+                    activate: Box::new(|_| request_new_memo()),
                     ..Default::default()
                 }
                 .into(),
@@ -256,7 +283,7 @@ mod imp {
     use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
     use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
-    use super::{request_lock, request_quit, request_raise_notes, request_toggle};
+    use super::{request_lock, request_new_memo, request_quit, request_raise_notes, request_toggle};
     use crate::icon::tray_icon_rgba;
     use ymemo_i18n::t;
 
@@ -272,8 +299,8 @@ mod imp {
     impl TrayHandle {
         /// Rewrites the labels in the current language, in start()'s append order.
         pub fn refresh(&self) {
-            let labels = [t!("tray.raise_notes"), t!("tray.memo_list"), t!("tray.lock"),
-                          t!("tray.quit")];
+            let labels = [t!("tray.raise_notes"), t!("tray.new_memo"), t!("tray.memo_list"),
+                          t!("tray.lock"), t!("tray.quit")];
             for (item, label) in self.items.iter().zip(labels) {
                 item.set_text(label);
             }
@@ -286,12 +313,14 @@ mod imp {
     }
 
     pub fn start() -> TrayHandle {
-        // Menu: notes, list, lock, separator, quit. Events are dispatched by item id.
+        // Menu: notes, new memo, list, lock, separator, quit. Events are dispatched by item id.
         let raise_item = MenuItem::new(t!("tray.raise_notes"), true, None);
+        let new_item = MenuItem::new(t!("tray.new_memo"), true, None);
         let list_item = MenuItem::new(t!("tray.memo_list"), true, None);
         let lock_item = MenuItem::new(t!("tray.lock"), true, None);
         let quit_item = MenuItem::new(t!("tray.quit"), true, None);
         let raise_id: MenuId = raise_item.id().clone();
+        let new_id: MenuId = new_item.id().clone();
         let list_id: MenuId = list_item.id().clone();
         let lock_id: MenuId = lock_item.id().clone();
         let quit_id: MenuId = quit_item.id().clone();
@@ -300,6 +329,7 @@ mod imp {
         // append returns muda's Result (tray_icon::menu), not tray_icon::Result.
         let build_menu = || -> tray_icon::menu::Result<()> {
             menu.append(&raise_item)?;
+            menu.append(&new_item)?;
             menu.append(&list_item)?;
             menu.append(&lock_item)?;
             menu.append(&PredefinedMenuItem::separator())?;
@@ -337,6 +367,8 @@ mod imp {
             while let Ok(ev) = MenuEvent::receiver().try_recv() {
                 if ev.id == raise_id {
                     request_raise_notes();
+                } else if ev.id == new_id {
+                    request_new_memo();
                 } else if ev.id == list_id {
                     request_toggle();
                 } else if ev.id == lock_id {
@@ -361,7 +393,7 @@ mod imp {
         TrayHandle {
             _tray: tray,
             _poll: poll,
-            items: vec![raise_item, list_item, lock_item, quit_item],
+            items: vec![raise_item, new_item, list_item, lock_item, quit_item],
         }
     }
 }

@@ -1,4 +1,4 @@
-import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox } from "std-widgets.slint";
+import { LineEdit, Button, TextEdit, ListView, ScrollView, Slider, SpinBox } from "std-widgets.slint";
 import { Strings } from "@i18n";
 import { Palette, IconButton, Glyph } from "theme.slint";
 import { PairingPanel, SharedDeviceRow } from "pairing.slint";
@@ -467,23 +467,28 @@ export component ListWindow inherits Window {
             }
         }
 
-        if root.show-sync: VerticalLayout {
+        // Scrolls: the panel is taller than the window as soon as a request is waiting and a
+        // device or two is listed, and without this the rows at the bottom — the remove
+        // button and what it warns about — were cut off with no way to reach them.
+        if root.show-sync: ScrollView {
             vertical-stretch: 1;
-            PairingPanel {
-                available: root.sync-available;
-                my-code: root.my-pairing-code;
-                qr: root.qr-image;
-                message: root.peer-message;
-                lan-code: root.lan-pair-code;
-                lan-message: root.lan-message;
-                waiting-code: root.pair-waiting-code;
-                devices: root.shared-devices;
-                ink: #d8d2c2;
-                add-peer(code) => { root.add-peer(code); }
-                lan-join(code) => { root.lan-join(code); }
-                unshare(id) => { root.unshare(id); }
+            VerticalLayout {
+                alignment: start;
+                PairingPanel {
+                    available: root.sync-available;
+                    my-code: root.my-pairing-code;
+                    qr: root.qr-image;
+                    message: root.peer-message;
+                    lan-code: root.lan-pair-code;
+                    lan-message: root.lan-message;
+                    waiting-code: root.pair-waiting-code;
+                    devices: root.shared-devices;
+                    ink: #d8d2c2;
+                    add-peer(code) => { root.add-peer(code); }
+                    lan-join(code) => { root.lan-join(code); }
+                    unshare(id) => { root.unshare(id); }
+                }
             }
-            Rectangle { vertical-stretch: 1; }
         }
 
         // Find. Always on screen rather than behind a sixth toolbar button: a memo app whose

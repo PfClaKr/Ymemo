@@ -79,6 +79,7 @@ fn reset_window(ctx: &Ctx, win: &SecurityWindow) {
     win.set_recovery_code(SharedString::new());
     win.set_status(SharedString::new());
     win.set_status_is_error(false);
+    win.set_confirm_reissue(false);
     win.set_has_recovery(
         ctx.vault_ref().is_some_and(|v| v.has_recovery_code()),
     );
