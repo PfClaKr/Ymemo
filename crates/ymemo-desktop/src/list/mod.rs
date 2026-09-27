@@ -480,7 +480,12 @@ pub(crate) fn search_snippet(text: &str, needle: &str) -> Option<String> {
     }
     let at = lower.windows(want.len()).position(|w| w == want.as_slice())?;
     let end = at + want.len();
+    // Start at a word, not in one: cut mid-word the snippet read "…ons ship on Friday".
     let from = at.saturating_sub(BEFORE);
+    let from = match chars[from..at].iter().position(|c| c.is_whitespace()) {
+        Some(space) if from > 0 => from + space + 1,
+        _ => from,
+    };
     let to = (end + AFTER).min(chars.len());
     let piece = |a: usize, b: usize| escape_markdown(&chars[a..b].iter().collect::<String>());
     Some(format!(
@@ -617,6 +622,11 @@ mod tests {
         // Case does not matter, and no match is no snippet.
         assert!(search_snippet("Hello World", "world").unwrap().contains("**World**"));
         assert!(search_snippet("nothing here", "zzz").is_none());
+        // It starts on a word, not halfway into one.
+        assert_eq!(
+            search_snippet("Decisions ship on Friday", "friday").unwrap(),
+            "…ship on **Friday**"
+        );
         // Every snippet parses as the markdown Slint reads.
         assert!(slint::StyledText::from_markdown(&search_snippet(body, "hi").unwrap()).is_ok());
     }

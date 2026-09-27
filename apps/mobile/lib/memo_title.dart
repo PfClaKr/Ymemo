@@ -156,7 +156,16 @@ String revisionTime(int millis, FfiStrings s, {DateTime? now}) {
   }
   if (at < 0) return null;
   final end = at + want.length;
-  final from = at - before < 0 ? 0 : at - before;
+  // Start at a word, not in one: cut mid-word the snippet read "…ons ship on Friday".
+  var from = at - before < 0 ? 0 : at - before;
+  if (from > 0) {
+    for (var i = from; i < at; i++) {
+      if (String.fromCharCode(chars[i]).trim().isEmpty) {
+        from = i + 1;
+        break;
+      }
+    }
+  }
   final to = end + after > chars.length ? chars.length : end + after;
   String piece(int a, int b) => String.fromCharCodes(chars.sublist(a, b));
   return (

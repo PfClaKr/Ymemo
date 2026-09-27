@@ -9,6 +9,11 @@ void main() {
     expect(hit.after.startsWith('에 합니다'), isTrue);
   });
 
+  test('it starts on a word, not halfway into one', () {
+    final hit = searchSnippet('Decisions ship on Friday', 'friday')!;
+    expect(hit.before, '…ship on ');
+  });
+
   test('case does not matter, and no match is none', () {
     expect(searchSnippet('Hello World', 'world')!.match, 'World');
     expect(searchSnippet('nothing here', 'zzz'), isNull);
