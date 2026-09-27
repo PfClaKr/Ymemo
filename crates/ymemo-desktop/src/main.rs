@@ -110,6 +110,7 @@ fn main() -> Result<()> {
 
     let ctx = Ctx::new(dir.clone(), startup::load_settings(&dir, &syncthing), syncthing.clone());
     ui.list.set_rows(ModelRc::from(ctx.model.clone()));
+    ui.list.set_folder_choices(list::folder_choices());
     let unlocked = Rc::new(Cell::new(false));
 
     settings_window::apply_lang(

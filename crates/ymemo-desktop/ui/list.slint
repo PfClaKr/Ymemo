@@ -6,6 +6,12 @@ import { PairingPanel, SharedDeviceRow } from "pairing.slint";
 
 // One row of the list. Rust flattens the group tree and tags each row with a depth, since
 // Slint has no tree view and this is drawn as an indented list.
+// One destination in the right-click menu's "Move to".
+export struct FolderChoice {
+    id: string,
+    name: string,
+}
+
 export struct ListRow {
     id: string,
     title: string,
@@ -108,6 +114,10 @@ export component ListWindow inherits Window {
     // Row whose inline palette is open; empty means none.
     property <string> coloring-id: "";
     callback delete-row(string, bool);     // id, is-group
+    // Every folder, in tree order and indented, with the top level first (empty id): what the
+    // right-click menu's "Move to" offers. Kept up to date by `refresh_list`.
+    in property <[FolderChoice]> folder-choices;
+    callback move-to-folder(string, bool, string); // id, is-group, destination folder ("" = top)
     callback move-row(int, int);           // source row, drop row (out of range = top level)
     callback reorder-row(int, int);        // source row, gap to drop it in (0 = above everything)
     callback add-peer(string);
@@ -1070,6 +1080,53 @@ export component ListWindow inherits Window {
                                     : del-ta.has-hover ? 1 : 0.4;
                             }
                             clicked => { root.commit-edit(); root.delete-row(row.id, row.is-group); }
+                        }
+                    }
+                }
+                // Right-click: the row's actions in one place, and the one that otherwise took
+                // a drag — moving a memo or a folder into another folder, which with a long
+                // list or a touchpad was the fiddliest thing in the window. Last child, so it
+                // sits on top; it takes only the right button and lets everything else through
+                // to the row below.
+                ContextMenuArea {
+                    enabled: root.editing-id != row.id;
+                    Menu {
+                        if !row.is-group: MenuItem {
+                            title: Strings.ui_list_menu_open;
+                            activated => { root.commit-edit(); root.open-memo(row.id); }
+                        }
+                        if row.is-group: MenuItem {
+                            title: Strings.ui_list_tip_new_memo_here;
+                            activated => { root.commit-edit(); root.new-memo-in(row.id); }
+                        }
+                        if row.is-group: MenuItem {
+                            title: Strings.ui_list_menu_rename;
+                            activated => {
+                                root.commit-edit();
+                                root.editing-text = row.title;
+                                root.editing-id = row.id;
+                            }
+                        }
+                        Menu {
+                            title: Strings.ui_list_menu_move_to;
+                            for folder in root.folder-choices: MenuItem {
+                                title: folder.name;
+                                // Not into itself; Rust also refuses its own subtree.
+                                enabled: folder.id != row.id;
+                                activated => {
+                                    root.commit-edit();
+                                    root.move-to-folder(row.id, row.is-group, folder.id);
+                                }
+                            }
+                        }
+                        MenuItem {
+                            title: Strings.ui_sticky_history;
+                            activated => { root.commit-edit(); root.show-history(row.id, row.is-group); }
+                        }
+                        MenuSeparator {}
+                        MenuItem {
+                            title: Strings.ui_list_tip_delete;
+                            activated => { root.commit-edit(); root.delete-row(row.id, row.is-group); }
                         }
                     }
                 }

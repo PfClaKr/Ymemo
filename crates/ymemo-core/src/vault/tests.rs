@@ -1739,3 +1739,41 @@ fn rebuild_keeps_groups() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// Removing a photo hands it back, and putting it back restores it exactly — the room in the
+/// writing included, which the removal closes rather than leaving as a blank gap.
+#[test]
+fn a_removed_photo_can_be_put_back_room_and_all() {
+    let dir = temp_dir();
+    let mut v = Vault::create(&dir, b"pw", Store::open_in_memory().unwrap()).unwrap();
+    let memo = Memo::new("list", "one\ntwo\nthree\n");
+    v.upsert(&memo).unwrap();
+    let a = v.attach(&memo.id, b"pretend-jpeg", "p.jpg", "image/jpeg", 4, 3).unwrap();
+    let floating = v.attach(&memo.id, b"another", "q.jpg", "image/jpeg", 4, 3).unwrap();
+    v.place_attachment_in_writing(&a.id, 2, 3).unwrap();
+    let with_room = v.store().get(&memo.id).unwrap().unwrap().body;
+
+    let removed = v.remove_attachment(&a.id).unwrap().expect("it was there");
+    assert_eq!(removed.rows, 3);
+    assert_eq!(v.store().get(&memo.id).unwrap().unwrap().body, "one\ntwo\nthree\n", "room closed");
+    assert!(v.store().get_attachment(&a.id).unwrap().is_none());
+
+    v.restore_attachment(&removed).unwrap();
+    assert_eq!(v.store().get(&memo.id).unwrap().unwrap().body, with_room, "room reopened");
+    let back = v.store().get_attachment(&a.id).unwrap().unwrap();
+    assert_eq!(back.mode(), crate::PhotoMode::Inline);
+    assert_eq!(back.anchor_line, 2);
+    assert_eq!(back.hash, a.hash);
+
+    // A floating photo has no room: removed and back, the body never moves.
+    let removed = v.remove_attachment(&floating.id).unwrap().unwrap();
+    assert_eq!(removed.rows, 0);
+    v.restore_attachment(&removed).unwrap();
+    assert_eq!(v.store().get(&memo.id).unwrap().unwrap().body, with_room);
+    assert_eq!(v.store().get_attachment(&floating.id).unwrap().unwrap().x_permille, floating.x_permille);
+
+    // Something already gone is nothing to hand back.
+    v.detach(&floating.id).unwrap();
+    assert!(v.remove_attachment(&floating.id).unwrap().is_none());
+    fs::remove_dir_all(&dir).ok();
+}

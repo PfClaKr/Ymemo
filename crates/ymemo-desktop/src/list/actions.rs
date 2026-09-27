@@ -35,6 +35,7 @@ pub(crate) fn wire(ctx: &Ctx, ui: &Ui, unlocked: &Rc<Cell<bool>>) {
     wire_rename_group(ctx, ui);
     wire_rename_vault(ctx, ui);
     wire_move_row(ctx, ui);
+    wire_move_to_folder(ctx, ui);
     wire_reorder(ctx, ui);
     wire_recolor(ctx, ui);
     wire_lock_now(ctx, ui, unlocked);
@@ -314,6 +315,16 @@ fn wire_move_row(ctx: &Ctx, ui: &Ui) {
     list.on_move_row(move |src, dst| {
         touch(&ctx);
         move_row(&ctx, src, dst);
+    });
+}
+
+/// The right-click menu's "Move to".
+fn wire_move_to_folder(ctx: &Ctx, ui: &Ui) {
+    let list = &ui.list;
+    let ctx = ctx.clone();
+    list.on_move_to_folder(move |id, is_group, folder| {
+        touch(&ctx);
+        list::move_to_folder(&ctx, &id, is_group, &folder);
     });
 }
 

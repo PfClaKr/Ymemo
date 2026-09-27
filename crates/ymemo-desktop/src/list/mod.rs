@@ -6,12 +6,50 @@ pub(crate) mod actions;
 use ymemo_core::diag;
 use std::collections::{HashMap, HashSet};
 
-use slint::{ComponentHandle, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
+use std::rc::Rc;
 use ymemo_core::{now_millis, vault::Vault, Memo};
 use ymemo_i18n::t;
 
 use crate::state::Ctx;
-use crate::ListRow;
+use crate::{FolderChoice, ListRow};
+
+thread_local! {
+    /// What the right-click menu's "Move to" offers; see [`folder_choices`].
+    static FOLDER_CHOICES: Rc<VecModel<FolderChoice>> = Rc::new(VecModel::default());
+}
+
+/// The model behind the list's "Move to" menu, for the window to hold. [`refresh_list`] keeps
+/// it current, so it follows renames and folders arriving from other devices.
+pub(crate) fn folder_choices() -> ModelRc<FolderChoice> {
+    FOLDER_CHOICES.with(|m| ModelRc::from(m.clone()))
+}
+
+/// Every folder in tree order, indented by depth, after the top level. Rewritten only when it
+/// changed: the list is refreshed on every keystroke in the find box, and replacing the model
+/// under an open menu would close it.
+fn update_folder_choices(children: &HashMap<String, Vec<ymemo_core::Group>>) {
+    fn walk(parent: &str, depth: usize, children: &HashMap<String, Vec<ymemo_core::Group>>, out: &mut Vec<FolderChoice>) {
+        for g in children.get(parent).map(Vec::as_slice).unwrap_or_default() {
+            let name = format!("{}{}", "    ".repeat(depth), g.name);
+            out.push(FolderChoice {
+                id: SharedString::from(g.id.as_str()),
+                name: SharedString::from(crate::hangul::for_slint(&name)),
+            });
+            walk(&g.id, depth + 1, children, out);
+        }
+    }
+    let mut next = vec![FolderChoice {
+        id: SharedString::new(),
+        name: SharedString::from(crate::hangul::for_slint(&t!("ui.list_menu_top_level"))),
+    }];
+    walk("", 0, children, &mut next);
+    FOLDER_CHOICES.with(|m| {
+        if m.iter().ne(next.iter().cloned()) {
+            m.set_vec(next);
+        }
+    });
+}
 
 /// Flattens the cached groups and memos into the list model.
 ///
@@ -43,6 +81,10 @@ pub(crate) fn refresh_list(
         HashSet::new()
     });
 
+    // The core lifts cyclic and orphaned groups to the top level.
+    let children = ymemo_core::group_children(&groups);
+    update_folder_choices(&children);
+
     let needle = query.trim().to_lowercase();
     if !needle.is_empty() {
         let mut rows: Vec<ListRow> = groups
@@ -65,8 +107,6 @@ pub(crate) fn refresh_list(
         return;
     }
 
-    // The core lifts cyclic and orphaned groups to the top level.
-    let children = ymemo_core::group_children(&groups);
     let valid: HashSet<&str> = groups.iter().map(|g| g.id.as_str()).collect();
 
     let mut rows = Vec::new();
@@ -129,27 +169,37 @@ pub(crate) fn clear_search(ctx: &Ctx) {
 /// - Dropped on a memo: into that memo's group, i.e. beside it.
 /// - Dropped past either end of the list: out to the top level.
 pub(crate) fn move_row(ctx: &Ctx, src: i32, dst: i32) {
-    use slint::Model;
     let rows = &ctx.model;
     let Some(source) = usize::try_from(src).ok().and_then(|i| rows.row_data(i)) else {
         return;
     };
 
+    // Derive the new parent from the drop target; out of range means top level.
+    let target_parent = {
+        let Some(v) = ctx.vault_ref() else { return };
+        match usize::try_from(dst).ok().and_then(|i| rows.row_data(i)) {
+            Some(t) if t.is_group => t.id.to_string(),
+            Some(t) => match v.store().get(t.id.as_str()) {
+                Ok(Some(m)) => m.group_id,
+                _ => String::new(),
+            },
+            None => String::new(), // dropped past the list
+        }
+    };
+    move_to_folder(ctx, source.id.as_str(), source.is_group, &target_parent);
+}
+
+/// Puts a memo or a folder into `target_parent` ("" = the top level): the drop in
+/// [`move_row`], and the right-click menu's "Move to". A folder is never put inside itself or
+/// its own subtree, which would make the tree cyclic; that is refused silently, as a drop
+/// that did not take.
+pub(crate) fn move_to_folder(ctx: &Ctx, id: &str, is_group: bool, target_parent: &str) {
     let Some(mut guard) = ctx.vault_mut() else { return };
     let v = &mut *guard;
+    let target_parent = target_parent.to_string();
 
-    // Derive the new parent from the drop target; out of range means top level.
-    let target_parent = match usize::try_from(dst).ok().and_then(|i| rows.row_data(i)) {
-        Some(t) if t.is_group => t.id.to_string(),
-        Some(t) => match v.store().get(t.id.as_str()) {
-            Ok(Some(m)) => m.group_id,
-            _ => String::new(),
-        },
-        None => String::new(), // dropped past the list
-    };
-
-    let res = if source.is_group {
-        let id = source.id.to_string();
+    let res = if is_group {
+        let id = id.to_string();
         // Never into itself or its own subtree; that would make the tree cyclic.
         let groups = match v.store().list_groups() {
             Ok(g) => g,
@@ -170,7 +220,7 @@ pub(crate) fn move_row(ctx: &Ctx, src: i32, dst: i32) {
             _ => return,
         }
     } else {
-        match v.store().get(source.id.as_str()) {
+        match v.store().get(id) {
             Ok(Some(mut m)) if m.group_id != target_parent => {
                 m.group_id = target_parent;
                 m.updated_at = now_millis();

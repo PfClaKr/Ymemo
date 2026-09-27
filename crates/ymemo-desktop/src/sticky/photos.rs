@@ -3,12 +3,13 @@
 
 use slint::ComponentHandle;
 use std::cell::RefCell;
+use std::rc::Rc;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use ymemo_core::diag;
-use ymemo_core::vault::Vault;
+use ymemo_core::vault::{RemovedPhoto, Vault};
 use ymemo_i18n::t;
 
 use crate::state::{touch, Ctx, APP};
@@ -447,19 +448,81 @@ fn wire_place(ctx: &Ctx, window: &StickyWindow, id: &str) {
 
 /// Detach a photo. The blob file stays — another device may still be showing it.
 fn wire_remove(ctx: &Ctx, window: &StickyWindow, id: &str) {
+    // The one removal this note can still take back, and the timer that withdraws the offer.
+    // Per note, like the bar that shows it; a second removal replaces the first.
+    let last: Rc<RefCell<Option<RemovedPhoto>>> = Rc::new(RefCell::new(None));
+    let expiry = Rc::new(slint::Timer::default());
+    {
+        let ctx = ctx.clone();
+        let id = id.to_string();
+        let weak = window.as_weak();
+        let last = last.clone();
+        let expiry = expiry.clone();
+        window.on_remove_photo(move |photo_id| {
+            touch(&ctx);
+            let Some(w) = weak.upgrade() else { return };
+            // A photo in the writing takes its room with it, and the room is closed in what
+            // is **stored**: save what is on screen first, as moving one in or out does.
+            save_memo(&ctx, &id, w.get_memo_text().as_str());
+            let removed = {
+                let Some(mut guard) = ctx.vault_mut() else { return };
+                match guard.remove_attachment(photo_id.as_str()) {
+                    Ok(removed) => removed,
+                    Err(e) => {
+                        diag!("could not remove the photo: {e}");
+                        crate::list::report_write_failure(&e);
+                        None
+                    }
+                }
+            };
+            reload_body(&ctx, &w, &id);
+            refresh_photos(&ctx, &id);
+            let Some(removed) = removed else { return };
+            *last.borrow_mut() = Some(removed);
+            w.set_photo_undo(true);
+            let weak = weak.clone();
+            let last = last.clone();
+            expiry.start(slint::TimerMode::SingleShot, PHOTO_UNDO_FOR, move || {
+                last.borrow_mut().take();
+                if let Some(w) = weak.upgrade() {
+                    w.set_photo_undo(false);
+                }
+            });
+        });
+    }
     let ctx = ctx.clone();
     let id = id.to_string();
-    window.on_remove_photo(move |photo_id| {
+    let weak = window.as_weak();
+    window.on_undo_photo(move || {
         touch(&ctx);
+        let Some(w) = weak.upgrade() else { return };
+        w.set_photo_undo(false);
+        expiry.stop();
+        let Some(removed) = last.borrow_mut().take() else { return };
+        save_memo(&ctx, &id, w.get_memo_text().as_str());
         {
             let Some(mut guard) = ctx.vault_mut() else { return };
-            let v = &mut *guard;
-            if let Err(e) = v.detach(photo_id.as_str()) {
-                diag!("could not remove the photo: {e}");
+            if let Err(e) = guard.restore_attachment(&removed) {
+                diag!("could not put the photo back: {e}");
+                crate::list::report_write_failure(&e);
             }
         }
+        reload_body(&ctx, &w, &id);
         refresh_photos(&ctx, &id);
     });
+}
+
+/// How long a removed photo is offered back. Shorter than the list's undo: this bar sits over
+/// the bottom of the note, where the writing is.
+const PHOTO_UNDO_FOR: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Puts the stored body back into the note after the core changed it underneath — a room
+/// opened or closed. `refresh_photos` only carries the pictures.
+fn reload_body(ctx: &Ctx, w: &StickyWindow, id: &str) {
+    let memo = ctx.vault_ref().and_then(|v| v.store().get(id).ok().flatten());
+    if let Some(memo) = memo {
+        set_body_text(w, &sticky_text(&memo));
+    }
 }
 
 /// Write a photo out to a file the user picks.

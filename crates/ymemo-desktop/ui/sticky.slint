@@ -629,6 +629,10 @@ export component StickyWindow inherits Window {
     // itself: the list is where the same failure is reported, and the list is often closed
     // while a sticky is being typed into.
     in property <string> notice: "";
+    // A photo was just removed and can still be put back; the bar says so for a few
+    // seconds. The history does not cover photos, so this is the only way back to one.
+    in property <bool> photo-undo: false;
+    callback undo-photo();
     private property <bool> show-palette: false;
     changed show-palette => { root.palette-toggled(self.show-palette); }
     // The bar button under the pointer, by name; empty when there is none. The title bar
@@ -1224,6 +1228,38 @@ export component StickyWindow inherits Window {
                     background: Palette.ink(root.sticky-color).with-alpha(0.10);
                     opacity: root.photo-drop-target ? 1.0 : 0.0;
                     animate opacity { duration: 120ms; }
+                }
+            }
+        }
+
+        // ---- "Photo removed · Undo", across the bottom. Under the failure notice below, which
+        // matters more when both are up. ----
+        if !root.collapsed && root.photo-undo: Rectangle {
+            background: #3b3a33;
+            height: 20px;
+            y: parent.height - self.height;
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 6px;
+                spacing: 6px;
+                Text {
+                    text: Strings.ui_sticky_photo_removed;
+                    font-size: 10px;
+                    color: #f0ead6;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: Strings.ui_list_undo;
+                    font-size: 10px;
+                    font-weight: 700;
+                    color: #ffe15c;
+                    vertical-alignment: center;
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.undo-photo(); }
+                    }
                 }
             }
         }
