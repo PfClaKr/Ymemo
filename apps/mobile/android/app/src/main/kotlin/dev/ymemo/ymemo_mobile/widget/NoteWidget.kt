@@ -32,6 +32,8 @@ class NoteWidget : AppWidgetProvider() {
 
     companion object {
         fun update(context: Context, manager: AppWidgetManager, widgetId: Int) {
+            // Strings in the app's language, not the system's; see Locales.
+            val text = Locales.localized(context)
             val snapshot = WidgetStore.read(context)
             val chosen = WidgetStore.noteMemo(context, widgetId)
             val memo = when {
@@ -56,16 +58,16 @@ class NoteWidget : AppWidgetProvider() {
             views.setTextViewText(
                 R.id.note_title,
                 when {
-                    memo == null -> context.getString(R.string.widget_note_label)
+                    memo == null -> text.getString(R.string.widget_note_label)
                     memo.title.isNotEmpty() -> memo.title
-                    else -> context.getString(R.string.widget_untitled)
+                    else -> text.getString(R.string.widget_untitled)
                 },
             )
             views.setTextViewText(
                 R.id.note_body,
                 when {
-                    snapshot.hidden -> context.getString(R.string.widget_locked)
-                    memo == null -> context.getString(R.string.widget_empty)
+                    snapshot.hidden -> text.getString(R.string.widget_locked)
+                    memo == null -> text.getString(R.string.widget_empty)
                     else -> memo.preview
                 },
             )
@@ -80,6 +82,8 @@ class NoteWidget : AppWidgetProvider() {
             views.setOnClickPendingIntent(R.id.note_edit, open)
             views.setOnClickPendingIntent(R.id.note_pick, reconfigure(context, widgetId))
 
+            views.setContentDescription(R.id.note_edit, text.getString(R.string.widget_edit))
+            views.setContentDescription(R.id.note_pick, text.getString(R.string.widget_pick))
             manager.updateAppWidget(widgetId, views)
         }
 

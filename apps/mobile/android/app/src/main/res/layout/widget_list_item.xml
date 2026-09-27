@@ -1,58 +1,82 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One row of the list widget: a folder or a memo. The stripe carries the palette color,
-     which is the only way two pastel rows stay apart at this size. -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- One row of the list widget: a folder or a memo, as a rounded card washed in its colour
+     with the stripe inside it — the app's own list rows. It was a flat band between divider
+     lines, the look the app's list left behind. The outer padding is the gap between cards:
+     a collection widget ignores its rows' own margins. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/row_root"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:background="?android:attr/selectableItemBackground"
-    android:gravity="center_vertical"
-    android:minHeight="46dp"
-    android:orientation="horizontal"
-    android:paddingStart="14dp"
-    android:paddingEnd="14dp"
-    android:paddingTop="7dp"
-    android:paddingBottom="7dp">
+    android:paddingStart="8dp"
+    android:paddingEnd="8dp"
+    android:paddingTop="3dp"
+    android:paddingBottom="3dp">
 
-    <ImageView
-        android:id="@+id/row_stripe"
-        android:layout_width="4dp"
-        android:layout_height="26dp"
-        android:contentDescription="@null"
-        android:scaleType="fitXY"
-        android:src="@drawable/widget_stripe" />
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
 
-    <ImageView
-        android:id="@+id/row_icon"
-        android:layout_width="17dp"
-        android:layout_height="17dp"
-        android:layout_marginStart="9dp"
-        android:contentDescription="@null"
-        android:src="@drawable/ic_widget_folder" />
+        <ImageView
+            android:id="@+id/row_card"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="@null"
+            android:scaleType="fitXY"
+            android:src="@drawable/widget_row" />
 
-    <LinearLayout
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="9dp"
-        android:layout_weight="1"
-        android:orientation="vertical">
-
-        <TextView
-            android:id="@+id/row_title"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="@color/widget_ink"
-            android:textSize="13sp" />
+            android:background="?android:attr/selectableItemBackground"
+            android:gravity="center_vertical"
+            android:minHeight="46dp"
+            android:orientation="horizontal"
+            android:paddingStart="10dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="7dp"
+            android:paddingBottom="7dp">
 
-        <TextView
-            android:id="@+id/row_body"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="@color/widget_muted"
-            android:textSize="11sp" />
-    </LinearLayout>
-</LinearLayout>
+            <ImageView
+                android:id="@+id/row_stripe"
+                android:layout_width="4dp"
+                android:layout_height="26dp"
+                android:contentDescription="@null"
+                android:scaleType="fitXY"
+                android:src="@drawable/widget_stripe" />
+
+            <ImageView
+                android:id="@+id/row_icon"
+                android:layout_width="17dp"
+                android:layout_height="17dp"
+                android:layout_marginStart="9dp"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_widget_folder" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="9dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/row_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_ink"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/row_body"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_muted"
+                    android:textSize="11sp" />
+            </LinearLayout>
+        </LinearLayout>
+    </FrameLayout>
+</FrameLayout>

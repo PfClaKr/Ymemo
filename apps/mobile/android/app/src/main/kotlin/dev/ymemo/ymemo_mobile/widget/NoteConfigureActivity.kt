@@ -2,6 +2,7 @@ package dev.ymemo.ymemo_mobile.widget
 
 import android.app.Activity
 import android.appwidget.AppWidgetManager
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.widget.ListView
@@ -19,6 +20,11 @@ import dev.ymemo.ymemo_mobile.R
  * the app once, and that is what the text says.
  */
 class NoteConfigureActivity : Activity() {
+
+    // In the app's language rather than the system's, like the widgets themselves.
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(Locales.localized(newBase))
+    }
 
     private var widgetId = AppWidgetManager.INVALID_APPWIDGET_ID
 

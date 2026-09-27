@@ -119,6 +119,7 @@ Future<void> publishWidgets() async {
     await _publish(jsonEncode({
       'vault': name,
       'hidden': false,
+      'lang': widgetLang,
       'folders': [
         for (final folder in all)
           {
@@ -163,7 +164,14 @@ Future<void> publishWidgets() async {
 /// same reasoning as `FLAG_SECURE` on the app-switcher thumbnail. It is unconditional:
 /// closing the vault is the only thing that gets here, whether it was the lock button or the
 /// app being left with "lock when the app is left" on.
-Future<void> hideWidgets() => _publish(jsonEncode({'hidden': true}));
+Future<void> hideWidgets() => _publish(jsonEncode({'hidden': true, 'lang': widgetLang}));
+
+/// The language the app was set to in its own settings — `ko`, `en`, or `auto` for the
+/// system's. Carried in every snapshot so the widgets and their settings screens speak it
+/// too: Android reads their strings in the **system** language, and a phone set to English
+/// with Ymemo set to Korean put English widgets beside a Korean app. Set by `main.dart`
+/// whenever the language is applied.
+String widgetLang = 'auto';
 
 Future<void> _publish(String snapshot) async {
   if (snapshot == _published) return;

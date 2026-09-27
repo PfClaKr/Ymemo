@@ -19,4 +19,9 @@
     <color name="widget_accent">#FF8C7B1E</color>
     <!-- The list's background in the light theme (theme.dart's surface), for the start-up window. -->
     <color name="app_background">#FFF9EB</color>
+    <!-- The widget settings screens: the app's accent at a strength that reads on its
+         background, the ink their headings are set in, and what sits on the accent. -->
+    <color name="configure_accent">#6B5E00</color>
+    <color name="configure_ink">#1F1C12</color>
+    <color name="configure_on_accent">#FFFFFF</color>
 </resources>

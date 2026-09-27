@@ -19,9 +19,21 @@
     <!-- The "which memo?" screen the sticky widget opens. It is an ordinary Activity, not
          Flutter, so it needs a theme of its own; DeviceDefault keeps it looking like the
          launcher's own dialogs rather than like a second, differently-styled app. -->
+    <!-- The app's paper and its gold, not the system's grey and purple: these screens are
+         the first thing of Ymemo's anyone sees when they place a widget, and in the system's
+         defaults they looked like a different app. -->
     <style name="WidgetConfigureTheme" parent="@android:style/Theme.DeviceDefault.Light">
         <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@color/app_background</item>
+        <item name="android:colorBackground">@color/app_background</item>
+        <item name="android:colorAccent">@color/configure_accent</item>
+        <item name="android:colorPrimary">@color/configure_accent</item>
+        <item name="android:colorControlActivated">@color/configure_accent</item>
+        <item name="android:textColorPrimary">@color/configure_ink</item>
+        <item name="android:statusBarColor">@color/app_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@color/app_background</item>
     </style>
 
     <!-- The heading over one group of settings in the list widget's configure screen. -->
@@ -32,5 +44,7 @@
         <item name="android:paddingBottom">4dp</item>
         <item name="android:textSize">13sp</item>
         <item name="android:textStyle">bold</item>
+        <!-- The accent, as the app's own settings headings are. -->
+        <item name="android:textColor">@color/configure_accent</item>
     </style>
 </resources>

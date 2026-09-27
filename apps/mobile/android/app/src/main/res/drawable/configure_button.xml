@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The widget settings screens' one button: the app's filled, rounded primary, not the
+     platform's grey raised slab. A ripple, so a press still shows. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="#33FFFFFF">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/configure_accent" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+</ripple>

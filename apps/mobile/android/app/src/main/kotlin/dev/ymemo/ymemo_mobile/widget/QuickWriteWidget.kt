@@ -22,6 +22,12 @@ class QuickWriteWidget : AppWidgetProvider() {
     companion object {
         fun update(context: Context, manager: AppWidgetManager, widgetId: Int) {
             val views = RemoteViews(context.packageName, R.layout.widget_quick_write)
+            // Set here, not left to the layout: the launcher resolves a layout's strings in the
+            // system's language, and these follow the app's (see Locales).
+            val text = Locales.localized(context)
+            views.setTextViewText(R.id.quick_hint, text.getString(R.string.widget_quick_hint))
+            views.setContentDescription(R.id.quick_photo, text.getString(R.string.widget_photo_memo))
+            views.setContentDescription(R.id.quick_new, text.getString(R.string.widget_new_memo))
             views.setOnClickPendingIntent(
                 R.id.quick_root,
                 Launch.pending(context, widgetId, Launch.NEW_MEMO),

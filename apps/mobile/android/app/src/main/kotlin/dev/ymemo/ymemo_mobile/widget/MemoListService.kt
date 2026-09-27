@@ -57,6 +57,10 @@ private class MemoListFactory(
         val (isFolder, entry) = rows[position]
         val views = RemoteViews(context.packageName, R.layout.widget_list_item)
 
+        views.setInt(R.id.row_card, "setColorFilter", wash(entry.color))
+        // As see-through as the widget's own card, or the rows would float solid on a
+        // translucent widget.
+        views.setInt(R.id.row_card, "setImageAlpha", WidgetStore.listAlpha(context, widgetId) * 255 / 100)
         views.setInt(R.id.row_stripe, "setColorFilter", Palette.swatch(entry.color))
         views.setInt(R.id.row_icon, "setColorFilter", Palette.ink(entry.color))
         views.setImageViewResource(
@@ -67,7 +71,7 @@ private class MemoListFactory(
         views.setTextColor(R.id.row_body, chrome.muted)
         views.setTextViewText(
             R.id.row_title,
-            entry.title.ifEmpty { context.getString(R.string.widget_untitled) },
+            entry.title.ifEmpty { Locales.localized(context).getString(R.string.widget_untitled) },
         )
         views.setTextViewText(R.id.row_body, entry.line)
         views.setViewVisibility(
@@ -80,6 +84,19 @@ private class MemoListFactory(
             Launch.fillIn(if (isFolder) Launch.OPEN_FOLDER else Launch.OPEN_MEMO, entry.id),
         )
         return views
+    }
+
+    /**
+     * A row's card: a thin pour of the memo's colour over the widget's own card, the same
+     * 16% the app's list uses (`paletteRow`), mixed opaque; the widget's opacity is applied
+     * to the card as a whole.
+     */
+    private fun wash(color: String): Int {
+        val over = Palette.swatch(color)
+        val under = chrome.card
+        fun mix(shift: Int) =
+            (((over shr shift) and 0xFF) * 16 + ((under shr shift) and 0xFF) * 84) / 100
+        return (0xFF shl 24) or (mix(16) shl 16) or (mix(8) shl 8) or mix(0)
     }
 
     /** Nothing to show while a row is being fetched: the snapshot is already in memory. */

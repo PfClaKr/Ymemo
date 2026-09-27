@@ -38,6 +38,8 @@ class MemoListWidget : AppWidgetProvider() {
 
     companion object {
         fun update(context: Context, manager: AppWidgetManager, widgetId: Int) {
+            // Strings in the app's language, not the system's; see Locales.
+            val text = Locales.localized(context)
             val snapshot = WidgetStore.read(context)
             val picks = WidgetStore.listPicks(context, widgetId)
             val folder = snapshot.folder(
@@ -64,12 +66,12 @@ class MemoListWidget : AppWidgetProvider() {
             // then on screen: the whole vault again, which is what `rows` falls back to.
             views.setTextViewText(
                 R.id.list_title,
-                folder?.title?.ifEmpty { context.getString(R.string.widget_list_label) }
-                    ?: snapshot.vaultName.ifEmpty { context.getString(R.string.widget_list_label) },
+                folder?.title?.ifEmpty { text.getString(R.string.widget_list_label) }
+                    ?: snapshot.vaultName.ifEmpty { text.getString(R.string.widget_list_label) },
             )
             views.setTextViewText(
                 R.id.list_empty,
-                context.getString(
+                text.getString(
                     if (snapshot.hidden) R.string.widget_locked else R.string.widget_empty
                 ),
             )
@@ -107,6 +109,9 @@ class MemoListWidget : AppWidgetProvider() {
             views.setEmptyView(R.id.list_items, R.id.list_empty)
             views.setPendingIntentTemplate(R.id.list_items, Launch.rowTemplate(context, widgetId))
 
+            views.setContentDescription(R.id.list_settings, text.getString(R.string.widget_list_settings))
+            views.setContentDescription(R.id.list_photo, text.getString(R.string.widget_photo_memo))
+            views.setContentDescription(R.id.list_add, text.getString(R.string.widget_new_memo))
             manager.updateAppWidget(widgetId, views)
         }
 

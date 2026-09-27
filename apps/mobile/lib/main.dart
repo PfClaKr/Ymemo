@@ -70,6 +70,7 @@ Future<void> main() async {
   await setLanguage(
     code: settings.value.lang == 'auto' ? Platform.localeName : settings.value.lang,
   );
+  widgets.widgetLang = settings.value.lang;
 
   final sync = SyncController(
     SyncPaths(
@@ -195,6 +196,9 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
   /// the same catalog, so one re-read is the whole job.
   Future<void> _applyLanguage(String lang) async {
     await setLanguage(code: lang == 'auto' ? Platform.localeName : lang);
+    widgets.widgetLang = lang;
+    // The widgets speak it too, from the next snapshot on — which is this one.
+    unawaited(widgets.publishWidgets());
     final strings = await mobileStrings();
     if (mounted) setState(() => _strings = strings);
   }
