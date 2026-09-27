@@ -111,6 +111,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     itemBuilder: (context, i) {
                       final revision = _revisions[i];
                       final open = _selected == i;
+                      // Newest first, so the top row is what the memo already holds: putting
+                      // it back would change nothing and only add a row. Marked, not offered.
+                      final current = i == 0;
                       return Card(
                         margin: const EdgeInsets.only(bottom: 8),
                         color: paletteBar(widget.color),
@@ -121,7 +124,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
                               title: Text(_when(revision.at),
                                   style: TextStyle(fontWeight: FontWeight.bold, color: ink)),
                               subtitle: Text(
-                                [revision.kind, revision.device, revision.changed]
+                                [
+                                  revision.kind,
+                                  if (current) widget.strings.historyCurrent,
+                                  revision.device,
+                                  revision.changed,
+                                ]
                                     .where((part) => part.isNotEmpty)
                                     .join(' · '),
                                 style: TextStyle(color: ink.withValues(alpha: 0.75)),
@@ -148,7 +156,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                   alignment: Alignment.centerLeft,
                                   // A deletion is a revision with nothing in it; the version
                                   // before it is the one to go back to.
-                                  child: revision.restorable
+                                  child: revision.restorable && !current
                                       ? FilledButton(
                                           onPressed: () => _restore(revision),
                                           child: Text(widget.strings.historyRestore),

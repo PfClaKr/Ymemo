@@ -170,7 +170,8 @@ class _SyncScreenState extends State<SyncScreen> {
   /// Joiner side: broadcast for the device showing the typed code.
   Future<void> _joinLan() async {
     final code = _lanInput.text.trim();
-    if (code.isEmpty || _joining) return;
+    // Six digits or nothing: anything else only failed after the whole network wait.
+    if (code.length != 6 || _joining) return;
     setState(() {
       _joining = true;
       _lanMessage = widget.strings.lanSearching;
@@ -312,6 +313,14 @@ class _SyncScreenState extends State<SyncScreen> {
   }
 
   Future<void> _unpair(FfiSharedDevice device) async {
+    // The removal is written into the synced vault and only a fresh pairing undoes it.
+    final sure = await confirmAction(
+      context,
+      message: widget.strings.unpairWarning,
+      confirm: widget.strings.unpair,
+      cancel: widget.strings.cancel,
+    );
+    if (!sure || !mounted) return;
     try {
       await widget.sync.unpair(device.id);
     } catch (e) {
@@ -425,9 +434,12 @@ class _SyncScreenState extends State<SyncScreen> {
             const SizedBox(width: 12),
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: FilledButton(
-                onPressed: _joining ? null : _joinLan,
-                child: Text(widget.strings.lanConnect),
+              child: ListenableBuilder(
+                listenable: _lanInput,
+                builder: (context, _) => FilledButton(
+                  onPressed: _joining || _lanInput.text.trim().length != 6 ? null : _joinLan,
+                  child: Text(widget.strings.lanConnect),
+                ),
               ),
             ),
           ],

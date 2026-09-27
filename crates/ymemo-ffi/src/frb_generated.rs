@@ -2749,6 +2749,7 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_moveTo = <String>::sse_decode(deserializer);
         let mut var_history = <String>::sse_decode(deserializer);
         let mut var_historyEmpty = <String>::sse_decode(deserializer);
+        let mut var_historyCurrent = <String>::sse_decode(deserializer);
         let mut var_historyRestore = <String>::sse_decode(deserializer);
         let mut var_historyRestored = <String>::sse_decode(deserializer);
         let mut var_newGroup = <String>::sse_decode(deserializer);
@@ -2788,6 +2789,7 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_titleHint = <String>::sse_decode(deserializer);
         let mut var_unlock = <String>::sse_decode(deserializer);
         let mut var_unpair = <String>::sse_decode(deserializer);
+        let mut var_unpairWarning = <String>::sse_decode(deserializer);
         let mut var_color = <String>::sse_decode(deserializer);
         let mut var_changePassword = <String>::sse_decode(deserializer);
         let mut var_confirmPassword = <String>::sse_decode(deserializer);
@@ -2812,6 +2814,7 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_recoveryPrompt = <String>::sse_decode(deserializer);
         let mut var_recoveryWarning = <String>::sse_decode(deserializer);
         let mut var_reissueRecovery = <String>::sse_decode(deserializer);
+        let mut var_reissueWarning = <String>::sse_decode(deserializer);
         let mut var_resetDone = <String>::sse_decode(deserializer);
         let mut var_resetPassword = <String>::sse_decode(deserializer);
         let mut var_resetVault = <String>::sse_decode(deserializer);
@@ -2904,6 +2907,7 @@ impl SseDecode for crate::api::FfiStrings {
             move_to: var_moveTo,
             history: var_history,
             history_empty: var_historyEmpty,
+            history_current: var_historyCurrent,
             history_restore: var_historyRestore,
             history_restored: var_historyRestored,
             new_group: var_newGroup,
@@ -2943,6 +2947,7 @@ impl SseDecode for crate::api::FfiStrings {
             title_hint: var_titleHint,
             unlock: var_unlock,
             unpair: var_unpair,
+            unpair_warning: var_unpairWarning,
             color: var_color,
             change_password: var_changePassword,
             confirm_password: var_confirmPassword,
@@ -2967,6 +2972,7 @@ impl SseDecode for crate::api::FfiStrings {
             recovery_prompt: var_recoveryPrompt,
             recovery_warning: var_recoveryWarning,
             reissue_recovery: var_reissueRecovery,
+            reissue_warning: var_reissueWarning,
             reset_done: var_resetDone,
             reset_password: var_resetPassword,
             reset_vault: var_resetVault,
@@ -3516,6 +3522,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.move_to.into_into_dart().into_dart(),
             self.history.into_into_dart().into_dart(),
             self.history_empty.into_into_dart().into_dart(),
+            self.history_current.into_into_dart().into_dart(),
             self.history_restore.into_into_dart().into_dart(),
             self.history_restored.into_into_dart().into_dart(),
             self.new_group.into_into_dart().into_dart(),
@@ -3555,6 +3562,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.title_hint.into_into_dart().into_dart(),
             self.unlock.into_into_dart().into_dart(),
             self.unpair.into_into_dart().into_dart(),
+            self.unpair_warning.into_into_dart().into_dart(),
             self.color.into_into_dart().into_dart(),
             self.change_password.into_into_dart().into_dart(),
             self.confirm_password.into_into_dart().into_dart(),
@@ -3579,6 +3587,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.recovery_prompt.into_into_dart().into_dart(),
             self.recovery_warning.into_into_dart().into_dart(),
             self.reissue_recovery.into_into_dart().into_dart(),
+            self.reissue_warning.into_into_dart().into_dart(),
             self.reset_done.into_into_dart().into_dart(),
             self.reset_password.into_into_dart().into_dart(),
             self.reset_vault.into_into_dart().into_dart(),
@@ -3827,6 +3836,7 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.move_to, serializer);
         <String>::sse_encode(self.history, serializer);
         <String>::sse_encode(self.history_empty, serializer);
+        <String>::sse_encode(self.history_current, serializer);
         <String>::sse_encode(self.history_restore, serializer);
         <String>::sse_encode(self.history_restored, serializer);
         <String>::sse_encode(self.new_group, serializer);
@@ -3866,6 +3876,7 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.title_hint, serializer);
         <String>::sse_encode(self.unlock, serializer);
         <String>::sse_encode(self.unpair, serializer);
+        <String>::sse_encode(self.unpair_warning, serializer);
         <String>::sse_encode(self.color, serializer);
         <String>::sse_encode(self.change_password, serializer);
         <String>::sse_encode(self.confirm_password, serializer);
@@ -3890,6 +3901,7 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.recovery_prompt, serializer);
         <String>::sse_encode(self.recovery_warning, serializer);
         <String>::sse_encode(self.reissue_recovery, serializer);
+        <String>::sse_encode(self.reissue_warning, serializer);
         <String>::sse_encode(self.reset_done, serializer);
         <String>::sse_encode(self.reset_password, serializer);
         <String>::sse_encode(self.reset_vault, serializer);

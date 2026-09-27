@@ -997,6 +997,7 @@ class FfiStrings {
   final String moveTo;
   final String history;
   final String historyEmpty;
+  final String historyCurrent;
   final String historyRestore;
   final String historyRestored;
   final String newGroup;
@@ -1038,6 +1039,7 @@ class FfiStrings {
   final String titleHint;
   final String unlock;
   final String unpair;
+  final String unpairWarning;
   final String color;
   final String changePassword;
   final String confirmPassword;
@@ -1062,6 +1064,7 @@ class FfiStrings {
   final String recoveryPrompt;
   final String recoveryWarning;
   final String reissueRecovery;
+  final String reissueWarning;
   final String resetDone;
   final String resetPassword;
   final String resetVault;
@@ -1155,6 +1158,7 @@ class FfiStrings {
     required this.moveTo,
     required this.history,
     required this.historyEmpty,
+    required this.historyCurrent,
     required this.historyRestore,
     required this.historyRestored,
     required this.newGroup,
@@ -1194,6 +1198,7 @@ class FfiStrings {
     required this.titleHint,
     required this.unlock,
     required this.unpair,
+    required this.unpairWarning,
     required this.color,
     required this.changePassword,
     required this.confirmPassword,
@@ -1218,6 +1223,7 @@ class FfiStrings {
     required this.recoveryPrompt,
     required this.recoveryWarning,
     required this.reissueRecovery,
+    required this.reissueWarning,
     required this.resetDone,
     required this.resetPassword,
     required this.resetVault,
@@ -1313,6 +1319,7 @@ class FfiStrings {
       moveTo.hashCode ^
       history.hashCode ^
       historyEmpty.hashCode ^
+      historyCurrent.hashCode ^
       historyRestore.hashCode ^
       historyRestored.hashCode ^
       newGroup.hashCode ^
@@ -1352,6 +1359,7 @@ class FfiStrings {
       titleHint.hashCode ^
       unlock.hashCode ^
       unpair.hashCode ^
+      unpairWarning.hashCode ^
       color.hashCode ^
       changePassword.hashCode ^
       confirmPassword.hashCode ^
@@ -1376,6 +1384,7 @@ class FfiStrings {
       recoveryPrompt.hashCode ^
       recoveryWarning.hashCode ^
       reissueRecovery.hashCode ^
+      reissueWarning.hashCode ^
       resetDone.hashCode ^
       resetPassword.hashCode ^
       resetVault.hashCode ^
@@ -1473,6 +1482,7 @@ class FfiStrings {
           moveTo == other.moveTo &&
           history == other.history &&
           historyEmpty == other.historyEmpty &&
+          historyCurrent == other.historyCurrent &&
           historyRestore == other.historyRestore &&
           historyRestored == other.historyRestored &&
           newGroup == other.newGroup &&
@@ -1512,6 +1522,7 @@ class FfiStrings {
           titleHint == other.titleHint &&
           unlock == other.unlock &&
           unpair == other.unpair &&
+          unpairWarning == other.unpairWarning &&
           color == other.color &&
           changePassword == other.changePassword &&
           confirmPassword == other.confirmPassword &&
@@ -1536,6 +1547,7 @@ class FfiStrings {
           recoveryPrompt == other.recoveryPrompt &&
           recoveryWarning == other.recoveryWarning &&
           reissueRecovery == other.reissueRecovery &&
+          reissueWarning == other.reissueWarning &&
           resetDone == other.resetDone &&
           resetPassword == other.resetPassword &&
           resetVault == other.resetVault &&

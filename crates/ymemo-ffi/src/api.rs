@@ -238,6 +238,7 @@ pub struct FfiStrings {
     pub move_to: String,
     pub history: String,
     pub history_empty: String,
+    pub history_current: String,
     pub history_restore: String,
     pub history_restored: String,
     pub new_group: String,
@@ -278,6 +279,7 @@ pub struct FfiStrings {
     pub title_hint: String,
     pub unlock: String,
     pub unpair: String,
+    pub unpair_warning: String,
 
     // Colors, and the master password / recovery code screens. The `msg.*` ones are shared
     // word for word with the desktop, which raises them from Rust.
@@ -305,6 +307,7 @@ pub struct FfiStrings {
     pub recovery_prompt: String,
     pub recovery_warning: String,
     pub reissue_recovery: String,
+    pub reissue_warning: String,
     pub reset_done: String,
     pub reset_password: String,
     pub reset_vault: String,
@@ -403,6 +406,7 @@ pub fn mobile_strings() -> FfiStrings {
         move_to: t!("mobile.move_to"),
         history: t!("mobile.history"),
         history_empty: t!("mobile.history_empty"),
+        history_current: t!("mobile.history_current"),
         history_restore: t!("mobile.history_restore"),
         history_restored: t!("mobile.history_restored"),
         new_group: t!("mobile.new_group"),
@@ -442,6 +446,7 @@ pub fn mobile_strings() -> FfiStrings {
         title_hint: t!("mobile.title_hint"),
         unlock: t!("mobile.unlock"),
         unpair: t!("mobile.unpair"),
+        unpair_warning: t!("mobile.unpair_warning"),
 
         color: t!("mobile.color"),
         change_password: t!("mobile.change_password"),
@@ -467,6 +472,7 @@ pub fn mobile_strings() -> FfiStrings {
         recovery_prompt: t!("mobile.recovery_prompt"),
         recovery_warning: t!("mobile.recovery_warning"),
         reissue_recovery: t!("mobile.reissue_recovery"),
+        reissue_warning: t!("mobile.reissue_warning"),
         reset_done: t!("msg.reset_done"),
         reset_password: t!("mobile.reset_password"),
         reset_vault: t!("mobile.reset_vault"),
