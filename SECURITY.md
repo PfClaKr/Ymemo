@@ -59,6 +59,8 @@ Relative to the app data directory (`~/.local/share/ymemo` on Linux):
 | `settings.json` | no | device-local settings (language, lock timeouts, ...) |
 | `ymemo.log` (+ `.1`) | no | the last 512 KB of what went wrong: timestamps, paths, error strings, and any panic (with the text it quotes scrubbed out). **No memo text** — it is written to be attachable to a bug report without reading it first |
 | `shared_prefs/dev.ymemo.widget.xml` | no | Android only, and only if a home-screen widget is used: **plaintext** titles and body previews of up to 100 memos |
+| an export (`Ymemo-<date>.zip`) | no | only when the user asks for one (Settings, on either platform): **every memo and photo in plaintext**, written to the one file the user names and nowhere else. It is how the writing leaves the app, so it is meant to be readable |
+| `cache/shared/*` | no | Android only, for a moment: a picture another app shared to Ymemo, copied out of the sharing app while its read grant lasts. Deleted as soon as it is attached — or as soon as it is known it will not be |
 | the platform keystore | no | Android only: the stay-unlocked session key, and — if biometric unlock is on — a second copy of the **data key** with no expiry. Both encrypted by a key the Android Keystore holds, never in a file of ours |
 
 Three rows matter most:

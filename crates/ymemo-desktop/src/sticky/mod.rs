@@ -261,6 +261,7 @@ fn build_window(ctx: &Ctx, memo: &Memo) -> Result<StickyWindow> {
     window.set_sticky_color(SharedString::from(memo.color.clone()));
     window.set_sticky_opacity(memo.opacity as f32);
     window.set_pinned(ctx.settings.borrow().memo_pinned(&memo.id));
+    window.set_text_scale(text_scale(ctx));
     window.set_created_at(SharedString::from(format_created_at(memo.created_at)));
     if let Some(v) = ctx.vault_ref() {
         set_photo_models(&window, split_photo_rows(&v, &memo.id));
@@ -311,6 +312,7 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     wire_close(ctx, &window, &memo.id, &dirty);
     wire_wm_close(&window);
     wire_new_memo(ctx, &window);
+    wire_zoom(ctx, &window);
     wire_delete(&window, &memo.id);
     photos::wire(ctx, &window, &memo.id);
     appearance::wire(ctx, &window, &memo.id, &expanded_height);
@@ -520,6 +522,40 @@ fn wire_wm_close(window: &StickyWindow) {
 fn wire_new_memo(ctx: &Ctx, window: &StickyWindow) {
     let ctx = ctx.clone();
     window.on_new_memo(move || new_memo(&ctx));
+}
+
+/// Ctrl+= / Ctrl+- / Ctrl+0 on a note: the writing of every note larger, smaller, or back to
+/// the default. One size for the desk rather than one per note, because it is a matter of how
+/// well this screen reads, not of the note — and it is the same setting the dialog shows.
+fn wire_zoom(ctx: &Ctx, window: &StickyWindow) {
+    let ctx = ctx.clone();
+    window.on_zoom(move |step| {
+        let next = {
+            let mut s = ctx.settings.borrow_mut();
+            s.note_text_percent = if step == 0 {
+                crate::settings::NOTE_TEXT_PERCENT.0
+            } else {
+                s.note_text_percent + step.signum() * crate::settings::NOTE_TEXT_STEP
+            };
+            s.sanitize();
+            s.clone()
+        };
+        next.save(&ctx.dir);
+        apply_text_size(&ctx);
+    });
+}
+
+/// The note text size as the factor the sticky multiplies its font sizes by.
+fn text_scale(ctx: &Ctx) -> f32 {
+    ctx.settings.borrow().note_text_percent as f32 / 100.0
+}
+
+/// Puts the stored note text size on every open note.
+pub(crate) fn apply_text_size(ctx: &Ctx) {
+    let scale = text_scale(ctx);
+    for entry in ctx.stickies.borrow().values() {
+        entry.window.set_text_scale(scale);
+    }
 }
 
 /// Delete, from the note's colour panel. The list is brought up with its undo bar, since a

@@ -601,6 +601,11 @@ export component StickyWindow inherits Window {
     callback remove-photo(string);
     callback close-requested();
     callback new-memo();
+    // +1 larger, -1 smaller, 0 back to the default: the note text size, for every note.
+    callback zoom(int);
+    // How much larger than the default the writing is drawn (the setting, as a factor). The
+    // photos do not follow it: their size is stored with the memo and shared between devices.
+    in property <float> text-scale: 1.0;
     callback toggle-pin();
     callback set-color(string);
     callback set-opacity(float);
@@ -668,6 +673,20 @@ export component StickyWindow inherits Window {
             // makes a deskful of them tiring.
             if (ev.modifiers.control && ev.text == "w") {
                 root.close-requested();
+                return accept;
+            }
+            // "=" as well as "+": on most layouts plus is shift and equals, and asking for
+            // shift to make text larger is one key too many.
+            if (ev.modifiers.control && (ev.text == "=" || ev.text == "+")) {
+                root.zoom(1);
+                return accept;
+            }
+            if (ev.modifiers.control && ev.text == "-") {
+                root.zoom(-1);
+                return accept;
+            }
+            if (ev.modifiers.control && ev.text == "0") {
+                root.zoom(0);
                 return accept;
             }
             // The same key the list uses, so it means one thing everywhere.
@@ -1051,7 +1070,7 @@ export component StickyWindow inherits Window {
                                                     for run in codeline.tokens: Text {
                                                         text: run.text;
                                                         font-family: "monospace";
-                                                        font-size: block.font-size;
+                                                        font-size: block.font-size * root.text-scale;
                                                         color: run.color;
                                                     }
                                                 }
@@ -1059,7 +1078,7 @@ export component StickyWindow inherits Window {
                                             if block.lines.length == 0: Text {
                                                 text: block.text;
                                                 font-family: "monospace";
-                                                font-size: block.font-size;
+                                                font-size: block.font-size * root.text-scale;
                                                 color: #2b2b22;
                                                 wrap: word-wrap;
                                             }
@@ -1067,7 +1086,7 @@ export component StickyWindow inherits Window {
                                     }
                                     if !block.code: StyledText {
                                         text: block.styled;
-                                        default-font-size: block.font-size;
+                                        default-font-size: block.font-size * root.text-scale;
                                         default-color: #2b2b22;
                                     }
                                 }
@@ -1077,8 +1096,9 @@ export component StickyWindow inherits Window {
                         body := NotePad {
                             width: 100%;
                             height: 100%;
-                            // Must match BODY_FONT_PX in sticky.rs, which sizes the photos.
-                            font-size: 13px;
+                            // 13px must match BODY_FONT_PX in sticky.rs, which sizes the
+                            // photos; the scale is the reader's, and the photos ignore it.
+                            font-size: 13px * root.text-scale;
                             // Transparent while the read view is over it. The field stays
                             // where it is — it has to, or a click could not hand the caret
                             // back to it — and simply draws nothing; painting the read view
@@ -1155,7 +1175,7 @@ export component StickyWindow inherits Window {
                         text: photo.prefix;
                         width: body.text-width;
                         wrap: word-wrap;
-                        font-size: 13px;
+                        font-size: 13px * root.text-scale;
                     }
                     PhotoItem {
                         photo: photo;

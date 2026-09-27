@@ -29,6 +29,7 @@ pub(crate) fn fill_settings_window(ctx: &Ctx, win: &SettingsWindow) {
     win.set_idle_minutes(s.idle_lock_minutes);
     win.set_default_color(SharedString::from(s.default_color.clone()));
     win.set_default_opacity(s.default_opacity);
+    win.set_note_text_percent(s.note_text_percent);
     win.set_merge_seconds(s.merge_seconds);
     win.set_watch_delay_seconds(s.watch_delay_seconds);
     win.set_rescan_seconds(s.rescan_seconds);
@@ -179,6 +180,7 @@ fn wire_apply(
             t.refresh();
         }
         start_merge_timer(&merge_timer, &ctx, list.as_weak());
+        crate::sticky::apply_text_size(&ctx);
         // The watch delay lives in Syncthing's folder config, not ours, so saving has to
         // push it across; `set_folder_timing` does nothing when the daemon already agrees.
         apply_folder_settings(&syncthing_for_settings, &next);
@@ -230,10 +232,61 @@ fn wire_updates(ctx: &Ctx, ui: &Ui) {
     // The log is a file the user is asked for, never one they read here: open the folder and
     // let the desktop's own file manager do the rest.
     let dir = ctx.dir.clone();
+    {
+        let ctx = ctx.clone();
+        let weak = settings_win.as_weak();
+        settings_win.on_export_memos(move || export_memos(&ctx, weak.clone()));
+    }
     settings_win.on_open_log(move || {
         if let Err(e) = update::open_url(&dir.to_string_lossy()) {
             diag!("could not open the log folder: {e}");
         }
+    });
+}
+
+/// Writes every memo out as a zip of Markdown files, to a file the user picks.
+///
+/// The zip is built here, on the UI thread, because that is where the vault lives; it is a
+/// copy of text and already-encrypted blobs decrypted once, which is quick. Only the dialog
+/// and the write go to a worker, for the same reason the photo dialogs do.
+fn export_memos(ctx: &Ctx, weak: slint::Weak<SettingsWindow>) {
+    touch(ctx);
+    let zip = {
+        let Some(v) = ctx.vault_ref() else { return };
+        match ymemo_core::export::markdown_zip(&v) {
+            Ok(zip) => zip,
+            Err(e) => {
+                diag!("could not export the memos: {e}");
+                if let Some(w) = weak.upgrade() {
+                    w.set_status(SharedString::from(t!("msg.export_failed", error = e)));
+                }
+                return;
+            }
+        }
+    };
+    let title = t!("msg.export_dialog_title");
+    let file_name = format!("Ymemo-{}.zip", chrono::Local::now().format("%Y-%m-%d"));
+    std::thread::spawn(move || {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title(&title)
+            .set_file_name(&file_name)
+            .add_filter("zip", &["zip"])
+            .save_file()
+        else {
+            return; // cancelled
+        };
+        let status = match std::fs::write(&path, &zip) {
+            Ok(()) => t!("msg.exported", path = path.display()),
+            Err(e) => {
+                diag!("could not write the export: {e}");
+                t!("msg.export_failed", error = e)
+            }
+        };
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(w) = weak.upgrade() {
+                w.set_status(SharedString::from(status));
+            }
+        });
     });
 }
 
@@ -250,6 +303,7 @@ fn read_dialog(ctx: &Ctx, w: &SettingsWindow) -> Settings {
     next.idle_lock_minutes = w.get_idle_minutes();
     next.default_color = w.get_default_color().to_string();
     next.default_opacity = w.get_default_opacity();
+    next.note_text_percent = w.get_note_text_percent();
     next.merge_seconds = w.get_merge_seconds();
     next.watch_delay_seconds = w.get_watch_delay_seconds();
     next.rescan_seconds = w.get_rescan_seconds();

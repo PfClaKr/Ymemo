@@ -72,7 +72,10 @@ connect shows the same one.
   "are you sure". And every past version of every note and folder is kept — what it said, when,
   and which device changed it — and any of them can be put back.
 - **Your phone too.** The same memos, folders, photos and history, plus three home-screen
-  widgets and two shortcuts. They go blank the moment the app locks.
+  widgets and two shortcuts. They go blank the moment the app locks. Share text or a picture
+  from any app to make a memo of it, and share a memo out the same way.
+- **Taking it with you.** Settings > Export writes every memo as a Markdown file, in its
+  folders, with its photos, all in one zip — readable without this app.
 - **Locking.** A master password, an instant lock, an idle auto-lock, and optionally staying
   unlocked for a set number of days. Android can also reopen with your fingerprint.
 - **Connecting a device.** Scan its QR code or type its pairing code; both screens show the

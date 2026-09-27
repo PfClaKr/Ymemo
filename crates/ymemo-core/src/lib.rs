@@ -11,6 +11,7 @@ pub mod blob;
 pub mod changelog;
 pub mod crypto;
 pub mod diag;
+pub mod export;
 pub mod fsutil;
 mod groups;
 pub mod history;

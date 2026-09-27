@@ -46,6 +46,12 @@ export component PairingPanel inherits VerticalLayout {
     private property <string> confirm-id;
     // Whether the pairing code was just put on the clipboard.
     private property <bool> copied: false;
+    // "Copied" says so for a moment and goes back, rather than until the window closes.
+    copied-timer := Timer {
+        interval: 2s;
+        running: root.copied;
+        triggered => { root.copied = false; }
+    }
 
     spacing: 8px;
 

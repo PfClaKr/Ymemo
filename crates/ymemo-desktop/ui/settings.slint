@@ -62,6 +62,7 @@ export component SettingsWindow inherits Window {
     in-out property <int> idle-minutes: 0;
     in-out property <string> default-color: "yellow";
     in-out property <int> default-opacity: 100;
+    in-out property <int> note-text-percent: 100;
     in-out property <int> merge-seconds: 15;
     in-out property <int> watch-delay-seconds: 10;
     in-out property <int> rescan-seconds: 60;
@@ -98,6 +99,8 @@ export component SettingsWindow inherits Window {
     callback open-security();
     callback check-update();
     callback open-log();
+    // Every memo written out as Markdown files in a zip; see ymemo_core::export.
+    callback export-memos();
     callback open-update();
 
     // Escape closes this window, the way it closes the folder-name box and puts a
@@ -236,6 +239,31 @@ export component SettingsWindow inherits Window {
                         }
                     }
 
+                    SettingRow {
+                        label: Strings.ui_settings_note_text;
+                        hint: Strings.ui_settings_note_text_hint;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Slider {
+                                horizontal-stretch: 1;
+                                // NOTE_TEXT_PERCENT in settings.rs; never below 100, see there.
+                                minimum: 100;
+                                maximum: 200;
+                                step: 10;
+                                value: root.note-text-percent;
+                                changed(v) => { root.note-text-percent = Math.round(v / 10) * 10; }
+                            }
+                            Text {
+                                text: root.note-text-percent + "%";
+                                font-size: 11px;
+                                color: #ece7db;
+                                vertical-alignment: center;
+                                width: 40px;
+                                horizontal-alignment: right;
+                            }
+                        }
+                    }
+
                     // ---- Advanced ----
                     // The three timings live together because that is how they behave: the delay
                     // a user sees is the sending device's watch delay plus the receiving one's
@@ -278,6 +306,21 @@ export component SettingsWindow inherits Window {
                             minimum: 0;
                             maximum: 365;
                             value <=> root.keep-versions-days;
+                        }
+                    }
+
+                    // The way out: a backup that does not need this app, or a move to another.
+                    // Only while unlocked — there is nothing readable to write out otherwise.
+                    SettingRow {
+                        label: Strings.ui_settings_export;
+                        hint: Strings.ui_settings_export_hint;
+                        HorizontalLayout {
+                            Button {
+                                text: Strings.ui_settings_export_button;
+                                enabled: root.unlocked;
+                                clicked => { root.export-memos(); }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
                         }
                     }
 
