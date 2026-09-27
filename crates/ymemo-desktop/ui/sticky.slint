@@ -518,6 +518,57 @@ component NotePad {
     }
 }
 
+// A slider drawn in the note's own ink. The standard one is the platform's accent — a
+// Windows blue — and on a scrap of yellow paper it was the loudest thing in the window.
+component InkSlider inherits Rectangle {
+    in property <float> minimum: 0;
+    in property <float> maximum: 100;
+    in property <float> value;
+    in property <color> ink;
+    callback changed(float);
+    callback released(float);
+    min-height: 18px;
+    private property <float> fraction: (root.value - root.minimum) / (root.maximum - root.minimum);
+    private property <length> knob: 12px;
+
+    // The track, and the part of it to the left of the knob.
+    Rectangle {
+        y: (parent.height - self.height) / 2;
+        height: 3px;
+        border-radius: 1.5px;
+        background: root.ink.with-alpha(0.22);
+    }
+    Rectangle {
+        y: (parent.height - self.height) / 2;
+        width: root.fraction * (parent.width - root.knob) + root.knob / 2;
+        height: 3px;
+        border-radius: 1.5px;
+        background: root.ink.with-alpha(0.7);
+    }
+    Rectangle {
+        x: root.fraction * (parent.width - root.knob);
+        y: (parent.height - self.height) / 2;
+        width: root.knob;
+        height: root.knob;
+        border-radius: root.knob / 2;
+        background: root.ink;
+        border-width: 2px;
+        border-color: #ffffffcc;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        function at(x: length) -> float {
+            root.minimum + Math.clamp((x - root.knob / 2) / (root.width - root.knob), 0, 1)
+                * (root.maximum - root.minimum)
+        }
+        pointer-event(ev) => {
+            if (ev.kind == PointerEventKind.down) { root.changed(self.at(self.mouse-x)); }
+            if (ev.kind == PointerEventKind.up) { root.released(self.at(self.mouse-x)); }
+        }
+        moved => { if (self.pressed) { root.changed(self.at(self.mouse-x)); } }
+    }
+}
+
 export component StickyWindow inherits Window {
     default-font-family: "Pretendard";
     // Where the focus goes when nothing else has asked for it — which is not only at
@@ -991,11 +1042,12 @@ export component StickyWindow inherits Window {
                             color: Palette.ink(root.sticky-color);
                             vertical-alignment: center;
                         }
-                        Slider {
+                        InkSlider {
                             horizontal-stretch: 1;
                             minimum: 20; // matches the core's MIN_OPACITY
                             maximum: 100;
                             value: root.sticky-opacity;
+                            ink: Palette.ink(root.sticky-color);
                             // Preview while dragging, store once on release.
                             changed(v) => { root.sticky-opacity = v; }
                             released(v) => { root.set-opacity(v); }
@@ -1156,7 +1208,9 @@ export component StickyWindow inherits Window {
                             // is the corner the last line wants.
                             opacity: body.has-focus || !root.chrome ? 0.0 : 0.5;
                             animate opacity { duration: 150ms; }
-                            x: parent.width - self.width - 7px;
+                            // Clear of the resize mark in the window's corner, which shows at
+                            // the same moments this does.
+                            x: parent.width - self.width - 16px;
                             y: parent.height - self.height - 3px;
                         }
                     }
@@ -1254,6 +1308,24 @@ export component StickyWindow inherits Window {
                     animate opacity { duration: 120ms; }
                 }
             }
+        }
+
+        // ---- Where to pull to resize. The note has always been resizable at its edges
+        // (`resize-border-width`), with nothing anywhere saying so; this corner mark is what
+        // a window that has no frame of its own offers instead. Only while the note is in use,
+        // like the rest of its furniture, and drawn only: the border underneath does the work.
+        if !root.collapsed: Path {
+            x: parent.width - 12px;
+            y: parent.height - 12px;
+            width: 9px;
+            height: 9px;
+            viewbox-width: 9;
+            viewbox-height: 9;
+            commands: "M 8.5 1 L 1 8.5 M 8.5 5 L 5 8.5";
+            stroke: Palette.ink(root.sticky-color);
+            stroke-width: 1.2px;
+            opacity: root.chrome ? 0.5 : 0;
+            animate opacity { duration: 140ms; easing: ease-out; }
         }
 
         // ---- "Photo removed · Undo", across the bottom. Under the failure notice below, which

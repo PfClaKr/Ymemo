@@ -236,15 +236,6 @@ pub(crate) fn note_date(millis: i64) -> String {
     }
 }
 
-/// A full timestamp, `YYYY-MM-DD HH:MM`: the history window's revisions.
-pub(crate) fn format_created_at(millis: i64) -> String {
-    use chrono::{Local, TimeZone};
-    match Local.timestamp_millis_opt(millis) {
-        chrono::offset::LocalResult::Single(t) => t.format("%Y-%m-%d %H:%M").to_string(),
-        _ => String::new(),
-    }
-}
-
 /// Sets a memo's title on its sticky, in both the places it appears.
 ///
 /// Two properties for one string: `memo-title` is drawn by Slint and goes through

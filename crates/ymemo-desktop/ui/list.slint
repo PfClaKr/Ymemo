@@ -734,6 +734,11 @@ export component ListWindow inherits Window {
 
         if !root.show-sync && root.rows.length > 0: ListView {
             vertical-stretch: 1;
+            // Never wider than the window: nothing in a row is meant to be scrolled to, and
+            // left to itself the view measured the rows' natural widths — a long title's,
+            // say — and grew a horizontal scrollbar along the bottom of the list.
+            viewport-width: self.visible-width;
+            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
             // A local mirror of the selection, so its `changed` can fire in here: this view
             // is inside an `if`, and nothing outside a conditional can reach an id declared
             // in it — which is also why the scrolling lives here rather than beside the
@@ -761,6 +766,10 @@ export component ListWindow inherits Window {
                 property <bool> preview-fits: title-measure.preferred-width <= self.width * 0.62;
                 title-measure := Text {
                     visible: false;
+                    // Measured, never laid out: at its natural width a long title made the row
+                    // that wide, and the list grew a horizontal scrollbar to scroll to it.
+                    width: 0px;
+                    height: 0px;
                     text: row.title;
                     font-size: 14px;
                 }
