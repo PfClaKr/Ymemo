@@ -54,6 +54,7 @@ mod photos;
 mod tests;
 
 pub use header::{recovery_code_exists, reset_password_with_recovery, wipe};
+pub use photos::RemovedPhoto;
 use header::{
     heal_divergent_log, read_header, to_hex, unlock_header, verify_key, write_header, VaultHeader,
 };

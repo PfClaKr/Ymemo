@@ -14,7 +14,8 @@
         android:paddingEnd="20dp"
         android:paddingBottom="12dp"
         android:text="@string/widget_configure_title"
-        android:textSize="19sp"
+        android:textColor="@color/configure_ink"
+        android:textSize="20sp"
         android:textStyle="bold" />
 
     <ListView

@@ -31,6 +31,8 @@
     <string name="widget_configure_recent_hint">Follows whatever you wrote last</string>
     <string name="widget_configure_empty">Open Ymemo and unlock it, then add the widget again.</string>
 
+    <!-- What the share sheet calls this app's "save as a new memo" target. -->
+    <string name="share_label">Ymemo</string>
     <string name="shortcut_new_memo_short">New memo</string>
     <string name="shortcut_new_memo_long">Write a new memo</string>
     <string name="shortcut_photo_memo_short">Photo memo</string>

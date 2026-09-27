@@ -2,7 +2,9 @@ package dev.ymemo.ymemo_mobile.widget
 
 import android.app.Activity
 import android.appwidget.AppWidgetManager
+import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
@@ -32,11 +34,17 @@ import dev.ymemo.ymemo_mobile.R
  */
 class ListConfigureActivity : Activity() {
 
+    // In the app's language rather than the system's, like the widgets themselves.
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(Locales.localized(newBase))
+    }
+
     private var widgetId = AppWidgetManager.INVALID_APPWIDGET_ID
 
     /** Folder id per radio button id, in the order they were added. */
     private val folderIds = mutableListOf<String>()
     private val colorKeys = mutableListOf<String>()
+    private val colorLabels = mutableListOf<Int>()
 
     /** One checkbox per memo, by memo id, for the "memos I pick" answer. */
     private val pickBoxes = linkedMapOf<String, CheckBox>()
@@ -177,20 +185,61 @@ class ListConfigureActivity : Activity() {
     }
 
     /** The launcher's own light/dark chrome, or one of the sticky papers. */
+    /**
+     * The background, as a row of swatches — the system's first, then the five papers — with
+     * the chosen one's name underneath. The same choice the app offers a memo, made the same
+     * way; it was six full-width radio rows, each painted its own colour.
+     */
     private fun fillColors() {
         val group = findViewById<RadioGroup>(R.id.configure_colors)
         val chosen = WidgetStore.listColor(this, widgetId)
-
-        addChoice(group, colorKeys, WidgetStore.THEME_COLOR,
-            getString(R.string.widget_list_configure_theme), chosen)
-        PAPERS.forEach { (key, label) ->
-            val button = addChoice(group, colorKeys, key, getString(label), chosen)
-            // The swatch is the answer: a row of color names is a row of words about colors.
-            button.setBackgroundColor(Palette.bg(key))
-            button.setTextColor(Palette.ink(key))
+        val options = listOf(WidgetStore.THEME_COLOR to R.string.widget_list_configure_theme) + PAPERS
+        options.forEach { (key, label) ->
+            val button = RadioButton(this).apply {
+                id = View.generateViewId()
+                buttonDrawable = null
+                contentDescription = getString(label)
+                isChecked = key == chosen
+                layoutParams = RadioGroup.LayoutParams(dp(SWATCH), dp(SWATCH)).apply {
+                    marginEnd = dp(12)
+                }
+            }
+            group.addView(button)
+            colorKeys.add(key)
+            colorLabels.add(label)
         }
-        group.setOnCheckedChangeListener { _, _ -> updatePreview() }
+        showSwatches()
+        group.setOnCheckedChangeListener { _, _ ->
+            showSwatches()
+            updatePreview()
+        }
     }
+
+    /** Draws each swatch, ringing the chosen one, and names it under the row. */
+    private fun showSwatches() {
+        val group = findViewById<RadioGroup>(R.id.configure_colors)
+        var name = ""
+        for (i in 0 until group.childCount) {
+            val button = group.getChildAt(i) as RadioButton
+            val key = colorKeys[i]
+            button.background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(
+                    if (key == WidgetStore.THEME_COLOR) Chrome.of(this@ListConfigureActivity, key).card
+                    else Palette.swatch(key)
+                )
+                if (button.isChecked) {
+                    setStroke(dp(3), getColor(R.color.configure_ink))
+                } else {
+                    setStroke(dp(1), 0x33000000)
+                }
+            }
+            if (button.isChecked) name = getString(colorLabels[i])
+        }
+        findViewById<TextView>(R.id.configure_color_name).text = name
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun fillOpacity() {
         val bar = findViewById<SeekBar>(R.id.configure_opacity)
@@ -322,6 +371,9 @@ class ListConfigureActivity : Activity() {
 
         /** How far one level of nesting shifts a folder, in px at mdpi. */
         const val INDENT = 40
+
+        /** A background swatch's diameter, in dp. */
+        const val SWATCH = 40
 
         /** The palette, in the order the app's own color picker uses. */
         val PAPERS = listOf(

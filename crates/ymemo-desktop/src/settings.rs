@@ -70,6 +70,11 @@ fn sane_geometry(g: &[i32; 4], min_w: i32, min_h: i32) -> bool {
     position_ok && g[2] >= min_w && g[3] >= min_h && g[2] <= GEOMETRY_LIMIT && g[3] <= GEOMETRY_LIMIT
 }
 
+/// Smallest and largest note text size, in percent; see [`Settings::note_text_percent`].
+pub const NOTE_TEXT_PERCENT: (i32, i32) = (100, 200);
+/// How far one Ctrl+= / Ctrl+- moves the note text size, in percent.
+pub const NOTE_TEXT_STEP: i32 = 10;
+
 /// Device-local preferences; every field defaults, so older files still load.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -84,6 +89,10 @@ pub struct Settings {
     pub default_color: String,
     /// Opacity of new memos, in percent.
     pub default_opacity: i32,
+    /// How large a note's writing is drawn, in percent of the default. Never below 100: a
+    /// photo standing in the writing sits in blank lines sized for the default, and smaller
+    /// lines would slide the words under the picture. Photos themselves keep their size.
+    pub note_text_percent: i32,
     /// How often other devices' changes are pulled in, in seconds.
     pub merge_seconds: i32,
     /// How long Syncthing waits after a write before it ships the file, in seconds.
@@ -154,6 +163,7 @@ impl Default for Settings {
             idle_lock_minutes: 0,
             default_color: "yellow".into(),
             default_opacity: 100,
+            note_text_percent: 100,
             merge_seconds: 15,
             // Syncthing's own defaults, so an existing install behaves exactly as it did
             // before these became settings.
@@ -211,6 +221,8 @@ impl Settings {
             self.default_color = "yellow".into();
         }
         self.default_opacity = ymemo_core::clamp_opacity(self.default_opacity as i64) as i32;
+        self.note_text_percent =
+            self.note_text_percent.clamp(NOTE_TEXT_PERCENT.0, NOTE_TEXT_PERCENT.1);
         self.merge_seconds = self
             .merge_seconds
             .clamp(MERGE_SECONDS_RANGE.0, MERGE_SECONDS_RANGE.1);
@@ -431,6 +443,7 @@ mod tests {
             idle_lock_minutes: -5,
             default_color: "chartreuse".into(),
             default_opacity: 1,
+            note_text_percent: 10,
             merge_seconds: 0,
             // Both out of range on the low side, where clamping matters most: a zero-second
             // watch delay would have Syncthing shipping half-written logs.
@@ -478,6 +491,7 @@ mod tests {
         assert_eq!(s.last_update_check, 0);
         assert!(s.update_check_due());
         assert!(s.default_opacity >= 20); // raised to the core's MIN_OPACITY
+        assert_eq!(s.note_text_percent, NOTE_TEXT_PERCENT.0);
         assert_eq!(s.merge_seconds, MERGE_SECONDS_RANGE.0);
         assert_eq!(s.watch_delay_seconds, WATCH_DELAY_RANGE.0);
         assert_eq!(s.rescan_seconds, RESCAN_SECONDS_RANGE.0);

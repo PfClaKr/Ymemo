@@ -3,18 +3,20 @@ library;
 
 import 'dart:async';
 import 'dart:math' show max;
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../markdown_style.dart';
+import '../host.dart' as host;
 import '../memo_title.dart';
+import '../markdown_style.dart';
 import '../palette.dart';
+import '../pending_edits.dart';
 import '../src/rust/api.dart';
+import '../theme.dart';
 import '../ui_util.dart';
 import '../widgets/note_photo.dart';
+import 'history_screen.dart';
 
 /// Memo editor: title and body, saved on the way out.
 class MemoEditScreen extends StatefulWidget {
@@ -26,6 +28,7 @@ class MemoEditScreen extends StatefulWidget {
     required this.body,
     required this.color,
     this.pickPhotoOnOpen = false,
+    this.isNew = false,
   });
 
   final FfiStrings strings;
@@ -37,9 +40,17 @@ class MemoEditScreen extends StatefulWidget {
   /// memo that are about a photo rather than about text.
   final bool pickPhotoOnOpen;
 
+  /// The list created this memo for the editor. Left blank, it is discarded on the way out —
+  /// also when the way out is the app being left, which never comes back through the list.
+  final bool isNew;
+
   /// Palette key the memo arrived with; the editor wears it the way the desktop's sticky
   /// does, so the same memo looks like the same memo on either device.
   final String color;
+
+  /// What the editor pops with when the memo is to be deleted; the list does the deleting,
+  /// because the list is where the undo can be offered.
+  static const deleteResult = 'delete';
 
   @override
   State<MemoEditScreen> createState() => _MemoEditScreenState();
@@ -144,9 +155,59 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
     if (chosen != null) await _setColor(chosen);
   }
 
+  /// Saves a moment after typing stops, the way the desktop's sticky does: the editor used to
+  /// write only on the way back, so anything that took the app away first took the text too.
+  Timer? _autosave;
+
+  /// What `YmemoApp` calls before it takes the vault away; see [PendingEdits].
+  late final Future<void> Function() _flushHook = _flushBeforeLeaving;
+
+  Future<void> _flushBeforeLeaving() async {
+    _autosave?.cancel();
+    await _save();
+    // The same as backing out of a new memo left blank (the list's `_add`), for the way out
+    // that never returns to the list.
+    if (widget.isNew && _title.text.trim().isEmpty && _body.text.trim().isEmpty) {
+      await memoDiscardIfBlank(id: widget.id);
+    }
+  }
+
+  /// Saves, shows the memo's past, and — if a version was put back — takes the restored text
+  /// into the fields, which would otherwise write the pre-restore words straight back.
+  Future<void> _openHistory() async {
+    if (!await _save() || !mounted) return;
+    final restored = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      builder: (_) => HistoryScreen(
+        strings: widget.strings,
+        memoId: widget.id,
+        title: headingFor(_title.text, _body.text, widget.strings.newMemo),
+        color: _color,
+      ),
+    ));
+    if (restored != true || !mounted) return;
+    final memo = (await memoList()).where((m) => m.id == widget.id).firstOrNull;
+    if (memo == null || !mounted) return;
+    _savedTitle = memo.title;
+    _savedBody = memo.body;
+    _title.text = memo.title;
+    _body.text = memo.body;
+    setState(() => _color = memo.color);
+    await _reloadPhotos();
+  }
+
+  void _scheduleAutosave() {
+    _autosave?.cancel();
+    _autosave = Timer(const Duration(milliseconds: 800), () {
+      if (mounted) _save();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
+    PendingEdits.attach(_flushHook);
+    _title.addListener(_scheduleAutosave);
+    _body.addListener(_scheduleAutosave);
     // A photo standing in the writing is drawn at a height measured from the top of the text,
     // so it has to be redrawn when the text scrolls under it — otherwise it stays where it is
     // while its words move away.
@@ -175,6 +236,50 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   Future<void> _reloadPhotos() async {
     final list = await attachmentList(memoId: widget.id);
     if (mounted) setState(() => _photos = list);
+  }
+
+  /// Removes a photo and offers it back for a moment, the way a deleted memo is: the history
+  /// does not cover photos, so without the offer a stray tap on the ✕ lost the picture.
+  ///
+  /// Saved first, for the reason [_movePhoto] is: a photo in the writing takes its room with
+  /// it, and the room is closed in what the core has stored.
+  Future<void> _removePhoto(FfiAttachment photo) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await memoUpsert(id: widget.id, title: _title.text, body: _body.text);
+      _showBody(await attachmentRemove(id: photo.id));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
+    if (_selectedPhoto == photo.id) _selectedPhoto = null;
+    await _reloadPhotos();
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(
+      content: Text(widget.strings.photoRemoved),
+      action: SnackBarAction(label: widget.strings.undo, onPressed: _restorePhoto),
+    ));
+  }
+
+  Future<void> _restorePhoto() async {
+    try {
+      await memoUpsert(id: widget.id, title: _title.text, body: _body.text);
+      final body = await attachmentRestore();
+      if (body != null) _showBody(body);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+      return;
+    }
+    await _reloadPhotos();
+  }
+
+  /// The body the core now holds, after it opened or closed a photo's room. Left alone when
+  /// nothing moved, so the caret stays where it was.
+  void _showBody(String body) {
+    if (mounted && _body.text != body) _body.text = body;
+    _savedBody = body;
   }
 
   /// Moves a photo into the writing at the caret, or takes it back out.
@@ -244,7 +349,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
     final picked = await ImagePicker().pickImage(source: source);
     if (picked == null) return;
     final bytes = await picked.readAsBytes();
-    final size = await _decodeSize(bytes);
+    final size = await decodeImageSize(bytes);
     await attachmentAdd(
       memoId: widget.id,
       data: bytes,
@@ -261,20 +366,6 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       _photos = added;
       if (added.isNotEmpty) _selectedPhoto = added.last.id;
     });
-  }
-
-  /// Original pixel size, or null when decoding fails; the core then assumes 1:1.
-  Future<ui.Size?> _decodeSize(Uint8List bytes) async {
-    try {
-      final codec = await ui.instantiateImageCodec(bytes);
-      final frame = await codec.getNextFrame();
-      final size = ui.Size(frame.image.width.toDouble(), frame.image.height.toDouble());
-      frame.image.dispose();
-      codec.dispose();
-      return size;
-    } catch (_) {
-      return null;
-    }
   }
 
   Future<void> _pickSource() async {
@@ -303,6 +394,8 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
 
   @override
   void dispose() {
+    PendingEdits.detach(_flushHook);
+    _autosave?.cancel();
     _followTimer?.cancel();
     _title.dispose();
     _body.dispose();
@@ -331,7 +424,9 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PaperTheme(builder: _page);
+
+  Widget _page(BuildContext context) {
     final base = Theme.of(context);
     final ink = paletteInk(_color);
     // What the body is really set in, for the measuring above.
@@ -366,19 +461,26 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       child: Scaffold(
         backgroundColor: paletteBg(_color),
         appBar: AppBar(
-          // The memo's own title, as the list shows it — the bar said "New memo" over every
-          // memo ever opened, including ones written months ago. Fixed at the title it
-          // arrived with rather than following the field below it, which is right there.
-          // A memo with no title of its own reads by its first line, the same fallback the
-          // list uses, or the two would name the same memo differently.
-          title: Text(headingFor(widget.title, widget.body, widget.strings.newMemo)),
-          backgroundColor: paletteBar(_color),
+          // The bar is the paper: one sheet from the top of the screen down, with the title
+          // written large on it below rather than printed in a coloured strip above it. The
+          // note's colour is carried by the paper and by the chip that changes it.
+          backgroundColor: paletteBg(_color),
+          surfaceTintColor: Colors.transparent,
+          scrolledUnderElevation: 0,
           foregroundColor: ink,
           actions: [
             IconButton(
-              icon: const Icon(Icons.palette_outlined),
               tooltip: widget.strings.color,
               onPressed: _pickColor,
+              icon: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: paletteSwatch(_color),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: ink.withValues(alpha: 0.6), width: 1.5),
+                ),
+              ),
             ),
             IconButton(
               icon: const Icon(Icons.add_photo_alternate),
@@ -393,16 +495,50 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                 if (saved && context.mounted) Navigator.of(context).pop();
               },
             ),
+            // The memo's past and its deletion, which were only reachable from the list's
+            // long press — somewhere nobody looks from inside a memo.
+            PopupMenuButton<String>(
+              onSelected: (action) async {
+                if (action == 'history') {
+                  await _openHistory();
+                } else if (action == 'share') {
+                  // What is on screen, not what was last saved: the words being looked at.
+                  await host.shareText(title: _title.text.trim(), text: _body.text);
+                } else if (action == MemoEditScreen.deleteResult) {
+                  _autosave?.cancel();
+                  Navigator.of(context).pop(MemoEditScreen.deleteResult);
+                }
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem(value: 'share', child: Text(widget.strings.share)),
+                PopupMenuItem(value: 'history', child: Text(widget.strings.history)),
+                PopupMenuItem(
+                  value: MemoEditScreen.deleteResult,
+                  child: Text(widget.strings.delete),
+                ),
+              ],
+            ),
           ],
         ),
         body: Padding(
-          padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset(context)),
+          padding: EdgeInsets.fromLTRB(20, 4, 20, 16 + bottomInset(context)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // The title, written large on the paper — not a labelled, underlined field,
+              // which made a note look like a form to fill in.
               TextField(
                 controller: _title,
-                decoration: InputDecoration(labelText: widget.strings.titleHint),
+                style: base.textTheme.headlineSmall
+                    ?.copyWith(fontWeight: FontWeight.w700, color: const Color(0xFF2B2B22)),
+                decoration: InputDecoration(
+                  hintText: widget.strings.titleHint,
+                  hintStyle: base.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w700, color: ink.withValues(alpha: 0.35)),
+                  filled: false,
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                ),
                 textInputAction: TextInputAction.next,
                 // A memo that has not been written yet opens ready to be written in — the
                 // keyboard used to need a tap of its own before a new note could be started.
@@ -455,6 +591,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                                         // The hint is also the only place the app says what
                                         // ``` does, so it has room to say it.
                                         hintMaxLines: 3,
+                                        filled: false,
                                         border: InputBorder.none,
                                       ),
                                       maxLines: null,
@@ -491,6 +628,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                                       onSelect: () =>
                                           setState(() => _selectedPhoto = photo.id),
                                       onChanged: _reloadPhotos,
+                                      onRemove: () => _removePhoto(photo),
                                       onMove: (into) =>
                                           _movePhoto(photo, intoWriting: into),
                                     ),
@@ -506,6 +644,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                                       onSelect: () =>
                                           setState(() => _selectedPhoto = photo.id),
                                       onChanged: _reloadPhotos,
+                                      onRemove: () => _removePhoto(photo),
                                       onMove: (into) =>
                                           _movePhoto(photo, intoWriting: into),
                                     ),
@@ -543,6 +682,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                                     onSelect: () =>
                                         setState(() => _selectedPhoto = photo.id),
                                     onChanged: _reloadPhotos,
+                                    onRemove: () => _removePhoto(photo),
                                     onMove: (into) =>
                                         _movePhoto(photo, intoWriting: into),
                                   ),

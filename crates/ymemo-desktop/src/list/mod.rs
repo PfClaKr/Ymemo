@@ -6,12 +6,50 @@ pub(crate) mod actions;
 use ymemo_core::diag;
 use std::collections::{HashMap, HashSet};
 
-use slint::{ComponentHandle, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
+use std::rc::Rc;
 use ymemo_core::{now_millis, vault::Vault, Memo};
 use ymemo_i18n::t;
 
 use crate::state::Ctx;
-use crate::ListRow;
+use crate::{FolderChoice, ListRow};
+
+thread_local! {
+    /// What the right-click menu's "Move to" offers; see [`folder_choices`].
+    static FOLDER_CHOICES: Rc<VecModel<FolderChoice>> = Rc::new(VecModel::default());
+}
+
+/// The model behind the list's "Move to" menu, for the window to hold. [`refresh_list`] keeps
+/// it current, so it follows renames and folders arriving from other devices.
+pub(crate) fn folder_choices() -> ModelRc<FolderChoice> {
+    FOLDER_CHOICES.with(|m| ModelRc::from(m.clone()))
+}
+
+/// Every folder in tree order, indented by depth, after the top level. Rewritten only when it
+/// changed: the list is refreshed on every keystroke in the find box, and replacing the model
+/// under an open menu would close it.
+fn update_folder_choices(children: &HashMap<String, Vec<ymemo_core::Group>>) {
+    fn walk(parent: &str, depth: usize, children: &HashMap<String, Vec<ymemo_core::Group>>, out: &mut Vec<FolderChoice>) {
+        for g in children.get(parent).map(Vec::as_slice).unwrap_or_default() {
+            let name = format!("{}{}", "    ".repeat(depth), g.name);
+            out.push(FolderChoice {
+                id: SharedString::from(g.id.as_str()),
+                name: SharedString::from(crate::hangul::for_slint(&name)),
+            });
+            walk(&g.id, depth + 1, children, out);
+        }
+    }
+    let mut next = vec![FolderChoice {
+        id: SharedString::new(),
+        name: SharedString::from(crate::hangul::for_slint(&t!("ui.list_menu_top_level"))),
+    }];
+    walk("", 0, children, &mut next);
+    FOLDER_CHOICES.with(|m| {
+        if m.iter().ne(next.iter().cloned()) {
+            m.set_vec(next);
+        }
+    });
+}
 
 /// Flattens the cached groups and memos into the list model.
 ///
@@ -43,6 +81,10 @@ pub(crate) fn refresh_list(
         HashSet::new()
     });
 
+    // The core lifts cyclic and orphaned groups to the top level.
+    let children = ymemo_core::group_children(&groups);
+    update_folder_choices(&children);
+
     let needle = query.trim().to_lowercase();
     if !needle.is_empty() {
         let mut rows: Vec<ListRow> = groups
@@ -58,15 +100,14 @@ pub(crate) fn refresh_list(
                         || m.body.to_lowercase().contains(&needle)
                 })
                 .map(|m| {
-                    in_folder(memo_row(m, 0, with_photo.contains(&m.id)), &m.group_id, &groups)
+                    let row = memo_row(m, 0, with_photo.contains(&m.id));
+                    in_folder(with_snippet(row, &m.body, &needle), &m.group_id, &groups)
                 }),
         );
         model.set_vec(rows);
         return;
     }
 
-    // The core lifts cyclic and orphaned groups to the top level.
-    let children = ymemo_core::group_children(&groups);
     let valid: HashSet<&str> = groups.iter().map(|g| g.id.as_str()).collect();
 
     let mut rows = Vec::new();
@@ -129,27 +170,37 @@ pub(crate) fn clear_search(ctx: &Ctx) {
 /// - Dropped on a memo: into that memo's group, i.e. beside it.
 /// - Dropped past either end of the list: out to the top level.
 pub(crate) fn move_row(ctx: &Ctx, src: i32, dst: i32) {
-    use slint::Model;
     let rows = &ctx.model;
     let Some(source) = usize::try_from(src).ok().and_then(|i| rows.row_data(i)) else {
         return;
     };
 
+    // Derive the new parent from the drop target; out of range means top level.
+    let target_parent = {
+        let Some(v) = ctx.vault_ref() else { return };
+        match usize::try_from(dst).ok().and_then(|i| rows.row_data(i)) {
+            Some(t) if t.is_group => t.id.to_string(),
+            Some(t) => match v.store().get(t.id.as_str()) {
+                Ok(Some(m)) => m.group_id,
+                _ => String::new(),
+            },
+            None => String::new(), // dropped past the list
+        }
+    };
+    move_to_folder(ctx, source.id.as_str(), source.is_group, &target_parent);
+}
+
+/// Puts a memo or a folder into `target_parent` ("" = the top level): the drop in
+/// [`move_row`], and the right-click menu's "Move to". A folder is never put inside itself or
+/// its own subtree, which would make the tree cyclic; that is refused silently, as a drop
+/// that did not take.
+pub(crate) fn move_to_folder(ctx: &Ctx, id: &str, is_group: bool, target_parent: &str) {
     let Some(mut guard) = ctx.vault_mut() else { return };
     let v = &mut *guard;
+    let target_parent = target_parent.to_string();
 
-    // Derive the new parent from the drop target; out of range means top level.
-    let target_parent = match usize::try_from(dst).ok().and_then(|i| rows.row_data(i)) {
-        Some(t) if t.is_group => t.id.to_string(),
-        Some(t) => match v.store().get(t.id.as_str()) {
-            Ok(Some(m)) => m.group_id,
-            _ => String::new(),
-        },
-        None => String::new(), // dropped past the list
-    };
-
-    let res = if source.is_group {
-        let id = source.id.to_string();
+    let res = if is_group {
+        let id = id.to_string();
         // Never into itself or its own subtree; that would make the tree cyclic.
         let groups = match v.store().list_groups() {
             Ok(g) => g,
@@ -170,7 +221,7 @@ pub(crate) fn move_row(ctx: &Ctx, src: i32, dst: i32) {
             _ => return,
         }
     } else {
-        match v.store().get(source.id.as_str()) {
+        match v.store().get(id) {
             Ok(Some(mut m)) if m.group_id != target_parent => {
                 m.group_id = target_parent;
                 m.updated_at = now_millis();
@@ -359,6 +410,10 @@ pub(crate) fn group_row(
         expanded,
         child_count,
         folder: SharedString::new(),
+        preview: SharedString::new(),
+        when: SharedString::new(),
+        snippet: Default::default(),
+        has_snippet: false,
     }
 }
 
@@ -385,6 +440,138 @@ pub(crate) fn memo_row(memo: &Memo, depth: i32, has_photo: bool) -> ListRow {
         child_count: 0,
         has_photo,
         folder: SharedString::new(),
+        preview: SharedString::from(crate::hangul::for_slint(&preview_of(memo, &title))),
+        when: SharedString::from(crate::hangul::for_slint(&relative_time(
+            memo.updated_at,
+            chrono::Local::now(),
+        ))),
+        snippet: Default::default(),
+        has_snippet: false,
+    }
+}
+
+/// A search hit's row, showing **where** in the body the words were found rather than how
+/// the body begins — which said nothing about why the memo was on the list. Left as it was
+/// when the match is only in the title, which the row already shows.
+fn with_snippet(row: ListRow, body: &str, needle: &str) -> ListRow {
+    let Some(markdown) = search_snippet(body, needle) else { return row };
+    let markdown = crate::hangul::for_slint(&markdown);
+    match slint::StyledText::from_markdown(&markdown) {
+        Ok(snippet) => ListRow { snippet, has_snippet: true, ..row },
+        Err(_) => row,
+    }
+}
+
+/// The stretch of `text` around the first match of `needle` (already lower-cased), as
+/// markdown with the match in bold: a few words before it, more after, on one line, with "…"
+/// where it was cut. `None` when `text` does not contain it.
+///
+/// Compared a character at a time rather than by slicing the lower-cased copy, because
+/// lower-casing can change a character's length in bytes and the two strings would no
+/// longer line up.
+pub(crate) fn search_snippet(text: &str, needle: &str) -> Option<String> {
+    const BEFORE: usize = 12;
+    const AFTER: usize = 40;
+    let chars: Vec<char> = text.chars().map(|c| if c == '\n' { ' ' } else { c }).collect();
+    let lower: Vec<char> = chars.iter().map(|c| c.to_lowercase().next().unwrap_or(*c)).collect();
+    let want: Vec<char> = needle.chars().collect();
+    if want.is_empty() {
+        return None;
+    }
+    let at = lower.windows(want.len()).position(|w| w == want.as_slice())?;
+    let end = at + want.len();
+    // Start at a word, not in one: cut mid-word the snippet read "…ons ship on Friday".
+    let from = at.saturating_sub(BEFORE);
+    let from = match chars[from..at].iter().position(|c| c.is_whitespace()) {
+        Some(space) if from > 0 => from + space + 1,
+        _ => from,
+    };
+    let to = (end + AFTER).min(chars.len());
+    let piece = |a: usize, b: usize| escape_markdown(&chars[a..b].iter().collect::<String>());
+    Some(format!(
+        "{}{}**{}**{}{}",
+        if from > 0 { "…" } else { "" },
+        piece(from, at).trim_start(),
+        piece(at, end),
+        piece(end, to),
+        if to < chars.len() { "…" } else { "" },
+    ))
+}
+
+/// `text` with every character markdown would read as markup escaped, so a snippet is drawn
+/// as written — a `*` in a shopping list is a star here too.
+fn escape_markdown(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if "\\`*_{}[]()<>#+-.!|~".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// The writing after a memo's title, on one line: what tells two notes called "회의" apart.
+/// Fence lines are skipped (they are markup, not writing), and so is the line the title was
+/// taken from, when it was.
+fn preview_of(memo: &Memo, title: &str) -> String {
+    let mut out = String::new();
+    let mut first = true;
+    for line in memo.body.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("```") {
+            continue;
+        }
+        if std::mem::take(&mut first) {
+            let named = line.trim_start_matches('#').trim();
+            if memo.title.is_empty() || (!title.is_empty() && named.starts_with(title.trim())) {
+                continue;
+            }
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&plain_line(line));
+        if out.chars().count() >= 80 {
+            break;
+        }
+    }
+    out.chars().take(80).collect()
+}
+
+/// One line of a memo as a preview reads it: a heading's hashes, a list's bullet and the
+/// emphasis marks are markup, and in a line of grey text beside the title they are noise.
+fn plain_line(line: &str) -> String {
+    let line = line.trim_start_matches('#').trim_start();
+    let line = ["- ", "* ", "+ ", "> "]
+        .iter()
+        .find_map(|m| line.strip_prefix(m))
+        .unwrap_or(line);
+    line.replace("**", "").replace("__", "").replace('`', "")
+}
+
+/// When a memo was last written, the way a person would say it: "방금", "5분 전", "3시간 전",
+/// "어제", then the date — with the year only once it is not this one.
+pub(crate) fn relative_time<Tz: chrono::TimeZone>(millis: i64, now: chrono::DateTime<Tz>) -> String {
+    use chrono::Datelike;
+    let tz = now.timezone();
+    let Some(then) = tz.timestamp_millis_opt(millis).single() else {
+        return String::new();
+    };
+    let secs = (now.timestamp_millis() - millis) / 1000;
+    let days = now.date_naive().signed_duration_since(then.date_naive()).num_days();
+    if secs < 60 {
+        t!("msg.time_now")
+    } else if secs < 3600 {
+        t!("msg.time_minutes", n = secs / 60)
+    } else if days == 0 {
+        t!("msg.time_hours", n = secs / 3600)
+    } else if days == 1 {
+        t!("msg.time_yesterday")
+    } else if then.year() == now.year() {
+        t!("msg.time_date", month = then.month(), day = then.day())
+    } else {
+        t!("msg.time_date_year", year = then.year(), month = then.month(), day = then.day())
     }
 }
 
@@ -406,6 +593,51 @@ fn in_folder(row: ListRow, parent_id: &str, groups: &[ymemo_core::Group]) -> Lis
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn times_read_the_way_people_say_them() {
+        use chrono::{TimeZone, Utc};
+        let now = Utc.with_ymd_and_hms(2026, 9, 27, 15, 0, 0).unwrap();
+        let ago = |secs: i64| now.timestamp_millis() - secs * 1000;
+        assert_eq!(relative_time(ago(10), now), t!("msg.time_now"));
+        assert_eq!(relative_time(ago(5 * 60), now), t!("msg.time_minutes", n = 5));
+        assert_eq!(relative_time(ago(3 * 3600), now), t!("msg.time_hours", n = 3));
+        assert_eq!(relative_time(ago(20 * 3600), now), t!("msg.time_yesterday"));
+        let march = Utc.with_ymd_and_hms(2026, 3, 1, 9, 0, 0).unwrap().timestamp_millis();
+        assert_eq!(relative_time(march, now), t!("msg.time_date", month = 3, day = 1));
+        let old = Utc.with_ymd_and_hms(2024, 12, 31, 9, 0, 0).unwrap().timestamp_millis();
+        assert_eq!(relative_time(old, now), t!("msg.time_date_year", year = 2024, month = 12, day = 31));
+    }
+
+    #[test]
+    fn a_search_snippet_is_the_match_in_its_words() {
+        let body = "회의록\n결정 사항\n배포는 금요일에 합니다. fn main() { println!(\"hi\"); }";
+        let got = search_snippet(body, "금요일").unwrap();
+        assert!(got.contains("**금요일**"), "{got}");
+        assert!(got.starts_with('…'), "cut before: {got}");
+        // Markup in the body is escaped, not drawn.
+        let got = search_snippet("a *star* and hi", "hi").unwrap();
+        assert!(got.contains("\\*star\\*"), "{got}");
+        assert!(got.ends_with("**hi**"), "{got}");
+        // Case does not matter, and no match is no snippet.
+        assert!(search_snippet("Hello World", "world").unwrap().contains("**World**"));
+        assert!(search_snippet("nothing here", "zzz").is_none());
+        // It starts on a word, not halfway into one.
+        assert_eq!(
+            search_snippet("Decisions ship on Friday", "friday").unwrap(),
+            "…ship on **Friday**"
+        );
+        // Every snippet parses as the markdown Slint reads.
+        assert!(slint::StyledText::from_markdown(&search_snippet(body, "hi").unwrap()).is_ok());
+    }
+
+    #[test]
+    fn the_preview_is_what_follows_the_title() {
+        let memo = Memo::new("", "장보기\n- 우유\n\n```\n- 계란\n```");
+        assert_eq!(preview_of(&memo, "장보기"), "우유 계란");
+        let titled = Memo::new("회의", "결정 사항\n배포는 금요일");
+        assert_eq!(preview_of(&titled, "회의"), "결정 사항 배포는 금요일");
+    }
 
     use std::cell::{Cell, RefCell};
     use std::collections::{HashMap, HashSet};

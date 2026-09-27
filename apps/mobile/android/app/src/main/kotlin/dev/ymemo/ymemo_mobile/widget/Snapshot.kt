@@ -42,6 +42,8 @@ internal data class Snapshot(
     val vaultName: String,
     /** True once the vault has been closed: there is nothing to draw, only "tap to unlock". */
     val hidden: Boolean,
+    /** The app's own language setting, `ko`, `en` or `auto`; see [Locales]. */
+    val lang: String,
     val folders: List<Entry>,
     /** Every memo, most recently edited first. */
     val memos: List<Entry>,
@@ -92,7 +94,7 @@ internal data class Snapshot(
 
     companion object {
         /** What a device that has never unlocked the app shows. */
-        val EMPTY = Snapshot(vaultName = "", hidden = true, folders = emptyList(), memos = emptyList())
+        val EMPTY = Snapshot(vaultName = "", hidden = true, lang = "auto", folders = emptyList(), memos = emptyList())
     }
 }
 
@@ -183,6 +185,8 @@ internal object WidgetStore {
         return Snapshot(
             vaultName = root.optString("vault"),
             hidden = root.optBoolean("hidden", true),
+            // Absent in snapshots from before the widgets followed the app's language.
+            lang = root.optString("lang", "auto"),
             folders = entries("folders"),
             memos = entries("memos"),
         )

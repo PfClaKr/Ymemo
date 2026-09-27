@@ -17,12 +17,14 @@ import 'package:path_provider/path_provider.dart';
 
 import 'home_widgets.dart' as widgets;
 import 'host.dart' as host;
+import 'pending_edits.dart';
 import 'screens/lock_screen.dart';
 import 'screens/memo_list_screen.dart';
 import 'settings.dart';
 import 'src/rust/api.dart';
 import 'src/rust/frb_generated.dart';
 import 'sync.dart';
+import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -68,6 +70,7 @@ Future<void> main() async {
   await setLanguage(
     code: settings.value.lang == 'auto' ? Platform.localeName : settings.value.lang,
   );
+  widgets.widgetLang = settings.value.lang;
 
   final sync = SyncController(
     SyncPaths(
@@ -153,11 +156,18 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
     final leaving = state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached ||
         state == AppLifecycleState.hidden;
-    if (leaving && _unlocked && widget.settings.value.lockOnBackground) {
+    if (leaving) unawaited(_leaving());
+  }
+
+  Future<void> _leaving() async {
+    // Written first, whatever else happens: Android may kill a process in the background,
+    // and an open editor otherwise only saves on the way back.
+    await PendingEdits.flush();
+    if (_unlocked && widget.settings.value.lockOnBackground) {
       // The session is deliberately **kept**: this closes the vault so the memos are not
       // sitting open behind the app switcher, but it is not the user saying "ask me again".
       // Manual lock is what clears the session, exactly as on the desktop.
-      _closeVault();
+      await _closeVault();
     }
   }
 
@@ -186,6 +196,9 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
   /// the same catalog, so one re-read is the whole job.
   Future<void> _applyLanguage(String lang) async {
     await setLanguage(code: lang == 'auto' ? Platform.localeName : lang);
+    widgets.widgetLang = lang;
+    // The widgets speak it too, from the next snapshot on — which is this one.
+    unawaited(widgets.publishWidgets());
     final strings = await mobileStrings();
     if (mounted) setState(() => _strings = strings);
   }
@@ -208,6 +221,9 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
   }
 
   Future<void> _closeVault() async {
+    // Whatever the open editor holds goes into the vault before the vault goes. Closing it
+    // first, then popping the editor, lost every word typed since the editor opened.
+    await PendingEdits.flush();
     try {
       await vaultClose();
     } catch (e) {
@@ -224,26 +240,19 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     // The status bar is the system's, drawn over our own background because the app is edge
-    // to edge. Flutter's default leaves its clock and icons **light**, which on this cream
-    // paper is white on off-white — unreadable on every screen that has no AppBar to set the
-    // style for it, which is every screen before the vault is open. Setting it on the theme
-    // covers those too, and follows the platform brightness so a dark phone still gets light
-    // icons. `systemNavigationBar` is left alone: the gesture bar draws its own contrast.
-    final dark = MediaQuery.platformBrightnessOf(context) == Brightness.dark;
-    final overlay = SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: dark ? Brightness.light : Brightness.dark,
-      statusBarBrightness: dark ? Brightness.dark : Brightness.light,
-    );
-    SystemChrome.setSystemUIOverlayStyle(overlay);
+    // to edge. Its icons have to follow whatever is under them: every AppBar sets them from its
+    // theme (see `theme.dart`), and this covers the screens without one. Left to Flutter's
+    // default they were light on the cream paper, where the clock vanished — and a note's
+    // screens stay light in dark mode, which is why this is not simply the phone's setting.
+    // `systemNavigationBar` is left alone: the gesture bar draws its own contrast.
+    SystemChrome.setSystemUIOverlayStyle(
+        overlayFor(WidgetsBinding.instance.platformDispatcher.platformBrightness));
     return MaterialApp(
       title: 'Ymemo',
       navigatorKey: _navigator,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFE6D24A)),
-        useMaterial3: true,
-        appBarTheme: AppBarTheme(systemOverlayStyle: overlay),
-      ),
+      theme: ymemoTheme(Brightness.light),
+      darkTheme: ymemoTheme(Brightness.dark),
+      themeMode: ThemeMode.system,
       home: _restoring
           // Brief: reading one key out of the keystore. Showing the lock screen first would
           // make an auto-unlock look like a password prompt that flashed past.

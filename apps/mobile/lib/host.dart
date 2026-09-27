@@ -62,6 +62,11 @@ Future<bool> saveAs({
 }) async =>
     await _invoke<bool>('saveAs', {'name': name, 'mime': mime, 'bytes': bytes}) ?? false;
 
+/// Offers a memo's text to another app through the system share sheet. False when there is
+/// no sheet to show, or no host side to show it.
+Future<bool> shareText({required String title, required String text}) async =>
+    await _invoke<bool>('shareText', {'title': title, 'text': text}) ?? false;
+
 /// Calls the host pushes at us, by method name.
 ///
 /// One map rather than one `setMethodCallHandler` per feature: the channel keeps a **single**

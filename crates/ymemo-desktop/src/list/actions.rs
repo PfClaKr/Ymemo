@@ -11,7 +11,7 @@ use crate::list::{self, move_row, refresh_list};
 use crate::lock::lock_now;
 use crate::state::{touch, Ctx, Ui};
 use crate::sticky::{self, close_sticky, new_memo, open_sticky};
-use crate::update;
+use crate::{update, ListWindow};
 
 /// How long a delete can be taken back for.
 ///
@@ -35,6 +35,7 @@ pub(crate) fn wire(ctx: &Ctx, ui: &Ui, unlocked: &Rc<Cell<bool>>) {
     wire_rename_group(ctx, ui);
     wire_rename_vault(ctx, ui);
     wire_move_row(ctx, ui);
+    wire_move_to_folder(ctx, ui);
     wire_reorder(ctx, ui);
     wire_recolor(ctx, ui);
     wire_lock_now(ctx, ui, unlocked);
@@ -84,61 +85,64 @@ fn wire_new_memo_in(ctx: &Ctx, ui: &Ui) {
 /// of the list: the delete happens immediately, which is right for the many that were
 /// meant, and the one that was not is one click away for the next thirty seconds.
 fn wire_delete(ctx: &Ctx, ui: &Ui) {
-    let list = &ui.list;
     let ctx = ctx.clone();
+    let list_weak = ui.list.as_weak();
+    ui.list.on_delete_row(move |id, is_group| {
+        touch(&ctx);
+        if let Some(list) = list_weak.upgrade() {
+            delete_and_offer_undo(&ctx, &list, &id, is_group);
+        }
+    });
+}
+
+/// Deletes a memo or folder and puts the offer to take it back at the top of the list, for
+/// [`UNDO_WINDOW`]. The list's own delete, and a sticky's.
+pub(crate) fn delete_and_offer_undo(ctx: &Ctx, list: &ListWindow, id: &str, is_group: bool) {
+    let removed = {
+        let Some(mut guard) = ctx.vault_mut() else { return };
+        let v = &mut *guard;
+        // Deleting a group lifts its contents instead of removing them.
+        let res = if is_group { v.delete_group(id) } else { v.delete(id) };
+        let removed = match res {
+            Ok(removed) => removed,
+            Err(e) => {
+                diag!("delete failed: {e}");
+                list::report_write_failure(&e);
+                return;
+            }
+        };
+        refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
+        removed
+    };
+    if !is_group {
+        close_sticky(&ctx.stickies, id); // clean up an open sticky
+        // Drop its pin and its window too, or settings.json accumulates the ids of
+        // memos that no longer exist. Only a local delete can do this; one that
+        // arrives over sync leaves its entry behind, which costs a string and nothing
+        // else. Deliberately *not* undone by the undo below: a note put back belongs
+        // where the desk has room, not necessarily under whatever is there now.
+        let mut settings = ctx.settings.borrow_mut();
+        let changed = settings.forget_memo(id);
+        if changed {
+            settings.save(&ctx.dir);
+        }
+    }
+    let Some(removed) = removed else { return };
+    *ctx.undo.borrow_mut() = Some(removed);
+    list.set_undo_message(SharedString::from(if is_group {
+        t!("ui.list_deleted_group")
+    } else {
+        t!("ui.list_deleted_memo")
+    }));
+    // The offer expires: a bar that never goes away is furniture, and one still
+    // sitting there tomorrow says nothing about what it would put back.
     let list_weak = list.as_weak();
     let undo = ctx.undo.clone();
-    let undo_timer = ctx.undo_timer.clone();
-    list.on_delete_row(move |id, is_group| {
-        touch(&ctx);
-        let removed = {
-            let Some(mut guard) = ctx.vault_mut() else { return };
-            let v = &mut *guard;
-            // Deleting a group lifts its contents instead of removing them.
-            let res = if is_group { v.delete_group(&id) } else { v.delete(&id) };
-            let removed = match res {
-                Ok(removed) => removed,
-                Err(e) => {
-                    diag!("delete failed: {e}");
-                    list::report_write_failure(&e);
-                    return;
-                }
-            };
-            refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
-            removed
-        };
-        if !is_group {
-            close_sticky(&ctx.stickies, id.as_str()); // clean up an open sticky
-            // Drop its pin and its window too, or settings.json accumulates the ids of
-            // memos that no longer exist. Only a local delete can do this; one that
-            // arrives over sync leaves its entry behind, which costs a string and nothing
-            // else. Deliberately *not* undone by the undo below: a note put back belongs
-            // where the desk has room, not necessarily under whatever is there now.
-            let mut settings = ctx.settings.borrow_mut();
-            let changed = settings.forget_memo(id.as_str());
-            if changed {
-                settings.save(&ctx.dir);
-            }
-        }
-        let Some(removed) = removed else { return };
-        *undo.borrow_mut() = Some(removed);
+    ctx.undo_timer.start(TimerMode::SingleShot, UNDO_WINDOW, move || {
+        *undo.borrow_mut() = None;
         if let Some(list) = list_weak.upgrade() {
-            list.set_undo_message(SharedString::from(if is_group {
-                t!("ui.list_deleted_group")
-            } else {
-                t!("ui.list_deleted_memo")
-            }));
+            list.set_undo_message(SharedString::new());
         }
-        // The offer expires: a bar that never goes away is furniture, and one still
-        // sitting there tomorrow says nothing about what it would put back.
-        let list_weak = list_weak.clone();
-        let undo = undo.clone();
-        undo_timer.start(TimerMode::SingleShot, UNDO_WINDOW, move || {
-            *undo.borrow_mut() = None;
-            if let Some(list) = list_weak.upgrade() {
-                list.set_undo_message(SharedString::new());
-            }
-        });
     });
 }
 
@@ -311,6 +315,16 @@ fn wire_move_row(ctx: &Ctx, ui: &Ui) {
     list.on_move_row(move |src, dst| {
         touch(&ctx);
         move_row(&ctx, src, dst);
+    });
+}
+
+/// The right-click menu's "Move to".
+fn wire_move_to_folder(ctx: &Ctx, ui: &Ui) {
+    let list = &ui.list;
+    let ctx = ctx.clone();
+    list.on_move_to_folder(move |id, is_group, folder| {
+        touch(&ctx);
+        list::move_to_folder(&ctx, &id, is_group, &folder);
     });
 }
 

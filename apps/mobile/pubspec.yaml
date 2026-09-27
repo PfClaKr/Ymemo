@@ -5,7 +5,7 @@ publish_to: "none"
 # Keep in step with the workspace version in the root Cargo.toml: the release tag
 # is checked against that one, and an APK reporting a different number is a support
 # question waiting to happen. The +N is Android's versionCode and must only grow.
-version: 1.1.0+14
+version: 1.2.0+15
 
 environment:
   # PopScope.onPopInvokedWithResult needs Flutter 3.24 (Dart 3.5) or newer.
@@ -48,3 +48,16 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # The app's mark, as packaging/gen_icons.py renders it (copied from packaging/assets).
+  assets:
+    - assets/logo.png
+  # Pretendard (SIL OFL, assets/fonts/OFL.txt), the face the desktop app uses too, so the
+  # two read as one product rather than as whatever each system falls back to for Korean.
+  fonts:
+    - family: Pretendard
+      fonts:
+        - asset: assets/fonts/Pretendard-Regular.otf
+        - asset: assets/fonts/Pretendard-SemiBold.otf
+          weight: 600
+        - asset: assets/fonts/Pretendard-Bold.otf
+          weight: 700

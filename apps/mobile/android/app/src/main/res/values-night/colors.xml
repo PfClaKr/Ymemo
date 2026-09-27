@@ -7,4 +7,11 @@
     <color name="widget_muted">#FFA5A296</color>
     <color name="widget_divider">#26FFFFFF</color>
     <color name="widget_accent">#FFE6D24A</color>
+    <!-- The list's background in the dark theme, for the start-up window. -->
+    <color name="app_background">#15130C</color>
+    <!-- The widget settings screens: the app's accent at a strength that reads on its
+         background, the ink their headings are set in, and what sits on the accent. -->
+    <color name="configure_accent">#E6D24A</color>
+    <color name="configure_ink">#EDE7D5</color>
+    <color name="configure_on_accent">#1F1C12</color>
 </resources>

@@ -117,6 +117,9 @@ class MainActivity : FlutterFragmentActivity() {
                         call.argument<ByteArray>("bytes") ?: ByteArray(0),
                         result,
                     )
+                    "shareText" -> result.success(
+                        shareText(call.argument<String>("title") ?: "", call.argument<String>("text") ?: ""),
+                    )
                     else -> result.notImplemented()
                 }
             }
@@ -162,6 +165,26 @@ class MainActivity : FlutterFragmentActivity() {
             contentResolver.openOutputStream(uri)?.use { it.write(bytes) } != null
         }.getOrDefault(false)
         finishSave(written)
+    }
+
+    /**
+     * Hands a memo's text to another app through the system share sheet. The chooser is
+     * always shown, so nothing leaves without the user picking where it goes.
+     */
+    private fun shareText(title: String, text: String): Boolean {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+            if (title.isNotEmpty()) putExtra(Intent.EXTRA_SUBJECT, title)
+        }
+        val chooser = Intent.createChooser(send, title.ifEmpty { null }).apply {
+            // Not back into Ymemo itself: that would only make a copy of the memo.
+            putExtra(
+                Intent.EXTRA_EXCLUDE_COMPONENTS,
+                arrayOf(android.content.ComponentName(this@MainActivity, ShareActivity::class.java)),
+            )
+        }
+        return runCatching { startActivity(chooser) }.isSuccess
     }
 
     /** Answers the waiting Dart call and lets go of the bytes, whichever way it went. */
@@ -269,11 +292,20 @@ class MainActivity : FlutterFragmentActivity() {
                 else -> null
             }
             ?: return null
-        val id = intent.getStringExtra(Launch.EXTRA_ID) ?: ""
+        val out = mutableMapOf("action" to name, "id" to (intent.getStringExtra(Launch.EXTRA_ID) ?: ""))
+        for ((extra, key) in listOf(
+            Launch.EXTRA_TEXT to "text",
+            Launch.EXTRA_SUBJECT to "subject",
+            Launch.EXTRA_FILE to "file",
+            Launch.EXTRA_MIME to "mime",
+        )) {
+            intent.getStringExtra(extra)?.let { out[key] = it }
+            intent.removeExtra(extra)
+        }
         intent.removeExtra(Launch.EXTRA_ACTION)
         intent.removeExtra(Launch.EXTRA_ID)
         intent.action = Intent.ACTION_MAIN
-        return mapOf("action" to name, "id" to id)
+        return out
     }
 
     /** Stores the snapshot Dart just built and redraws whatever is on the home screen. */

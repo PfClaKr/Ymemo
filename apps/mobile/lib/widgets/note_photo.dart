@@ -31,6 +31,7 @@ class NotePhoto extends StatefulWidget {
     required this.selected,
     required this.onSelect,
     required this.onChanged,
+    required this.onRemove,
     this.flow = false,
     this.inWriting = false,
     this.placeAt,
@@ -64,6 +65,11 @@ class NotePhoto extends StatefulWidget {
   final VoidCallback onSelect;
   final Future<void> Function() onChanged;
 
+  /// Removing the photo. The editor does it, not this widget: a photo in the writing takes
+  /// its room with it, which changes the body the editor is holding, and the removal is
+  /// offered back from the editor's own snackbar.
+  final Future<void> Function() onRemove;
+
   @override
   State<NotePhoto> createState() => _NotePhotoState();
 }
@@ -81,20 +87,40 @@ class _NotePhotoState extends State<NotePhoto> {
   double _dy = 0;
   double _dw = 0;
 
+  /// While the photo has not synced, how often to look for it again.
+  static const Duration _recheck = Duration(seconds: 3);
+  Timer? _waiting;
+
   @override
   void initState() {
     super.initState();
     _load();
   }
 
+  @override
+  void dispose() {
+    _waiting?.cancel();
+    super.dispose();
+  }
+
   Future<void> _load() async {
-    // Before it syncs there are no bytes; say so rather than showing nothing.
+    // Before it syncs there are no bytes; say so rather than showing nothing — and keep
+    // looking. It used to say so until the memo was closed and opened again, long after the
+    // photo had arrived.
     if (!await attachmentHasBlob(hash: widget.attachment.hash)) {
-      if (mounted) setState(() => _missing = true);
+      if (!mounted) return;
+      setState(() => _missing = true);
+      _waiting?.cancel();
+      _waiting = Timer(_recheck, _load);
       return;
     }
     final bytes = await attachmentBytes(hash: widget.attachment.hash);
-    if (mounted) setState(() => _bytes = bytes);
+    if (mounted) {
+      setState(() {
+        _missing = false;
+        _bytes = bytes;
+      });
+    }
   }
 
   /// Whether the note decides where this photo goes, rather than the finger.
@@ -229,7 +255,26 @@ class _NotePhotoState extends State<NotePhoto> {
     if (_bytes == null) {
       return const Center(child: CircularProgressIndicator());
     }
-    return Image.memory(_bytes!, fit: BoxFit.cover);
+    // Decoded at the size it is drawn, not the size it was taken: a phone camera's picture is
+    // twelve megapixels, about 48 MB once decoded, for a photo a note shows a few hundred
+    // pixels wide. Rounded up to a step so dragging the resize handle does not decode it
+    // again on every frame, and never past the original, which would only upscale it.
+    return LayoutBuilder(builder: (context, box) {
+      final original = widget.attachment.widthPx.toInt();
+      int? decodeWidth;
+      if (box.maxWidth.isFinite) {
+        final wanted = box.maxWidth * MediaQuery.devicePixelRatioOf(context);
+        decodeWidth = ((wanted / 256).ceil() * 256);
+        if (original > 0 && decodeWidth > original) decodeWidth = null;
+      }
+      return Image.memory(
+        _bytes!,
+        fit: BoxFit.cover,
+        cacheWidth: decodeWidth,
+        // The old decode stays up while a new size is made, instead of a blank frame.
+        gaplessPlayback: true,
+      );
+    });
   }
 
   /// Detach and resize, shown only on the selected photo so the picture is not permanently
@@ -243,10 +288,7 @@ class _NotePhotoState extends State<NotePhoto> {
             label: widget.strings.photoRemove,
             button: true,
             child: GestureDetector(
-              onTap: () async {
-                await attachmentRemove(id: widget.attachment.id);
-                await widget.onChanged();
-              },
+              onTap: widget.onRemove,
               child: _chip(const Color(0xFFD64541), Icons.close),
             ),
           ),

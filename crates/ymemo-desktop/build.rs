@@ -14,7 +14,9 @@ fn main() {
     // while everything generated stays in OUT_DIR.
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     let config = slint_build::CompilerConfiguration::new()
-        .with_library_paths(HashMap::from([("i18n".to_string(), out.join("i18n.slint"))]));
+        .with_library_paths(HashMap::from([("i18n".to_string(), out.join("i18n.slint"))]))
+        // The fonts go into the binary, not beside it: an installed app has no `fonts/`.
+        .embed_resources(slint_build::EmbedResourcesKind::EmbedFiles);
     slint_build::compile_with_config("ui/app.slint", config).expect("slint compile failed");
 
     // Windows: embed the icon resource so Explorer, the taskbar and the installer show it.
@@ -76,6 +78,14 @@ fn generate_i18n() {
         rust.push_str(&format!(
             "    g.set_{ident}(crate::hangul::for_slint(&ymemo_i18n::t!(\"{key}\")).into());\n"
         ));
+        // Every hint also comes in its first sentence alone, for where the whole of it is
+        // behind an ⓘ (settings.slint's SettingRow). See src/hint.rs.
+        if key.ends_with("_hint") {
+            slint.push_str(&format!("    in-out property <string> {ident}_short;\n"));
+            rust.push_str(&format!(
+                "    g.set_{ident}_short(crate::hangul::for_slint(&crate::hint::first_sentence(&ymemo_i18n::t!(\"{key}\"))).into());\n"
+            ));
+        }
     }
     slint.push_str("}\n");
     rust.push_str("}\n");

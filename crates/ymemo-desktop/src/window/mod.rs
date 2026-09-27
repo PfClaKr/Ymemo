@@ -31,6 +31,7 @@ pub(crate) fn present<T: ComponentHandle + 'static>(component: &T) {
     let _ = component.show();
     set_window_icon(component.window());
     component.window().request_redraw();
+    dark_title_bar(component);
 
     let weak = component.as_weak();
     slint::Timer::single_shot(Duration::ZERO, move || {
@@ -54,6 +55,26 @@ pub(crate) fn present<T: ComponentHandle + 'static>(component: &T) {
         });
     });
 }
+
+/// The system's title bar in dark, over the windows that are always dark.
+///
+/// Windows draws the title bar, and on a light-mode desktop — the default — it drew a white
+/// bar across the top of every dark window, the one part of the app nobody had styled.
+/// winit's dark theme is Windows' dark title bar; on Windows 11 the caption is then set to
+/// the windows' own background colour, so bar and window are one surface. Windows 10 ignores
+/// the colour and keeps the dark bar. Elsewhere this is a hint at most. The stickies have no
+/// system title bar, so it costs them nothing.
+fn dark_title_bar<T: ComponentHandle + 'static>(component: &T) {
+    with_window(component, |w| {
+        w.set_theme(Some(i_slint_backend_winit::winit::window::Theme::Dark));
+        #[cfg(windows)]
+        windows_impl::caption_color(w, WINDOW_BACKGROUND);
+    });
+}
+
+/// The dark windows' background, `#2e2b27` in their `.slint` files.
+#[cfg(windows)]
+const WINDOW_BACKGROUND: (u8, u8, u8) = (0x2e, 0x2b, 0x27);
 
 /// Runs `f` with a window's **winit** window, as soon as there is one.
 ///

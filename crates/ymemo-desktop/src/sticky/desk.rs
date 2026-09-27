@@ -193,7 +193,13 @@ pub(super) fn wire_window_events(
             // hands the focus to each note as it maps, in the order Slint creates them —
             // which is backwards (see `stack_desk`). Counted, that reversed the saved order on
             // every restart.
-            WindowEvent::Focused(true) if born.elapsed() >= SETTLE => {
+            WindowEvent::Focused(focused) => {
+                if let Some(w) = weak.upgrade() {
+                    w.set_window_active(*focused);
+                }
+                if !*focused || born.elapsed() < SETTLE {
+                    return EventResult::Propagate;
+                }
                 last_active.set(next_stamp());
                 // The open list is the order the desk comes back in, bottom first; the note
                 // just activated is now the top of it.
@@ -202,11 +208,23 @@ pub(super) fn wire_window_events(
                     settings.save(&ctx.dir);
                 }
             }
+            // The title bar's buttons show while the pointer is over the note.
+            WindowEvent::CursorEntered { .. } | WindowEvent::CursorLeft { .. } => {
+                if let Some(w) = weak.upgrade() {
+                    w.set_pointer_inside(matches!(event, WindowEvent::CursorEntered { .. }));
+                }
+            }
             WindowEvent::Moved(_) => {
                 motion.moved_at.set(Some(Instant::now()));
                 motion.geometry_dirty.set(true);
             }
-            WindowEvent::Resized(_) => motion.geometry_dirty.set(true),
+            WindowEvent::Resized(size) => {
+                motion.geometry_dirty.set(true);
+                if let Some(w) = weak.upgrade() {
+                    let scale = w.window().scale_factor();
+                    w.set_window_width(size.width as f32 / scale);
+                }
+            }
             WindowEvent::HoveredFile(path) => {
                 if looks_like_a_photo(path) {
                     if let Some(w) = weak.upgrade() {

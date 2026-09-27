@@ -23,7 +23,7 @@ use ymemo_core::diag;
 
 use crate::globals::{
     lan_lock, rejected_lock, relock, remember_delete, sync_lock, vault_lock, with_sync, with_vault,
-    LAST_DELETE,
+    LAST_DELETE, LAST_PHOTO_REMOVAL,
 };
 use ymemo_i18n::t;
 
@@ -238,6 +238,34 @@ pub struct FfiStrings {
     pub move_to: String,
     pub history: String,
     pub history_empty: String,
+    pub photo_removed: String,
+    /// Relative times as templates, `{n}`/`{month}`/`{day}`/`{year}` left in for Dart to
+    /// fill — the desktop's own phrasing, so the two lists say "3시간 전" the same way.
+    pub time_now: String,
+    pub time_minutes: String,
+    pub time_hours: String,
+    pub time_yesterday: String,
+    pub time_date: String,
+    pub time_date_year: String,
+    pub when_today: String,
+    pub when_yesterday: String,
+    pub when_date: String,
+    pub when_date_year: String,
+    pub other_network: String,
+    pub reorder: String,
+    pub reorder_done: String,
+    pub first_memo: String,
+    pub show_password: String,
+    pub hide_password: String,
+    pub clear_search: String,
+    pub export_title: String,
+    pub export_hint: String,
+    pub export_button: String,
+    pub exported: String,
+    pub export_failed: String,
+    pub share: String,
+    pub default_color: String,
+    pub history_current: String,
     pub history_restore: String,
     pub history_restored: String,
     pub new_group: String,
@@ -278,6 +306,7 @@ pub struct FfiStrings {
     pub title_hint: String,
     pub unlock: String,
     pub unpair: String,
+    pub unpair_warning: String,
 
     // Colors, and the master password / recovery code screens. The `msg.*` ones are shared
     // word for word with the desktop, which raises them from Rust.
@@ -296,6 +325,7 @@ pub struct FfiStrings {
     pub password_changed: String,
     pub password_hint: String,
     pub password_mismatch: String,
+    pub password_too_short: String,
     pub recovery_absent: String,
     pub recovery_ack: String,
     pub recovery_code: String,
@@ -304,6 +334,7 @@ pub struct FfiStrings {
     pub recovery_prompt: String,
     pub recovery_warning: String,
     pub reissue_recovery: String,
+    pub reissue_warning: String,
     pub reset_done: String,
     pub reset_password: String,
     pub reset_vault: String,
@@ -402,6 +433,32 @@ pub fn mobile_strings() -> FfiStrings {
         move_to: t!("mobile.move_to"),
         history: t!("mobile.history"),
         history_empty: t!("mobile.history_empty"),
+        photo_removed: t!("mobile.photo_removed"),
+        time_now: t!("msg.time_now"),
+        time_minutes: t!("msg.time_minutes"),
+        time_hours: t!("msg.time_hours"),
+        time_yesterday: t!("msg.time_yesterday"),
+        time_date: t!("msg.time_date"),
+        time_date_year: t!("msg.time_date_year"),
+        when_today: t!("msg.when_today"),
+        when_yesterday: t!("msg.when_yesterday"),
+        when_date: t!("msg.when_date"),
+        when_date_year: t!("msg.when_date_year"),
+        other_network: t!("ui.pair_tab_remote"),
+        reorder: t!("mobile.reorder"),
+        reorder_done: t!("mobile.reorder_done"),
+        first_memo: t!("mobile.first_memo"),
+        show_password: t!("mobile.show_password"),
+        hide_password: t!("mobile.hide_password"),
+        clear_search: t!("mobile.clear_search"),
+        export_title: t!("ui.settings_export"),
+        export_hint: t!("mobile.export_hint"),
+        export_button: t!("mobile.export_button"),
+        exported: t!("mobile.exported"),
+        export_failed: t!("mobile.export_failed"),
+        share: t!("mobile.share"),
+        default_color: t!("ui.settings_default_color"),
+        history_current: t!("mobile.history_current"),
         history_restore: t!("mobile.history_restore"),
         history_restored: t!("mobile.history_restored"),
         new_group: t!("mobile.new_group"),
@@ -441,6 +498,7 @@ pub fn mobile_strings() -> FfiStrings {
         title_hint: t!("mobile.title_hint"),
         unlock: t!("mobile.unlock"),
         unpair: t!("mobile.unpair"),
+        unpair_warning: t!("mobile.unpair_warning"),
 
         color: t!("mobile.color"),
         change_password: t!("mobile.change_password"),
@@ -457,6 +515,7 @@ pub fn mobile_strings() -> FfiStrings {
         password_changed: t!("msg.password_changed"),
         password_hint: t!("mobile.password_hint"),
         password_mismatch: t!("mobile.password_mismatch"),
+        password_too_short: t!("mobile.password_too_short"),
         recovery_absent: t!("mobile.recovery_absent"),
         recovery_ack: t!("mobile.recovery_ack"),
         recovery_code: t!("mobile.recovery_code"),
@@ -465,6 +524,7 @@ pub fn mobile_strings() -> FfiStrings {
         recovery_prompt: t!("mobile.recovery_prompt"),
         recovery_warning: t!("mobile.recovery_warning"),
         reissue_recovery: t!("mobile.reissue_recovery"),
+        reissue_warning: t!("mobile.reissue_warning"),
         reset_done: t!("msg.reset_done"),
         reset_password: t!("mobile.reset_password"),
         reset_vault: t!("mobile.reset_vault"),
@@ -519,6 +579,7 @@ pub fn vault_close() -> Result<()> {
     // memo text behind it, and an undo offered across a lock would put a memo back into a
     // vault the user has just shut.
     remember_delete(None);
+    relock(&LAST_PHOTO_REMOVAL).take();
     Ok(())
 }
 
@@ -529,6 +590,11 @@ pub fn vault_close() -> Result<()> {
 // The core does all of this by rewriting `vault.json`'s wrapper alone — no log and no blob
 // is touched — so every call here is two Argon2id runs at worst and nothing to show progress
 // for. See `ymemo_core::vault` for why that is safe.
+
+/// Shortest new master password the app accepts; see `ymemo_core::crypto::MIN_PASSWORD_CHARS`.
+pub fn password_min_chars() -> u32 {
+    ymemo_core::crypto::MIN_PASSWORD_CHARS as u32
+}
 
 /// Whether `vault_dir` already holds a vault.
 ///
@@ -829,6 +895,12 @@ pub fn attachment_add(
     })
 }
 
+/// Every memo as Markdown files in a zip, photos included; see `ymemo_core::export`.
+/// **Plaintext** — for the user's own "save as" and nothing else.
+pub fn export_markdown_zip() -> Result<Vec<u8>> {
+    with_vault(|v| ymemo_core::export::markdown_zip(v))
+}
+
 /// Photo bytes. Errors while the blob has not synced yet; draw a placeholder instead.
 pub fn attachment_bytes(hash: String) -> Result<Vec<u8>> {
     with_vault(|v| v.attachment_bytes(&hash))
@@ -886,9 +958,29 @@ fn body_of_attachment(v: &mut Vault, attachment_id: &str) -> Result<String> {
     Ok(v.store().get(&a.memo_id)?.map(|m| m.body).unwrap_or_default())
 }
 
-/// Detaches a photo; the blob file stays (no GC).
-pub fn attachment_remove(id: String) -> Result<()> {
-    with_vault(|v| v.detach(&id))
+/// Removes a photo, closing its room in the writing if it stood in one, and keeps it for
+/// [`attachment_restore`]. Returns the memo's body afterwards, for the editor to show — the
+/// room's blank lines may just have gone from it. Save the editor first, as for moving a
+/// photo into the writing.
+pub fn attachment_remove(id: String) -> Result<String> {
+    with_vault(|v| {
+        let memo_id = v.store().get_attachment(&id)?.map(|a| a.memo_id).unwrap_or_default();
+        let removed = v.remove_attachment(&id)?;
+        *relock(&LAST_PHOTO_REMOVAL) = removed;
+        Ok(v.store().get(&memo_id)?.map(|m| m.body).unwrap_or_default())
+    })
+}
+
+/// Puts back the photo [`attachment_remove`] last took, room and all. Returns the memo's body
+/// afterwards, or `None` when there was nothing to put back.
+pub fn attachment_restore() -> Result<Option<String>> {
+    let Some(removed) = relock(&LAST_PHOTO_REMOVAL).take() else {
+        return Ok(None);
+    };
+    with_vault(|v| {
+        v.restore_attachment(&removed)?;
+        Ok(v.store().get(&removed.attachment.memo_id)?.map(|m| m.body))
+    })
 }
 
 /// All groups, sorted by name.
@@ -1542,6 +1634,8 @@ pub struct FfiSettings {
     pub update_check: bool,
     /// When that last happened (epoch millis), so it is not asked on every start.
     pub last_update_check: i64,
+    /// Palette key a new memo starts with, as the desktop's setting of the same name.
+    pub default_color: String,
 }
 
 impl Default for FfiSettings {
@@ -1559,6 +1653,7 @@ impl Default for FfiSettings {
             biometric_unlock: false,
             update_check: true,
             last_update_check: 0,
+            default_color: "yellow".into(),
         }
     }
 }
@@ -1577,6 +1672,9 @@ impl FfiSettings {
         self.rescan_seconds =
             self.rescan_seconds.clamp(RESCAN_SECONDS_RANGE.0, RESCAN_SECONDS_RANGE.1);
         self.keep_versions_days = self.keep_versions_days.clamp(0, KEEP_VERSIONS_DAYS_MAX);
+        if !matches!(self.default_color.as_str(), "yellow" | "pink" | "green" | "blue" | "purple") {
+            self.default_color = "yellow".into();
+        }
         if self.last_update_check < 0 || self.last_update_check > now_millis() {
             self.last_update_check = 0;
         }

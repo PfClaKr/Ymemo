@@ -107,14 +107,14 @@ pub(super) fn heal_divergent_log(
         return Ok(()); // no local log, nothing to heal
     }
     // Already opens under the canonical key: healthy, or healed earlier.
-    if ChangeLog::open(&own_path, canonical_key.clone()).read_all().is_ok() {
+    if ChangeLog::open(&own_path, canonical_key.clone()).read_all_strict().is_ok() {
         return Ok(());
     }
     // Look for the old key among the conflict headers. Each is unlocked the same way the
     // canonical one is, so a wrapped and an unwrapped header are both candidates.
     for header in conflict_headers(dir) {
         let Ok(old_key) = unlock_header(&header, password) else { continue };
-        if ChangeLog::open(&own_path, old_key.clone()).read_all().is_ok() {
+        if ChangeLog::open(&own_path, old_key.clone()).read_all_strict().is_ok() {
             reencrypt_log(&own_path, &old_key, canonical_key)?;
             crate::diag!("diverged vault key: re-encrypted our log under the canonical key");
             return Ok(());
@@ -244,7 +244,7 @@ pub(super) fn conflict_headers(dir: &Path) -> Vec<VaultHeader> {
 
 /// Rewrites a log from `old_key` to `new_key` and swaps it in atomically.
 pub(super) fn reencrypt_log(path: &Path, old_key: &MasterKey, new_key: &MasterKey) -> Result<()> {
-    let records = ChangeLog::open(path, old_key.clone()).read_all()?;
+    let records = ChangeLog::open(path, old_key.clone()).read_all_strict()?;
     let tmp = path.with_extension("ymlog.tmp");
     let _ = fs::remove_file(&tmp);
     let new_log = ChangeLog::open(&tmp, new_key.clone());

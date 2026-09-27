@@ -1,4 +1,4 @@
-import { Button, ListView, ScrollView } from "std-widgets.slint";
+import { Button, ListView, ScrollView, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
 
 // ---------------------------------------------------------------------------
@@ -29,6 +29,11 @@ export struct RevisionRow {
 }
 
 export component HistoryWindow inherits Window {
+    default-font-family: "Pretendard";
+    // This window is always dark, so the standard controls in it are too. Left to follow the
+    // system they came out light on a light-mode desktop — pale grey boxes set into a dark
+    // window, and a disabled primary button drawn darker than an enabled one beside it.
+    init => { StdPalette.color-scheme = ColorScheme.dark; }
     title: Strings.ui_history_title;
     preferred-width: 560px;
     preferred-height: 480px;
@@ -63,6 +68,30 @@ export component HistoryWindow inherits Window {
                 root.close-requested();
                 return accept;
             }
+            // Up/Down step through the versions and Return puts the chosen one back, the way
+            // the list window's keys work. Nothing chosen yet, either arrow starts at the top.
+            if (root.revisions.length > 0) {
+                if (ev.text == Key.DownArrow) {
+                    root.selected = min(root.selected + 1, root.revisions.length - 1);
+                    return accept;
+                }
+                if (ev.text == Key.UpArrow) {
+                    root.selected = max(root.selected - 1, 0);
+                    return accept;
+                }
+                if (ev.text == Key.Home) {
+                    root.selected = 0;
+                    return accept;
+                }
+                if (ev.text == Key.End) {
+                    root.selected = root.revisions.length - 1;
+                    return accept;
+                }
+            }
+            if (ev.text == Key.Return && root.selected >= 0 && root.current.restorable) {
+                root.restore(root.current.index);
+                return accept;
+            }
             return reject;
         }
 
@@ -92,6 +121,20 @@ export component HistoryWindow inherits Window {
                 // ---- The revisions themselves ----
                 ListView {
                     width: 235px;
+                    // Scrolls the chosen row into sight; a local mirror because this view is
+                    // inside an `if` (see the same thing in list.slint). Written only when the
+                    // row is out of view, so the wheel still belongs to the user.
+                    property <int> sel: root.selected;
+                    property <length> row-h: 52px;
+                    changed sel => {
+                        if (self.sel >= 0) {
+                            if (self.sel * self.row-h + self.row-h > -self.viewport-y + self.visible-height) {
+                                self.viewport-y = self.visible-height - (self.sel + 1) * self.row-h;
+                            } else if (self.sel * self.row-h < -self.viewport-y) {
+                                self.viewport-y = -self.sel * self.row-h;
+                            }
+                        }
+                    }
                     for row[idx] in root.revisions: Rectangle {
                         height: 52px;
                         border-radius: 6px;
@@ -100,7 +143,10 @@ export component HistoryWindow inherits Window {
                                   : transparent;
                         row-ta := TouchArea {
                             mouse-cursor: pointer;
-                            clicked => { root.selected = idx; }
+                            clicked => {
+                                root.selected = idx;
+                                keys.focus();
+                            }
                         }
                         HorizontalLayout {
                             padding: 7px;
@@ -114,6 +160,9 @@ export component HistoryWindow inherits Window {
                                 spacing: 2px;
                                 HorizontalLayout {
                                     spacing: 5px;
+                                    // Packed to the left: stretched, the two texts shared the
+                                    // row's width and the kind floated off halfway across it.
+                                    alignment: start;
                                     Text {
                                         text: row.when;
                                         font-size: 11px;

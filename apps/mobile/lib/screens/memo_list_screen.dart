@@ -2,9 +2,9 @@
 library;
 
 import 'dart:async';
-import 'dart:io' show Directory, FileSystemEvent;
+import 'dart:io' show Directory, File, FileSystemEvent;
 
-import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/foundation.dart' show Uint8List, listEquals;
 import 'package:flutter/material.dart';
 
 import '../home_widgets.dart' as widgets;
@@ -101,6 +101,9 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
   final TextEditingController _search = TextEditingController();
   String _query = '';
 
+  /// Whether the memos show their drag handles; the menu's "Rearrange" turns it on.
+  bool _reordering = false;
+
   bool get _atRoot => widget.groupId.isEmpty;
 
   @override
@@ -148,6 +151,9 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
         break;
       case widgets.WidgetAction.openFolder:
         await _openFolderById(request.id);
+        break;
+      case widgets.WidgetAction.share:
+        await _addShared(request);
         break;
     }
   }
@@ -340,6 +346,20 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
   }
 
   /// Asks for a name and creates a folder inside the one on screen.
+  Future<void> _openSettings() async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => SettingsScreen(
+        strings: widget.strings,
+        settings: widget.settings,
+        sync: widget.sync,
+        vaultDir: widget.sync.paths.vaultDir,
+        onLock: widget.onLock,
+        onLanguageChanged: widget.onLanguageChanged,
+      ),
+    ));
+    if (mounted) setState(() {}); // the language may have changed
+  }
+
   Future<void> _newFolder() async {
     final name = await _askForName(context, widget.strings, widget.strings.newGroup, '');
     if (name == null || name.isEmpty) return;
@@ -450,14 +470,42 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
               title: Text(folder.name, style: const TextStyle(fontWeight: FontWeight.w600)),
               // A folder is the one row here that goes somewhere rather than opening an
               // editor, and nothing on it said so.
-              trailing: Icon(Icons.chevron_right, color: paletteInk(folder.color)),
+              trailing: Icon(Icons.chevron_right,
+                  color: paletteMark(folder.color, Theme.of(context).brightness)),
               onTap: () => _openFolder(folder),
               onLongPress: () => _folderMenu(folder),
             ),
           ),
-          const Divider(height: 1, thickness: 1),
         ],
       );
+
+  /// Under a memo's title: how it goes on — or, while searching, where in it the words were
+  /// found, with them in bold. The start of the body said nothing about why a memo was on the
+  /// list of results.
+  Widget? _subtitle(FfiMemo memo) {
+    final hit = _query.isEmpty ? null : searchSnippet(memo.body, _query);
+    if (hit != null) {
+      return Text.rich(
+        TextSpan(children: [
+          TextSpan(text: hit.before),
+          TextSpan(
+            text: hit.match,
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          TextSpan(text: hit.after),
+        ]),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+    final preview = rowPreview(memo);
+    return preview.isEmpty
+        ? null
+        : Text(preview, maxLines: 1, overflow: TextOverflow.ellipsis);
+  }
 
   /// One memo row. `dragIndex` is its position in the reorderable list, or null while the
   /// list is showing search results, where there is no arrangement to drag it into.
@@ -488,32 +536,35 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
                     if (memo.hasPhoto) ...[
                       const SizedBox(width: 6),
                       Icon(Icons.image_outlined,
-                          size: 15, color: paletteInk(memo.color).withValues(alpha: 0.55)),
+                          size: 15, color: paletteMark(memo.color, Theme.of(context).brightness)),
                     ],
                   ],
                 ),
-                subtitle: rowPreview(memo).isEmpty
-                    ? null
-                    : Text(rowPreview(memo),
-                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                subtitle: _subtitle(memo),
                 onTap: () => _open(memo),
                 onLongPress: () => _memoMenu(memo),
                 // A handle of its own, rather than a long press: a long press already
                 // opens this memo's menu, and a drag that starts anywhere on the row
                 // would fight the swipe that deletes it.
-                trailing: dragIndex == null
-                    ? null
-                    : ReorderableDragStartListener(
+                // When it was last written, the way a person would say it — or, while the
+                // list is being rearranged, the handle to drag it by. The handle used to be
+                // on every row all the time, three grey bars down the right of the list.
+                trailing: dragIndex != null && _reordering
+                    ? ReorderableDragStartListener(
                         index: dragIndex,
                         child: Icon(
                           Icons.drag_handle,
-                          color: paletteInk(memo.color).withValues(alpha: 0.55),
+                          color: paletteMark(memo.color, Theme.of(context).brightness),
                         ),
+                      )
+                    : Text(
+                        relativeTime(memo.updatedAt.toInt(), widget.strings),
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant),
                       ),
               ),
             ),
           ),
-          const Divider(height: 1, thickness: 1),
         ],
       );
 
@@ -527,9 +578,11 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
   /// The memo is really gone from the document the whole time; undoing writes it back as a new
   /// edit (see `Vault::undelete`), so nothing here is a pending state that sync could catch
   /// half-done. The core keeps exactly one of these, and drops it when the vault closes.
-  Future<void> _deleteWithUndo(FfiMemo memo) async {
+  Future<void> _deleteWithUndo(FfiMemo memo) => _deleteIdWithUndo(memo.id);
+
+  Future<void> _deleteIdWithUndo(String id) async {
     final messenger = ScaffoldMessenger.of(context);
-    await memoDelete(id: memo.id);
+    await memoDelete(id: id);
     await _reload();
     if (!mounted) return;
     messenger.hideCurrentSnackBar();
@@ -546,7 +599,9 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
     ));
   }
 
-  /// Recolor or move, on a long press. Deleting is the swipe, so it is not repeated here.
+  /// Recolor, move, look back or delete, on a long press. Deleting is also the swipe, but a
+  /// swipe is a gesture nobody is told about: with the sheet offering everything else, a
+  /// memo looked as if it could not be deleted at all.
   Future<void> _memoMenu(FfiMemo memo) async {
     final s = widget.strings;
     final action = await showModalBottomSheet<String>(
@@ -567,6 +622,11 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
               title: Text(s.history),
               onTap: () => Navigator.of(context).pop('history'),
             ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: Text(s.delete),
+              onTap: () => Navigator.of(context).pop('delete'),
+            ),
           ],
         ),
       ),
@@ -578,12 +638,16 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
       await _reload();
     } else if (action == 'move') {
       await _moveMemo(memo);
+    } else if (action == 'delete') {
+      await _deleteWithUndo(memo);
     } else if (action == 'history') {
       final restored = await Navigator.of(context).push<bool>(MaterialPageRoute(
         builder: (_) => HistoryScreen(
           strings: widget.strings,
           memoId: memo.id,
-          title: memo.title,
+          // The name the row shows, first line and all: a memo with no title of its own was
+          // headed "New memo" in its own history.
+          title: rowTitle(memo, widget.strings.newMemo),
           color: memo.color,
         ),
       ));
@@ -597,12 +661,23 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
   /// The wash alone is too faint to separate at a glance once the list is long, and the
   /// stripe alone loses to the row's own text; together they are the signal the desktop's
   /// list gives, at a size a thumb scrolls past.
-  Widget _tinted(BuildContext context, String color, Widget child) => Container(
-        decoration: BoxDecoration(
-          color: paletteRow(color, Theme.of(context).colorScheme.surface),
-          border: Border(left: BorderSide(color: paletteSwatch(color), width: 5)),
+  ///
+  /// A card, not a band: rounded, with room around it, the way a list of notes looks in a
+  /// notes app rather than in a spreadsheet. The stripe stays, inside the rounding.
+  Widget _tinted(BuildContext context, String color, Widget child) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: Material(
+            color: paletteRow(color, Theme.of(context).colorScheme.surface),
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border(left: BorderSide(color: paletteSwatch(color), width: 5)),
+              ),
+              child: child,
+            ),
+          ),
         ),
-        child: child,
       );
 
   /// The palette, at the top of both long-press sheets.
@@ -685,13 +760,61 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
     _query = '';
   }
 
-  Future<void> _add({bool withPhoto = false}) async {
+  /// What another app shared, as a new memo: the text (under its subject, when the text
+  /// does not already say it) and the picture, if one came. The copy the host made of the
+  /// picture is deleted once it is in the vault — or once it is known it will not be.
+  Future<void> _addShared(widgets.WidgetRequest shared) async {
+    final text = shared.text.trim();
+    final subject = shared.subject.trim();
+    final body = subject.isEmpty || text.contains(subject)
+        ? text
+        : text.isEmpty
+            ? subject
+            : '$subject\n$text';
+    _SharedPhoto? photo;
+    if (shared.file.isNotEmpty) {
+      final file = File(shared.file);
+      try {
+        final bytes = await file.readAsBytes();
+        final ext = switch (shared.mime) {
+          'image/png' => 'png',
+          'image/gif' => 'gif',
+          'image/webp' => 'webp',
+          _ => 'jpg',
+        };
+        photo = _SharedPhoto(bytes, 'shared.$ext', shared.mime);
+      } catch (e) {
+        debugPrint('could not read the shared picture: $e');
+      } finally {
+        try {
+          await file.delete();
+        } catch (_) {}
+      }
+    }
+    if (body.isEmpty && photo == null) return;
+    await _add(body: body, photo: photo);
+  }
+
+  Future<void> _add({bool withPhoto = false, String body = '', _SharedPhoto? photo}) async {
     _clearSearch();
     final messenger = ScaffoldMessenger.of(context);
+    final color = widget.settings.value.defaultColor;
     final String id;
     try {
-      id = await memoUpsert(title: '', body: '');
+      id = await memoUpsert(title: '', body: body);
+      if (color != defaultColor) await memoSetColor(id: id, color: color);
       if (!_atRoot) await memoSetGroup(id: id, groupId: widget.groupId);
+      if (photo != null) {
+        final size = await decodeImageSize(photo.bytes);
+        await attachmentAdd(
+          memoId: id,
+          data: photo.bytes,
+          name: photo.name,
+          mime: photo.mime,
+          widthPx: size?.width.toInt() ?? 0,
+          heightPx: size?.height.toInt() ?? 0,
+        );
+      }
     } catch (e) {
       // Without this the button simply did nothing, which reads as a broken app rather
       // than as storage the vault cannot be written to.
@@ -699,18 +822,20 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
       return;
     }
     if (!mounted) return;
-    await Navigator.of(context).push(
+    final result = await Navigator.of(context).push<String>(
       MaterialPageRoute(
         builder: (_) => MemoEditScreen(
           strings: widget.strings,
           id: id,
           title: '',
-          body: '',
-          color: defaultColor,
+          body: body,
+          color: color,
           pickPhotoOnOpen: withPhoto,
+          isNew: true,
         ),
       ),
     );
+    if (result == MemoEditScreen.deleteResult) return _deleteIdWithUndo(id);
     // Backing out without writing anything leaves the memo this created behind, and one
     // "New memo" row for every time anyone tapped the button and changed their mind. The
     // core decides — a photo counts as writing.
@@ -723,7 +848,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
   }
 
   Future<void> _open(FfiMemo memo) async {
-    await Navigator.of(context).push(
+    final result = await Navigator.of(context).push<String>(
       MaterialPageRoute(
         builder: (_) => MemoEditScreen(
           strings: widget.strings,
@@ -734,6 +859,8 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
         ),
       ),
     );
+    // Deleting from the editor comes back here, where the undo can be offered.
+    if (result == MemoEditScreen.deleteResult) return _deleteIdWithUndo(memo.id);
     await _reload();
   }
 
@@ -755,39 +882,54 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
                 ),
               )
             : Text(widget.groupName),
+        titleTextStyle: Theme.of(context)
+            .textTheme
+            .headlineSmall
+            ?.copyWith(fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.create_new_folder_outlined),
-            tooltip: widget.strings.newGroup,
-            onPressed: _newFolder,
-          ),
           // Pairing, settings and the update banner belong to the screen you always start
-          // from; merging is about content, so it stays available inside a folder too.
+          // from. The pairing button stays out here because it carries the sync state;
+          // everything else is in the menu, so the bar is two things rather than four.
           if (_atRoot) SyncButton(strings: widget.strings, sync: widget.sync),
-          IconButton(
-            icon: const Icon(Icons.sync),
-            tooltip: widget.strings.syncNow,
-            // The timer does this every 15s; the button is for when you are waiting on a
-            // memo you just wrote on the other device.
-            onPressed: _mergeNow,
-          ),
-          if (_atRoot)
-          IconButton(
-            icon: const Icon(Icons.settings),
-            tooltip: widget.strings.settings,
-            onPressed: () async {
-              await Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => SettingsScreen(
-                  strings: widget.strings,
-                  settings: widget.settings,
-                  sync: widget.sync,
-                  vaultDir: widget.sync.paths.vaultDir,
-                  onLock: widget.onLock,
-                  onLanguageChanged: widget.onLanguageChanged,
-                ),
-              ));
-              if (mounted) setState(() {}); // the language may have changed
+          PopupMenuButton<String>(
+            onSelected: (action) async {
+              switch (action) {
+                case 'folder':
+                  await _newFolder();
+                case 'reorder':
+                  setState(() => _reordering = !_reordering);
+                case 'settings':
+                  await _openSettings();
+              }
             },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'folder',
+                child: ListTile(
+                  leading: const Icon(Icons.create_new_folder_outlined),
+                  title: Text(widget.strings.newGroup),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              PopupMenuItem(
+                value: 'reorder',
+                enabled: _query.isEmpty && _memos.length > 1,
+                child: ListTile(
+                  leading: Icon(_reordering ? Icons.check : Icons.swap_vert),
+                  title: Text(_reordering ? widget.strings.reorderDone : widget.strings.reorder),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              if (_atRoot)
+                PopupMenuItem(
+                  value: 'settings',
+                  child: ListTile(
+                    leading: const Icon(Icons.settings_outlined),
+                    title: Text(widget.strings.settings),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+            ],
           ),
         ],
       ),
@@ -809,11 +951,16 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
               isDense: true,
               hintText: widget.strings.search,
               prefixIcon: const Icon(Icons.search, size: 20),
-              border: const OutlineInputBorder(),
+              // A pill, filled, no outline: the search bar every current Android app has.
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(28),
+                borderSide: BorderSide.none,
+              ),
               suffixIcon: _query.isEmpty
                   ? null
                   : IconButton(
                       icon: const Icon(Icons.close, size: 20),
+                      tooltip: widget.strings.clearSearch,
                       onPressed: () {
                         _search.clear();
                         _runSearch('');
@@ -827,16 +974,37 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
             child: Center(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: Text(
-                  _query.isNotEmpty
-                      ? widget.strings.searchNone
-                      // A folder that is empty says so; the top level says what to do about
-                      // it, which is what someone opening the app for the first time sees.
-                      : _atRoot
-                          ? widget.strings.emptyHint
-                          : widget.strings.emptyFolder,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyMedium,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // The top level, empty: what someone opening the app for the first time
+                    // sees, so it is the app's mark and the one thing to do next, not a line
+                    // of text alone in the middle of the screen.
+                    if (_query.isEmpty && _atRoot) ...[
+                      Opacity(
+                        opacity: 0.9,
+                        child: Image.asset('assets/logo.png', width: 96, height: 96),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    Text(
+                      _query.isNotEmpty
+                          ? widget.strings.searchNone
+                          : _atRoot
+                              ? widget.strings.emptyHint
+                              : widget.strings.emptyFolder,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyLarge,
+                    ),
+                    if (_query.isEmpty && _atRoot) ...[
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        onPressed: _add,
+                        icon: const Icon(Icons.edit_outlined),
+                        label: Text(widget.strings.firstMemo),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ),
@@ -855,7 +1023,11 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
           )
         else
         Expanded(
-          child: ReorderableListView.builder(
+          // Pull to merge: what the sync button in the bar used to do, where every list app
+          // puts it. The timer and the log watch still do it on their own.
+          child: RefreshIndicator(
+            onRefresh: _mergeNow,
+            child: ReorderableListView.builder(
         // Room for the gesture bar and for the button floating above it, or the last memo
         // in the list is unreachable behind one or the other.
         padding: EdgeInsets.only(bottom: bottomInset(context) + 88),
@@ -869,6 +1041,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
         itemBuilder: (context, i) => i < _folders.length
             ? _folderTile(_folders[i])
             : _memoTile(_memos[i - _folders.length], i),
+            ),
           ),
         ),
       ]),
@@ -922,4 +1095,12 @@ Future<String?> _askForName(
       ],
     ),
   );
+}
+
+/// A picture another app shared, read and ready to attach.
+class _SharedPhoto {
+  const _SharedPhoto(this.bytes, this.name, this.mime);
+  final Uint8List bytes;
+  final String name;
+  final String mime;
 }

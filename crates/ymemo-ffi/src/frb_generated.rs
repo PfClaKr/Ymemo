@@ -37,7 +37,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -799599206;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 579834459;
 
 // Section: executor
 
@@ -305,6 +305,40 @@ fn wire__crate__api__attachment_remove_impl(
         },
     )
 }
+fn wire__crate__api__attachment_restore_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "attachment_restore",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::attachment_restore()?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__attachment_set_layout_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -482,6 +516,40 @@ fn wire__crate__api__diag_tail_impl(
                     let output_ok = Result::<_, ()>::Ok(crate::api::diag_tail(api_max_bytes))?;
                     Ok(output_ok)
                 })())
+            }
+        },
+    )
+}
+fn wire__crate__api__export_markdown_zip_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "export_markdown_zip",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::export_markdown_zip()?;
+                        Ok(output_ok)
+                    })(),
+                )
             }
         },
     )
@@ -1320,6 +1388,38 @@ fn wire__crate__api__mobile_strings_impl(
             move |context| {
                 transform_result_sse::<_, ()>((move || {
                     let output_ok = Result::<_, ()>::Ok(crate::api::mobile_strings())?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__password_min_chars_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "password_min_chars",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Result::<_, ()>::Ok(crate::api::password_min_chars())?;
                     Ok(output_ok)
                 })())
             }
@@ -2610,6 +2710,7 @@ impl SseDecode for crate::api::FfiSettings {
         let mut var_biometricUnlock = <bool>::sse_decode(deserializer);
         let mut var_updateCheck = <bool>::sse_decode(deserializer);
         let mut var_lastUpdateCheck = <i64>::sse_decode(deserializer);
+        let mut var_defaultColor = <String>::sse_decode(deserializer);
         return crate::api::FfiSettings {
             lang: var_lang,
             unlock_days: var_unlockDays,
@@ -2622,6 +2723,7 @@ impl SseDecode for crate::api::FfiSettings {
             biometric_unlock: var_biometricUnlock,
             update_check: var_updateCheck,
             last_update_check: var_lastUpdateCheck,
+            default_color: var_defaultColor,
         };
     }
 }
@@ -2717,6 +2819,32 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_moveTo = <String>::sse_decode(deserializer);
         let mut var_history = <String>::sse_decode(deserializer);
         let mut var_historyEmpty = <String>::sse_decode(deserializer);
+        let mut var_photoRemoved = <String>::sse_decode(deserializer);
+        let mut var_timeNow = <String>::sse_decode(deserializer);
+        let mut var_timeMinutes = <String>::sse_decode(deserializer);
+        let mut var_timeHours = <String>::sse_decode(deserializer);
+        let mut var_timeYesterday = <String>::sse_decode(deserializer);
+        let mut var_timeDate = <String>::sse_decode(deserializer);
+        let mut var_timeDateYear = <String>::sse_decode(deserializer);
+        let mut var_whenToday = <String>::sse_decode(deserializer);
+        let mut var_whenYesterday = <String>::sse_decode(deserializer);
+        let mut var_whenDate = <String>::sse_decode(deserializer);
+        let mut var_whenDateYear = <String>::sse_decode(deserializer);
+        let mut var_otherNetwork = <String>::sse_decode(deserializer);
+        let mut var_reorder = <String>::sse_decode(deserializer);
+        let mut var_reorderDone = <String>::sse_decode(deserializer);
+        let mut var_firstMemo = <String>::sse_decode(deserializer);
+        let mut var_showPassword = <String>::sse_decode(deserializer);
+        let mut var_hidePassword = <String>::sse_decode(deserializer);
+        let mut var_clearSearch = <String>::sse_decode(deserializer);
+        let mut var_exportTitle = <String>::sse_decode(deserializer);
+        let mut var_exportHint = <String>::sse_decode(deserializer);
+        let mut var_exportButton = <String>::sse_decode(deserializer);
+        let mut var_exported = <String>::sse_decode(deserializer);
+        let mut var_exportFailed = <String>::sse_decode(deserializer);
+        let mut var_share = <String>::sse_decode(deserializer);
+        let mut var_defaultColor = <String>::sse_decode(deserializer);
+        let mut var_historyCurrent = <String>::sse_decode(deserializer);
         let mut var_historyRestore = <String>::sse_decode(deserializer);
         let mut var_historyRestored = <String>::sse_decode(deserializer);
         let mut var_newGroup = <String>::sse_decode(deserializer);
@@ -2756,6 +2884,7 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_titleHint = <String>::sse_decode(deserializer);
         let mut var_unlock = <String>::sse_decode(deserializer);
         let mut var_unpair = <String>::sse_decode(deserializer);
+        let mut var_unpairWarning = <String>::sse_decode(deserializer);
         let mut var_color = <String>::sse_decode(deserializer);
         let mut var_changePassword = <String>::sse_decode(deserializer);
         let mut var_confirmPassword = <String>::sse_decode(deserializer);
@@ -2771,6 +2900,7 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_passwordChanged = <String>::sse_decode(deserializer);
         let mut var_passwordHint = <String>::sse_decode(deserializer);
         let mut var_passwordMismatch = <String>::sse_decode(deserializer);
+        let mut var_passwordTooShort = <String>::sse_decode(deserializer);
         let mut var_recoveryAbsent = <String>::sse_decode(deserializer);
         let mut var_recoveryAck = <String>::sse_decode(deserializer);
         let mut var_recoveryCode = <String>::sse_decode(deserializer);
@@ -2779,6 +2909,7 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_recoveryPrompt = <String>::sse_decode(deserializer);
         let mut var_recoveryWarning = <String>::sse_decode(deserializer);
         let mut var_reissueRecovery = <String>::sse_decode(deserializer);
+        let mut var_reissueWarning = <String>::sse_decode(deserializer);
         let mut var_resetDone = <String>::sse_decode(deserializer);
         let mut var_resetPassword = <String>::sse_decode(deserializer);
         let mut var_resetVault = <String>::sse_decode(deserializer);
@@ -2871,6 +3002,32 @@ impl SseDecode for crate::api::FfiStrings {
             move_to: var_moveTo,
             history: var_history,
             history_empty: var_historyEmpty,
+            photo_removed: var_photoRemoved,
+            time_now: var_timeNow,
+            time_minutes: var_timeMinutes,
+            time_hours: var_timeHours,
+            time_yesterday: var_timeYesterday,
+            time_date: var_timeDate,
+            time_date_year: var_timeDateYear,
+            when_today: var_whenToday,
+            when_yesterday: var_whenYesterday,
+            when_date: var_whenDate,
+            when_date_year: var_whenDateYear,
+            other_network: var_otherNetwork,
+            reorder: var_reorder,
+            reorder_done: var_reorderDone,
+            first_memo: var_firstMemo,
+            show_password: var_showPassword,
+            hide_password: var_hidePassword,
+            clear_search: var_clearSearch,
+            export_title: var_exportTitle,
+            export_hint: var_exportHint,
+            export_button: var_exportButton,
+            exported: var_exported,
+            export_failed: var_exportFailed,
+            share: var_share,
+            default_color: var_defaultColor,
+            history_current: var_historyCurrent,
             history_restore: var_historyRestore,
             history_restored: var_historyRestored,
             new_group: var_newGroup,
@@ -2910,6 +3067,7 @@ impl SseDecode for crate::api::FfiStrings {
             title_hint: var_titleHint,
             unlock: var_unlock,
             unpair: var_unpair,
+            unpair_warning: var_unpairWarning,
             color: var_color,
             change_password: var_changePassword,
             confirm_password: var_confirmPassword,
@@ -2925,6 +3083,7 @@ impl SseDecode for crate::api::FfiStrings {
             password_changed: var_passwordChanged,
             password_hint: var_passwordHint,
             password_mismatch: var_passwordMismatch,
+            password_too_short: var_passwordTooShort,
             recovery_absent: var_recoveryAbsent,
             recovery_ack: var_recoveryAck,
             recovery_code: var_recoveryCode,
@@ -2933,6 +3092,7 @@ impl SseDecode for crate::api::FfiStrings {
             recovery_prompt: var_recoveryPrompt,
             recovery_warning: var_recoveryWarning,
             reissue_recovery: var_reissueRecovery,
+            reissue_warning: var_reissueWarning,
             reset_done: var_resetDone,
             reset_password: var_resetPassword,
             reset_vault: var_resetVault,
@@ -3128,73 +3288,76 @@ fn pde_ffi_dispatcher_primary_impl(
         5 => wire__crate__api__attachment_list_impl(port, ptr, rust_vec_len, data_len),
         6 => wire__crate__api__attachment_place_in_writing_impl(port, ptr, rust_vec_len, data_len),
         7 => wire__crate__api__attachment_remove_impl(port, ptr, rust_vec_len, data_len),
-        8 => wire__crate__api__attachment_set_layout_impl(port, ptr, rust_vec_len, data_len),
-        9 => {
+        8 => wire__crate__api__attachment_restore_impl(port, ptr, rust_vec_len, data_len),
+        9 => wire__crate__api__attachment_set_layout_impl(port, ptr, rust_vec_len, data_len),
+        10 => {
             wire__crate__api__attachment_take_out_of_writing_impl(port, ptr, rust_vec_len, data_len)
         }
-        10 => wire__crate__api__diag_init_impl(port, ptr, rust_vec_len, data_len),
-        11 => wire__crate__api__diag_log_impl(port, ptr, rust_vec_len, data_len),
-        12 => wire__crate__api__diag_tail_impl(port, ptr, rust_vec_len, data_len),
-        13 => wire__crate__api__ffi_settings_default_impl(port, ptr, rust_vec_len, data_len),
-        14 => wire__crate__api__group_children_impl(port, ptr, rust_vec_len, data_len),
-        15 => wire__crate__api__group_create_impl(port, ptr, rust_vec_len, data_len),
-        16 => wire__crate__api__group_delete_impl(port, ptr, rust_vec_len, data_len),
-        17 => wire__crate__api__group_list_impl(port, ptr, rust_vec_len, data_len),
-        18 => wire__crate__api__group_rename_impl(port, ptr, rust_vec_len, data_len),
-        19 => wire__crate__api__group_set_color_impl(port, ptr, rust_vec_len, data_len),
-        20 => wire__crate__api__lan_code_impl(port, ptr, rust_vec_len, data_len),
-        21 => wire__crate__api__lan_join_impl(port, ptr, rust_vec_len, data_len),
-        22 => wire__crate__api__lan_poll_paired_impl(port, ptr, rust_vec_len, data_len),
-        23 => wire__crate__api__lan_start_impl(port, ptr, rust_vec_len, data_len),
-        24 => wire__crate__api__lan_stop_impl(port, ptr, rust_vec_len, data_len),
-        25 => wire__crate__api__memo_delete_impl(port, ptr, rust_vec_len, data_len),
-        26 => wire__crate__api__memo_discard_if_blank_impl(port, ptr, rust_vec_len, data_len),
-        27 => wire__crate__api__memo_history_impl(port, ptr, rust_vec_len, data_len),
-        28 => wire__crate__api__memo_list_impl(port, ptr, rust_vec_len, data_len),
-        29 => wire__crate__api__memo_move_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__memo_restore_impl(port, ptr, rust_vec_len, data_len),
-        31 => wire__crate__api__memo_set_color_impl(port, ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__memo_set_group_impl(port, ptr, rust_vec_len, data_len),
-        33 => wire__crate__api__memo_undelete_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__memo_upsert_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__memos_in_group_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__mobile_strings_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__set_language_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__settings_load_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__settings_save_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__sync_approve_device_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__sync_devices_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__sync_ensure_folder_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__sync_pair_with_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__sync_pending_devices_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__api__sync_rebuild_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__api__sync_reject_device_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__sync_set_device_name_impl(port, ptr, rust_vec_len, data_len),
-        48 => wire__crate__api__sync_set_paused_impl(port, ptr, rust_vec_len, data_len),
-        49 => wire__crate__api__sync_set_timing_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__api__sync_set_versioning_impl(port, ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__sync_start_impl(port, ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__sync_stop_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__sync_unpair_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__sync_verification_code_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__update_check_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__vault_change_password_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__vault_close_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__vault_exists_impl(port, ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__vault_has_recovery_code_impl(port, ptr, rust_vec_len, data_len),
-        60 => wire__crate__api__vault_issue_recovery_code_impl(port, ptr, rust_vec_len, data_len),
-        61 => wire__crate__api__vault_key_impl(port, ptr, rust_vec_len, data_len),
-        62 => wire__crate__api__vault_name_impl(port, ptr, rust_vec_len, data_len),
-        63 => wire__crate__api__vault_open_impl(port, ptr, rust_vec_len, data_len),
-        64 => wire__crate__api__vault_open_with_key_impl(port, ptr, rust_vec_len, data_len),
-        65 => wire__crate__api__vault_reset_impl(port, ptr, rust_vec_len, data_len),
-        66 => wire__crate__api__vault_reset_password_with_recovery_impl(
+        11 => wire__crate__api__diag_init_impl(port, ptr, rust_vec_len, data_len),
+        12 => wire__crate__api__diag_log_impl(port, ptr, rust_vec_len, data_len),
+        13 => wire__crate__api__diag_tail_impl(port, ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__export_markdown_zip_impl(port, ptr, rust_vec_len, data_len),
+        15 => wire__crate__api__ffi_settings_default_impl(port, ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__group_children_impl(port, ptr, rust_vec_len, data_len),
+        17 => wire__crate__api__group_create_impl(port, ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__group_delete_impl(port, ptr, rust_vec_len, data_len),
+        19 => wire__crate__api__group_list_impl(port, ptr, rust_vec_len, data_len),
+        20 => wire__crate__api__group_rename_impl(port, ptr, rust_vec_len, data_len),
+        21 => wire__crate__api__group_set_color_impl(port, ptr, rust_vec_len, data_len),
+        22 => wire__crate__api__lan_code_impl(port, ptr, rust_vec_len, data_len),
+        23 => wire__crate__api__lan_join_impl(port, ptr, rust_vec_len, data_len),
+        24 => wire__crate__api__lan_poll_paired_impl(port, ptr, rust_vec_len, data_len),
+        25 => wire__crate__api__lan_start_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__api__lan_stop_impl(port, ptr, rust_vec_len, data_len),
+        27 => wire__crate__api__memo_delete_impl(port, ptr, rust_vec_len, data_len),
+        28 => wire__crate__api__memo_discard_if_blank_impl(port, ptr, rust_vec_len, data_len),
+        29 => wire__crate__api__memo_history_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__api__memo_list_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__memo_move_impl(port, ptr, rust_vec_len, data_len),
+        32 => wire__crate__api__memo_restore_impl(port, ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__memo_set_color_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__memo_set_group_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__memo_undelete_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__memo_upsert_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__memos_in_group_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__mobile_strings_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__password_min_chars_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__set_language_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__settings_load_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__settings_save_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__sync_approve_device_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__sync_devices_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__sync_ensure_folder_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__sync_pair_with_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__sync_pending_devices_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__api__sync_rebuild_impl(port, ptr, rust_vec_len, data_len),
+        49 => wire__crate__api__sync_reject_device_impl(port, ptr, rust_vec_len, data_len),
+        50 => wire__crate__api__sync_set_device_name_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__sync_set_paused_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__sync_set_timing_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__sync_set_versioning_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__sync_start_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__sync_stop_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__sync_unpair_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__sync_verification_code_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__update_check_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__vault_change_password_impl(port, ptr, rust_vec_len, data_len),
+        60 => wire__crate__api__vault_close_impl(port, ptr, rust_vec_len, data_len),
+        61 => wire__crate__api__vault_exists_impl(port, ptr, rust_vec_len, data_len),
+        62 => wire__crate__api__vault_has_recovery_code_impl(port, ptr, rust_vec_len, data_len),
+        63 => wire__crate__api__vault_issue_recovery_code_impl(port, ptr, rust_vec_len, data_len),
+        64 => wire__crate__api__vault_key_impl(port, ptr, rust_vec_len, data_len),
+        65 => wire__crate__api__vault_name_impl(port, ptr, rust_vec_len, data_len),
+        66 => wire__crate__api__vault_open_impl(port, ptr, rust_vec_len, data_len),
+        67 => wire__crate__api__vault_open_with_key_impl(port, ptr, rust_vec_len, data_len),
+        68 => wire__crate__api__vault_reset_impl(port, ptr, rust_vec_len, data_len),
+        69 => wire__crate__api__vault_reset_password_with_recovery_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        67 => wire__crate__api__vault_set_name_impl(port, ptr, rust_vec_len, data_len),
+        70 => wire__crate__api__vault_set_name_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -3374,6 +3537,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiSettings {
             self.biometric_unlock.into_into_dart().into_dart(),
             self.update_check.into_into_dart().into_dart(),
             self.last_update_check.into_into_dart().into_dart(),
+            self.default_color.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3481,6 +3645,32 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.move_to.into_into_dart().into_dart(),
             self.history.into_into_dart().into_dart(),
             self.history_empty.into_into_dart().into_dart(),
+            self.photo_removed.into_into_dart().into_dart(),
+            self.time_now.into_into_dart().into_dart(),
+            self.time_minutes.into_into_dart().into_dart(),
+            self.time_hours.into_into_dart().into_dart(),
+            self.time_yesterday.into_into_dart().into_dart(),
+            self.time_date.into_into_dart().into_dart(),
+            self.time_date_year.into_into_dart().into_dart(),
+            self.when_today.into_into_dart().into_dart(),
+            self.when_yesterday.into_into_dart().into_dart(),
+            self.when_date.into_into_dart().into_dart(),
+            self.when_date_year.into_into_dart().into_dart(),
+            self.other_network.into_into_dart().into_dart(),
+            self.reorder.into_into_dart().into_dart(),
+            self.reorder_done.into_into_dart().into_dart(),
+            self.first_memo.into_into_dart().into_dart(),
+            self.show_password.into_into_dart().into_dart(),
+            self.hide_password.into_into_dart().into_dart(),
+            self.clear_search.into_into_dart().into_dart(),
+            self.export_title.into_into_dart().into_dart(),
+            self.export_hint.into_into_dart().into_dart(),
+            self.export_button.into_into_dart().into_dart(),
+            self.exported.into_into_dart().into_dart(),
+            self.export_failed.into_into_dart().into_dart(),
+            self.share.into_into_dart().into_dart(),
+            self.default_color.into_into_dart().into_dart(),
+            self.history_current.into_into_dart().into_dart(),
             self.history_restore.into_into_dart().into_dart(),
             self.history_restored.into_into_dart().into_dart(),
             self.new_group.into_into_dart().into_dart(),
@@ -3520,6 +3710,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.title_hint.into_into_dart().into_dart(),
             self.unlock.into_into_dart().into_dart(),
             self.unpair.into_into_dart().into_dart(),
+            self.unpair_warning.into_into_dart().into_dart(),
             self.color.into_into_dart().into_dart(),
             self.change_password.into_into_dart().into_dart(),
             self.confirm_password.into_into_dart().into_dart(),
@@ -3535,6 +3726,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.password_changed.into_into_dart().into_dart(),
             self.password_hint.into_into_dart().into_dart(),
             self.password_mismatch.into_into_dart().into_dart(),
+            self.password_too_short.into_into_dart().into_dart(),
             self.recovery_absent.into_into_dart().into_dart(),
             self.recovery_ack.into_into_dart().into_dart(),
             self.recovery_code.into_into_dart().into_dart(),
@@ -3543,6 +3735,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.recovery_prompt.into_into_dart().into_dart(),
             self.recovery_warning.into_into_dart().into_dart(),
             self.reissue_recovery.into_into_dart().into_dart(),
+            self.reissue_warning.into_into_dart().into_dart(),
             self.reset_done.into_into_dart().into_dart(),
             self.reset_password.into_into_dart().into_dart(),
             self.reset_vault.into_into_dart().into_dart(),
@@ -3702,6 +3895,7 @@ impl SseEncode for crate::api::FfiSettings {
         <bool>::sse_encode(self.biometric_unlock, serializer);
         <bool>::sse_encode(self.update_check, serializer);
         <i64>::sse_encode(self.last_update_check, serializer);
+        <String>::sse_encode(self.default_color, serializer);
     }
 }
 
@@ -3791,6 +3985,32 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.move_to, serializer);
         <String>::sse_encode(self.history, serializer);
         <String>::sse_encode(self.history_empty, serializer);
+        <String>::sse_encode(self.photo_removed, serializer);
+        <String>::sse_encode(self.time_now, serializer);
+        <String>::sse_encode(self.time_minutes, serializer);
+        <String>::sse_encode(self.time_hours, serializer);
+        <String>::sse_encode(self.time_yesterday, serializer);
+        <String>::sse_encode(self.time_date, serializer);
+        <String>::sse_encode(self.time_date_year, serializer);
+        <String>::sse_encode(self.when_today, serializer);
+        <String>::sse_encode(self.when_yesterday, serializer);
+        <String>::sse_encode(self.when_date, serializer);
+        <String>::sse_encode(self.when_date_year, serializer);
+        <String>::sse_encode(self.other_network, serializer);
+        <String>::sse_encode(self.reorder, serializer);
+        <String>::sse_encode(self.reorder_done, serializer);
+        <String>::sse_encode(self.first_memo, serializer);
+        <String>::sse_encode(self.show_password, serializer);
+        <String>::sse_encode(self.hide_password, serializer);
+        <String>::sse_encode(self.clear_search, serializer);
+        <String>::sse_encode(self.export_title, serializer);
+        <String>::sse_encode(self.export_hint, serializer);
+        <String>::sse_encode(self.export_button, serializer);
+        <String>::sse_encode(self.exported, serializer);
+        <String>::sse_encode(self.export_failed, serializer);
+        <String>::sse_encode(self.share, serializer);
+        <String>::sse_encode(self.default_color, serializer);
+        <String>::sse_encode(self.history_current, serializer);
         <String>::sse_encode(self.history_restore, serializer);
         <String>::sse_encode(self.history_restored, serializer);
         <String>::sse_encode(self.new_group, serializer);
@@ -3830,6 +4050,7 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.title_hint, serializer);
         <String>::sse_encode(self.unlock, serializer);
         <String>::sse_encode(self.unpair, serializer);
+        <String>::sse_encode(self.unpair_warning, serializer);
         <String>::sse_encode(self.color, serializer);
         <String>::sse_encode(self.change_password, serializer);
         <String>::sse_encode(self.confirm_password, serializer);
@@ -3845,6 +4066,7 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.password_changed, serializer);
         <String>::sse_encode(self.password_hint, serializer);
         <String>::sse_encode(self.password_mismatch, serializer);
+        <String>::sse_encode(self.password_too_short, serializer);
         <String>::sse_encode(self.recovery_absent, serializer);
         <String>::sse_encode(self.recovery_ack, serializer);
         <String>::sse_encode(self.recovery_code, serializer);
@@ -3853,6 +4075,7 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.recovery_prompt, serializer);
         <String>::sse_encode(self.recovery_warning, serializer);
         <String>::sse_encode(self.reissue_recovery, serializer);
+        <String>::sse_encode(self.reissue_warning, serializer);
         <String>::sse_encode(self.reset_done, serializer);
         <String>::sse_encode(self.reset_password, serializer);
         <String>::sse_encode(self.reset_vault, serializer);

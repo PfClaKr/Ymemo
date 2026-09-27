@@ -28,7 +28,8 @@
                 android:layout_height="wrap_content"
                 android:paddingBottom="16dp"
                 android:text="@string/widget_list_configure_title"
-                android:textSize="19sp"
+                android:textColor="@color/configure_ink"
+                android:textSize="20sp"
                 android:textStyle="bold" />
 
             <!-- What the choices below add up to, updated as they are made. Not a rendering
@@ -132,11 +133,21 @@
                 style="@style/WidgetConfigureSection"
                 android:text="@string/widget_list_configure_background" />
 
+            <!-- One row of swatches, as the app picks a colour, and the name of the one chosen
+                 under them. It was six full-width radio rows, each painted its colour. -->
             <RadioGroup
                 android:id="@+id/configure_colors"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical" />
+                android:paddingTop="6dp"
+                android:orientation="horizontal" />
+
+            <TextView
+                android:id="@+id/configure_color_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="6dp"
+                android:textSize="13sp" />
 
             <!-- Opacity -->
             <LinearLayout
@@ -169,9 +180,15 @@
     <Button
         android:id="@+id/configure_done"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="52dp"
         android:layout_marginStart="20dp"
         android:layout_marginEnd="20dp"
         android:layout_marginBottom="20dp"
+        android:background="@drawable/configure_button"
+        android:stateListAnimator="@null"
+        android:textAllCaps="false"
+        android:textColor="@color/configure_on_accent"
+        android:textSize="16sp"
+        android:textStyle="bold"
         android:text="@string/widget_list_configure_done" />
 </LinearLayout>

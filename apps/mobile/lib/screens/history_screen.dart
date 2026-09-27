@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 
 import '../palette.dart';
 import '../src/rust/api.dart';
+import '../memo_title.dart';
+import '../theme.dart';
 import '../ui_util.dart';
 
 /// Every past version of one memo, and the way back to any of them.
@@ -53,7 +55,15 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Future<void> _load() async {
     try {
       final revisions = await memoHistory(id: widget.memoId);
-      if (mounted) setState(() { _revisions = revisions; _loading = false; });
+      // The newest open from the start, as the desktop window opens on it: the screen
+      // otherwise began as a column of closed dates.
+      if (mounted) {
+        setState(() {
+          _revisions = revisions;
+          _loading = false;
+          _selected ??= revisions.isEmpty ? null : 0;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
       _say('$e');
@@ -78,16 +88,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
   }
 
-  /// `yyyy-MM-dd HH:mm` in local time. Written out rather than pulled from `intl`: it is one
-  /// line, and the app has no other formatted date to justify the dependency.
-  String _when(int millis) {
-    final t = DateTime.fromMillisecondsSinceEpoch(millis).toLocal();
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${t.year}-${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}';
-  }
+  String _when(int millis) => revisionTime(millis, widget.strings);
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PaperTheme(builder: _page);
+
+  Widget _page(BuildContext context) {
     final ink = paletteInk(widget.color);
     return PopScope(
       canPop: false,
@@ -111,6 +117,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     itemBuilder: (context, i) {
                       final revision = _revisions[i];
                       final open = _selected == i;
+                      // Newest first, so the top row is what the memo already holds: putting
+                      // it back would change nothing and only add a row. Marked, not offered.
+                      final current = i == 0;
                       return Card(
                         margin: const EdgeInsets.only(bottom: 8),
                         color: paletteBar(widget.color),
@@ -121,7 +130,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
                               title: Text(_when(revision.at),
                                   style: TextStyle(fontWeight: FontWeight.bold, color: ink)),
                               subtitle: Text(
-                                [revision.kind, revision.device, revision.changed]
+                                [
+                                  revision.kind,
+                                  if (current) widget.strings.historyCurrent,
+                                  revision.device,
+                                  revision.changed,
+                                ]
                                     .where((part) => part.isNotEmpty)
                                     .join(' · '),
                                 style: TextStyle(color: ink.withValues(alpha: 0.75)),
@@ -148,7 +162,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                   alignment: Alignment.centerLeft,
                                   // A deletion is a revision with nothing in it; the version
                                   // before it is the one to go back to.
-                                  child: revision.restorable
+                                  child: revision.restorable && !current
                                       ? FilledButton(
                                           onPressed: () => _restore(revision),
                                           child: Text(widget.strings.historyRestore),

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../host.dart' as host;
+import '../palette.dart';
 import '../security.dart';
 import '../settings.dart';
 import '../src/rust/api.dart';
@@ -84,6 +85,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     int? rescanSeconds,
     int? keepVersionsDays,
     bool? wifiOnlySync,
+    String? defaultColor,
   }) async {
     await widget.settings.save(FfiSettings(
       lang: lang ?? _s.lang,
@@ -97,6 +99,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       keepVersionsDays: keepVersionsDays ?? _s.keepVersionsDays,
       wifiOnlySync: wifiOnlySync ?? _s.wifiOnlySync,
       lastUpdateCheck: _s.lastUpdateCheck,
+      defaultColor: defaultColor ?? _s.defaultColor,
     ));
     // Flipping the switch has to take effect now, not at the next daemon start.
     if (wifiOnlySync != null) {
@@ -196,8 +199,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       items.sort();
     }
     return ListTile(
-      title: Text(label),
-      subtitle: Text(hint),
+      title: _title(label, hint),
+      subtitle: _hint(hint),
       trailing: DropdownButton<int>(
         value: value,
         onChanged: (v) => v == null ? null : onPick(v),
@@ -207,6 +210,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
+  }
+
+  /// A setting's explanation, as its subtitle: the **first sentence** of it. Most of them
+  /// ran three and four lines, and a screen of those read as a wall of text; the whole of it
+  /// is one tap away, behind the ⓘ beside the title ([_title]).
+  Widget _hint(String text) => Text(_firstSentence(text));
+
+  /// A setting's name, with an ⓘ that shows the whole explanation when the subtitle had to
+  /// stop short of it.
+  Widget _title(String title, String hint) {
+    if (_firstSentence(hint) == hint.trim()) return Text(title);
+    return Row(
+      children: [
+        Flexible(child: Text(title)),
+        IconButton(
+          icon: const Icon(Icons.info_outline, size: 18),
+          visualDensity: VisualDensity.compact,
+          tooltip: title,
+          onPressed: () => showDialog<void>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: Text(title),
+              content: Text(hint),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(widget.strings.ok),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Up to and including the first full stop that ends a sentence (". ", or the same with
+  /// "?"/"!"), or all of it when there is only one.
+  static String _firstSentence(String text) {
+    final t = text.trim();
+    final end = RegExp(r'[.!?](\s)').firstMatch(t);
+    return end == null ? t : t.substring(0, end.start + 1);
   }
 
   /// Shows the tail of the problem log, with one button that puts it on the clipboard —
@@ -242,6 +287,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
+  }
+
+  /// Every memo as a zip of Markdown files, through the system's own "save as". The zip is
+  /// plaintext and exists only in memory until the user names a place for it.
+  Future<void> _export() async {
+    final s = widget.strings;
+    try {
+      final zip = await exportMarkdownZip();
+      final now = DateTime.now();
+      String two(int n) => n.toString().padLeft(2, '0');
+      final ok = await host.saveAs(
+        name: 'Ymemo-${now.year}-${two(now.month)}-${two(now.day)}.zip',
+        mime: 'application/zip',
+        bytes: zip,
+      );
+      if (ok) _say(s.exported);
+    } catch (e) {
+      _say('${s.exportFailed}: $e');
+    }
   }
 
   void _say(String message) => ScaffoldMessenger.of(context).showSnackBar(
@@ -305,22 +369,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           const Divider(),
+          _header(s.defaultColor),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: ColorSwatches(
+              selected: _s.defaultColor,
+              onPick: (key) async {
+                await _save(defaultColor: key);
+                if (mounted) setState(() {});
+              },
+            ),
+          ),
+
+          const Divider(),
           _header(s.lockSection),
           SwitchListTile(
             value: _s.lockOnBackground,
             onChanged: (v) => _save(lockOnBackground: v),
-            title: Text(s.lockOnBackground),
-            subtitle: Text(s.lockOnBackgroundHint),
+            title: _title(s.lockOnBackground, s.lockOnBackgroundHint),
+            subtitle: _hint(s.lockOnBackgroundHint),
           ),
           SwitchListTile(
             value: _s.biometricUnlock,
             onChanged: _setBiometric,
-            title: Text(s.biometricUnlock),
-            subtitle: Text(s.biometricUnlockHint),
+            title: _title(s.biometricUnlock, s.biometricUnlockHint),
+            subtitle: _hint(s.biometricUnlockHint),
           ),
           ListTile(
-            title: Text(s.unlockDays),
-            subtitle: Text(s.unlockDaysHint),
+            title: _title(s.unlockDays, s.unlockDaysHint),
+            subtitle: _hint(s.unlockDaysHint),
             trailing: DropdownButton<int>(
               value: _dayChoices.contains(_s.unlockDays) ? _s.unlockDays : 0,
               onChanged: (v) => v == null ? null : _setUnlockDays(v),
@@ -374,12 +451,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SwitchListTile(
             value: _s.wifiOnlySync,
             onChanged: (v) => _save(wifiOnlySync: v),
-            title: Text(s.wifiOnly),
-            subtitle: Text(s.wifiOnlyHint),
+            title: _title(s.wifiOnly, s.wifiOnlyHint),
+            subtitle: _hint(s.wifiOnlyHint),
           ),
           ListTile(
-            title: Text(s.keepVersions),
-            subtitle: Text(s.keepVersionsHint),
+            title: _title(s.keepVersions, s.keepVersionsHint),
+            subtitle: _hint(s.keepVersionsHint),
             trailing: DropdownButton<int>(
               value: _keepChoices.contains(_s.keepVersionsDays) ? _s.keepVersionsDays : 30,
               onChanged: (v) => v == null ? null : _save(keepVersionsDays: v),
@@ -389,11 +466,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
+          ListTile(
+            title: _title(s.exportTitle, s.exportHint),
+            subtitle: _hint(s.exportHint),
+            trailing: TextButton(onPressed: _export, child: Text(s.exportButton)),
+          ),
           // A phone has no file manager worth sending someone to, so the log is shown here
           // and offered for copying rather than pointed at.
           ListTile(
-            title: Text(s.log),
-            subtitle: Text(s.logHint),
+            title: _title(s.log, s.logHint),
+            subtitle: _hint(s.logHint),
             trailing: TextButton(onPressed: _showLog, child: Text(s.logView)),
           ),
 
@@ -402,8 +484,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SwitchListTile(
             value: _s.updateCheck,
             onChanged: (v) => _save(updateCheck: v),
-            title: Text(s.updateCheck),
-            subtitle: Text(s.updateCheckHint),
+            title: _title(s.updateCheck, s.updateCheckHint),
+            subtitle: _hint(s.updateCheckHint),
           ),
           ListTile(
             title: Text(s.updateNow),

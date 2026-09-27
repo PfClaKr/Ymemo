@@ -68,6 +68,29 @@
                 android:resource="@xml/shortcuts" />
         </activity>
 
+        <!-- "Share to Ymemo" from another app. A trampoline, so a share does not start a
+             second copy of the app inside the sharing app's task; see ShareActivity.kt.
+             Exported because the share sheet is another app starting it — and it only ever
+             turns the shared text or picture into a new-memo request for MainActivity. -->
+        <activity
+            android:name=".ShareActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:label="@string/share_label"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="image/*"/>
+            </intent-filter>
+        </activity>
+
         <!-- Home-screen widgets.
              All three are drawn by the launcher, in its process, while this app may not be
              running at all: they read the snapshot MainActivity stores for them and never

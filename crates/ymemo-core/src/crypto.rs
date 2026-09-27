@@ -16,6 +16,15 @@ use rand::{rngs::OsRng, RngCore};
 
 pub const SALT_LEN: usize = 16;
 pub const KEY_LEN: usize = 32;
+
+/// Shortest master password either app accepts for a new vault or a new password.
+///
+/// `vault.json` is synced to every device and holds the data key wrapped under the password,
+/// so whoever gets a copy can try passwords offline for as long as they like; Argon2id makes
+/// each guess slow, not a short password safe. Checked by the UIs, not here: a vault opened
+/// with an older, shorter password must keep opening. The catalog's "too short" messages
+/// state the number, so they change with it.
+pub const MIN_PASSWORD_CHARS: usize = 8;
 pub const NONCE_LEN: usize = 24;
 
 /// Argon2id salt. Not secret, but must be stored next to the vault.

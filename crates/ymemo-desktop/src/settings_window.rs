@@ -29,6 +29,7 @@ pub(crate) fn fill_settings_window(ctx: &Ctx, win: &SettingsWindow) {
     win.set_idle_minutes(s.idle_lock_minutes);
     win.set_default_color(SharedString::from(s.default_color.clone()));
     win.set_default_opacity(s.default_opacity);
+    win.set_note_text_percent(s.note_text_percent);
     win.set_merge_seconds(s.merge_seconds);
     win.set_watch_delay_seconds(s.watch_delay_seconds);
     win.set_rescan_seconds(s.rescan_seconds);
@@ -79,7 +80,7 @@ pub(crate) fn wire(
     tray_handle: &Rc<RefCell<Option<tray::TrayHandle>>>,
 ) {
     wire_open(ctx, ui, unlocked);
-    wire_close(ui);
+    wire_close(ctx, ui);
     wire_apply(ctx, ui, syncthing, merge_timer, tray_handle);
     wire_lock_now(ctx, ui, unlocked);
     wire_updates(ctx, ui);
@@ -98,18 +99,35 @@ fn wire_open(ctx: &Ctx, ui: &Ui, unlocked: &Rc<Cell<bool>>) {
         fill_settings_window(&ctx, &w);
         w.set_unlocked(unlocked.get());
         w.set_status(SharedString::new());
+        w.set_close_warned(false);
         present(&w);
     });
 }
 
-/// Closing only hides it, so its position survives.
-fn wire_close(ui: &Ui) {
+/// Closing only hides it, so its position survives — but not over unsaved changes without a
+/// word. The dialog applies on Save, and "Close" used to throw away whatever had been changed
+/// with nothing said; now the first close says so and a second one means it. The window's own
+/// close button takes the same way out.
+fn wire_close(ctx: &Ctx, ui: &Ui) {
     let settings_win = &ui.settings;
+    let ctx = ctx.clone();
     let win = settings_win.as_weak();
     settings_win.on_close_requested(move || {
-        if let Some(w) = win.upgrade() {
-            let _ = w.hide();
+        let Some(w) = win.upgrade() else { return };
+        if !w.get_close_warned() && has_unsaved_changes(&ctx, &w) {
+            w.set_close_warned(true);
+            w.set_status(SharedString::from(t!("msg.settings_unsaved")));
+            return;
         }
+        w.set_close_warned(false);
+        let _ = w.hide();
+    });
+    let win = settings_win.as_weak();
+    settings_win.window().on_close_requested(move || {
+        if let Some(w) = win.upgrade() {
+            w.invoke_close_requested();
+        }
+        slint::CloseRequestResponse::KeepWindowShown
     });
 }
 
@@ -145,6 +163,7 @@ fn wire_apply(
         touch(&ctx);
         let prev_unlock_days = ctx.settings.borrow().unlock_days;
         let next = store_dialog(&ctx, &w);
+        w.set_close_warned(false);
 
         // Write the sanitized values back, so out-of-range input never changes silently.
         fill_settings_window(&ctx, &w);
@@ -161,6 +180,7 @@ fn wire_apply(
             t.refresh();
         }
         start_merge_timer(&merge_timer, &ctx, list.as_weak());
+        crate::sticky::apply_text_size(&ctx);
         // The watch delay lives in Syncthing's folder config, not ours, so saving has to
         // push it across; `set_folder_timing` does nothing when the daemon already agrees.
         apply_folder_settings(&syncthing_for_settings, &next);
@@ -212,6 +232,11 @@ fn wire_updates(ctx: &Ctx, ui: &Ui) {
     // The log is a file the user is asked for, never one they read here: open the folder and
     // let the desktop's own file manager do the rest.
     let dir = ctx.dir.clone();
+    {
+        let ctx = ctx.clone();
+        let weak = settings_win.as_weak();
+        settings_win.on_export_memos(move || export_memos(&ctx, weak.clone()));
+    }
     settings_win.on_open_log(move || {
         if let Err(e) = update::open_url(&dir.to_string_lossy()) {
             diag!("could not open the log folder: {e}");
@@ -219,24 +244,84 @@ fn wire_updates(ctx: &Ctx, ui: &Ui) {
     });
 }
 
-/// Reads the dialog over what is stored, sanitizes it, saves it and makes it current.
+/// Writes every memo out as a zip of Markdown files, to a file the user picks.
+///
+/// The zip is built here, on the UI thread, because that is where the vault lives; it is a
+/// copy of text and already-encrypted blobs decrypted once, which is quick. Only the dialog
+/// and the write go to a worker, for the same reason the photo dialogs do.
+fn export_memos(ctx: &Ctx, weak: slint::Weak<SettingsWindow>) {
+    touch(ctx);
+    let zip = {
+        let Some(v) = ctx.vault_ref() else { return };
+        match ymemo_core::export::markdown_zip(&v) {
+            Ok(zip) => zip,
+            Err(e) => {
+                diag!("could not export the memos: {e}");
+                if let Some(w) = weak.upgrade() {
+                    w.set_status(SharedString::from(t!("msg.export_failed", error = e)));
+                }
+                return;
+            }
+        }
+    };
+    let title = t!("msg.export_dialog_title");
+    let file_name = format!("Ymemo-{}.zip", chrono::Local::now().format("%Y-%m-%d"));
+    std::thread::spawn(move || {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title(&title)
+            .set_file_name(&file_name)
+            .add_filter("zip", &["zip"])
+            .save_file()
+        else {
+            return; // cancelled
+        };
+        let status = match std::fs::write(&path, &zip) {
+            Ok(()) => t!("msg.exported", path = path.display()),
+            Err(e) => {
+                diag!("could not write the export: {e}");
+                t!("msg.export_failed", error = e)
+            }
+        };
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(w) = weak.upgrade() {
+                w.set_status(SharedString::from(status));
+            }
+        });
+    });
+}
+
+/// The dialog's fields laid over what is stored, sanitized — what Save would store.
 ///
 /// Starts from what is stored and overwrites only the fields this dialog owns. Building the
 /// struct from scratch here meant every other field — the pins, where the windows are, which
 /// notes are folded, which are on the desk — had to be copied back across by hand, and one
 /// forgotten line would have quietly reset it the next time anybody pressed Save.
-fn store_dialog(ctx: &Ctx, w: &SettingsWindow) -> Settings {
+fn read_dialog(ctx: &Ctx, w: &SettingsWindow) -> Settings {
     let mut next = ctx.settings.borrow().clone();
     next.lang = w.get_lang_sel().to_string();
     next.unlock_days = w.get_unlock_days();
     next.idle_lock_minutes = w.get_idle_minutes();
     next.default_color = w.get_default_color().to_string();
     next.default_opacity = w.get_default_opacity();
+    next.note_text_percent = w.get_note_text_percent();
     next.merge_seconds = w.get_merge_seconds();
     next.watch_delay_seconds = w.get_watch_delay_seconds();
     next.rescan_seconds = w.get_rescan_seconds();
     next.keep_versions_days = w.get_keep_versions_days();
     next.update_check = w.get_update_check();
+    next.sanitize();
+    next
+}
+
+/// Whether closing now would throw away something the user changed in the dialog.
+fn has_unsaved_changes(ctx: &Ctx, w: &SettingsWindow) -> bool {
+    read_dialog(ctx, w) != *ctx.settings.borrow()
+        || (crate::autostart::supported() && w.get_start_at_login() != crate::autostart::enabled())
+}
+
+/// Stores the dialog (see [`read_dialog`]) and makes it current.
+fn store_dialog(ctx: &Ctx, w: &SettingsWindow) -> Settings {
+    let next = read_dialog(ctx, w);
     // Starting with the session is written to the desktop, not to `settings.json`, so it is
     // applied here on its own. A failure is reported and then read back when the window is
     // refilled, which leaves the toggle showing what is actually true rather than what was
@@ -244,7 +329,6 @@ fn store_dialog(ctx: &Ctx, w: &SettingsWindow) -> Settings {
     if let Err(e) = autostart::set(w.get_start_at_login()) {
         diag!("could not change the start-at-login setting: {e}");
     }
-    next.sanitize();
     next.save(&ctx.dir);
     *ctx.settings.borrow_mut() = next.clone();
     next

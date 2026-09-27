@@ -1,4 +1,4 @@
-import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox } from "std-widgets.slint";
+import { LineEdit, Button, TextEdit, ListView, ScrollView, Slider, SpinBox, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
 import { Palette, IconButton, Glyph } from "theme.slint";
 import { PairingPanel, SharedDeviceRow } from "pairing.slint";
@@ -6,6 +6,12 @@ import { PairingPanel, SharedDeviceRow } from "pairing.slint";
 
 // One row of the list. Rust flattens the group tree and tags each row with a depth, since
 // Slint has no tree view and this is drawn as an indented list.
+// One destination in the right-click menu's "Move to".
+export struct FolderChoice {
+    id: string,
+    name: string,
+}
+
 export struct ListRow {
     id: string,
     title: string,
@@ -22,6 +28,14 @@ export struct ListRow {
     // the memo but not the where — two rows called "회의" in two folders came back looking
     // like the same memo twice.
     folder: string,
+    // A memo's first line of writing after its title, and when it was last changed, already
+    // phrased ("3시간 전"). Both empty on a folder.
+    preview: string,
+    when: string,
+    // While searching, where in the body the words were found, with them in bold;
+    // `has-snippet` says whether there is one (a match only in the title has none).
+    snippet: styled-text,
+    has-snippet: bool,
 }
 
 
@@ -30,6 +44,11 @@ export struct ListRow {
 // accent shows the sticky's color.
 // ---------------------------------------------------------------------------
 export component ListWindow inherits Window {
+    default-font-family: "Pretendard";
+    // This window is always dark, so the standard controls in it are too. Left to follow the
+    // system they came out light on a light-mode desktop — pale grey boxes set into a dark
+    // window, and a disabled primary button drawn darker than an enabled one beside it.
+    init => { StdPalette.color-scheme = ColorScheme.dark; }
     // Where the focus goes when nothing else has asked for it — which is not only at
     // startup. A text field that takes the caret and is then torn down (the heading's rename
     // box, a folder's, the find box) leaves the focus nowhere at all, and a `FocusScope` that
@@ -54,6 +73,10 @@ export component ListWindow inherits Window {
     in-out property <string> vault-name;
     // The same name again, as it is really spelled: the line above is drawn by Slint and goes
     // through `hangul.rs`, this one goes to the desktop's own title bar and must not.
+    // Devices the vault is shared with, and how many of them are connected right now. Set
+    // on every refresh of the shared-device list (`pairing::devices`).
+    in property <int> linked-devices: 0;
+    in property <int> online-devices: 0;
     in property <string> vault-title;
     callback rename-vault(string);
     // Whether the heading is being edited right now.
@@ -104,6 +127,10 @@ export component ListWindow inherits Window {
     // Row whose inline palette is open; empty means none.
     property <string> coloring-id: "";
     callback delete-row(string, bool);     // id, is-group
+    // Every folder, in tree order and indented, with the top level first (empty id): what the
+    // right-click menu's "Move to" offers. Kept up to date by `refresh_list`.
+    in property <[FolderChoice]> folder-choices;
+    callback move-to-folder(string, bool, string); // id, is-group, destination folder ("" = top)
     callback move-row(int, int);           // source row, drop row (out of range = top level)
     callback reorder-row(int, int);        // source row, gap to drop it in (0 = above everything)
     callback add-peer(string);
@@ -323,6 +350,15 @@ export component ListWindow inherits Window {
 
         HorizontalLayout {
             spacing: 4px;
+            // The app's mark beside its name: the same picture as the tray and the taskbar
+            // (packaging/gen_icons.py), so the window reads as Ymemo, not as a dialog.
+            Image {
+                source: @image-url("../../../packaging/assets/ymemo-64.png");
+                width: 22px;
+                height: 22px;
+                y: (parent.height - self.height) / 2;
+            }
+            Rectangle { width: 4px; }
             // The heading is three things in one place: the vault's name, the field that
             // renames it, and — while the pointer is on a toolbar button — that button's
             // label. Cheaper than a tooltip and always in the same spot.
@@ -371,7 +407,10 @@ export component ListWindow inherits Window {
                     height: 100%;
                     text: b-lock.hovering ? Strings.ui_list_tip_lock
                         : b-gear.hovering ? Strings.ui_list_tip_settings
-                        : b-link.hovering ? Strings.ui_list_tip_sync
+                        : b-link.hovering ? (!root.sync-available ? Strings.ui_list_sync_off
+                            : root.linked-devices == 0 ? Strings.ui_list_tip_sync
+                            : Strings.ui_list_sync_online + " " + root.online-devices + "/"
+                                + root.linked-devices)
                         : b-folder.hovering ? Strings.ui_list_tip_new_group
                         : b-plus.hovering ? Strings.ui_list_tip_new_memo
                         : root.vault-name == "" ? Strings.ui_list_heading
@@ -398,27 +437,47 @@ export component ListWindow inherits Window {
                 }
             }
             b-lock := IconButton {
+                // Out of the way while the vault's name is being typed, so the field has the
+                // heading's width rather than what five buttons left of it. Zero-wide, not
+                // removed: the heading reads these buttons' hover by name.
+                width: root.naming ? 0px : 30px;
+                visible: !root.naming;
                 icon: "lock";
                 label: Strings.ui_list_tip_lock;
                 clicked => { root.commit-edit(); root.lock-now(); }
             }
             b-gear := IconButton {
+                width: root.naming ? 0px : 30px;
+                visible: !root.naming;
                 icon: "gear";
                 label: Strings.ui_list_tip_settings;
                 clicked => { root.commit-edit(); root.open-settings(); }
             }
             b-link := IconButton {
+                width: root.naming ? 0px : 30px;
+                visible: !root.naming;
                 icon: "link";
                 label: Strings.ui_list_tip_sync;
+                // Whether syncing is actually happening, without opening the panel: green
+                // while some device is connected, hollow while every paired one is away.
+                // And red when there is no sync program at all: the panel says why, but only
+                // to someone who opens it.
+                badge: !root.sync-available ? 3
+                    : root.linked-devices == 0 ? 0 : root.online-devices > 0 ? 1 : 2;
                 clicked => { root.show-sync = !root.show-sync; }
             }
             b-folder := IconButton {
+                width: root.naming ? 0px : 30px;
+                visible: !root.naming;
                 icon: "folder";
                 label: Strings.ui_list_tip_new_group;
                 clicked => { root.commit-edit(); root.new-group(); }
             }
             b-plus := IconButton {
+                width: root.naming ? 0px : 30px;
+                visible: !root.naming;
                 icon: "plus";
+                primary: true;
                 label: Strings.ui_list_tip_new_memo;
                 clicked => { root.commit-edit(); root.new-memo(); }
             }
@@ -454,23 +513,28 @@ export component ListWindow inherits Window {
             }
         }
 
-        if root.show-sync: VerticalLayout {
+        // Scrolls: the panel is taller than the window as soon as a request is waiting and a
+        // device or two is listed, and without this the rows at the bottom — the remove
+        // button and what it warns about — were cut off with no way to reach them.
+        if root.show-sync: ScrollView {
             vertical-stretch: 1;
-            PairingPanel {
-                available: root.sync-available;
-                my-code: root.my-pairing-code;
-                qr: root.qr-image;
-                message: root.peer-message;
-                lan-code: root.lan-pair-code;
-                lan-message: root.lan-message;
-                waiting-code: root.pair-waiting-code;
-                devices: root.shared-devices;
-                ink: #d8d2c2;
-                add-peer(code) => { root.add-peer(code); }
-                lan-join(code) => { root.lan-join(code); }
-                unshare(id) => { root.unshare(id); }
+            VerticalLayout {
+                alignment: start;
+                PairingPanel {
+                    available: root.sync-available;
+                    my-code: root.my-pairing-code;
+                    qr: root.qr-image;
+                    message: root.peer-message;
+                    lan-code: root.lan-pair-code;
+                    lan-message: root.lan-message;
+                    waiting-code: root.pair-waiting-code;
+                    devices: root.shared-devices;
+                    ink: #d8d2c2;
+                    add-peer(code) => { root.add-peer(code); }
+                    lan-join(code) => { root.lan-join(code); }
+                    unshare(id) => { root.unshare(id); }
+                }
             }
-            Rectangle { vertical-stretch: 1; }
         }
 
         // Find. Always on screen rather than behind a sixth toolbar button: a memo app whose
@@ -646,6 +710,18 @@ export component ListWindow inherits Window {
             spacing: 6px;
             padding-left: 12px;
             padding-right: 12px;
+            // The app's mark and the one thing to do next, as the phone's empty list has:
+            // what someone opening Ymemo for the first time sees.
+            if root.query == "": HorizontalLayout {
+                alignment: center;
+                Image {
+                    source: @image-url("../../../packaging/assets/ymemo-128.png");
+                    width: 72px;
+                    height: 72px;
+                    opacity: 0.9;
+                }
+            }
+            if root.query == "": Rectangle { height: 6px; }
             Text {
                 text: root.query == "" ? Strings.ui_list_empty : Strings.ui_list_search_none;
                 horizontal-alignment: center;
@@ -662,10 +738,24 @@ export component ListWindow inherits Window {
                 color: #8f887a;
                 wrap: word-wrap;
             }
+            if root.query == "": HorizontalLayout {
+                alignment: center;
+                padding-top: 8px;
+                Button {
+                    text: Strings.ui_list_first_memo;
+                    primary: true;
+                    clicked => { root.commit-edit(); root.new-memo(); }
+                }
+            }
         }
 
         if !root.show-sync && root.rows.length > 0: ListView {
             vertical-stretch: 1;
+            // Never wider than the window: nothing in a row is meant to be scrolled to, and
+            // left to itself the view measured the rows' natural widths — a long title's,
+            // say — and grew a horizontal scrollbar along the bottom of the list.
+            viewport-width: self.visible-width;
+            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
             // A local mirror of the selection, so its `changed` can fire in here: this view
             // is inside an `if`, and nothing outside a conditional can reach an id declared
             // in it — which is also why the scrolling lives here rather than beside the
@@ -683,22 +773,33 @@ export component ListWindow inherits Window {
                     }
                 }
             }
-            for row[idx] in root.rows: Rectangle {
+            for row[idx] in root.rows: row-box := Rectangle {
                 height: root.row-h;
+                // Whether the memo's preview gets the rest of the line. Not when the title
+                // alone is most of it: squeezed, the preview is a lone "…", and the layout
+                // shrinks the title to its ellipsis first to make room for it. Measured here,
+                // at the row, because both the title and the preview sit in `if`s of their
+                // own and neither can see into the other.
+                property <bool> preview-fits: title-measure.preferred-width <= self.width * 0.62;
+                title-measure := Text {
+                    visible: false;
+                    // Measured, never laid out: at its natural width a long title made the row
+                    // that wide, and the list grew a horizontal scrollbar to scroll to it.
+                    width: 0px;
+                    height: 0px;
+                    text: row.title;
+                    font-size: 14px;
+                }
                 border-radius: 6px;
                 // The dragged row dims, a folder about to swallow it highlights.
                 opacity: root.drag-source == idx ? 0.45 : 1;
                 animate opacity { duration: 120ms; easing: ease-out; }
-                // A folder and what is in it read as one block. The folder's own row sits a
-                // shade above the window and the rows under it half a shade, so the group is
-                // a band rather than four lines that happen to be indented — the indent alone
-                // is 14px, which is not much to tell "inside Work" from "next to Work".
-                // Slight on purpose: both stay under the hover and the drop highlight, which
-                // still have to be the brightest things on a row.
+                // Nothing at rest: only the hover and a folder about to take a drop are
+                // filled. Every folder and everything in one used to carry its own shade,
+                // which striped the whole list; the indent, the folder's bold name and its
+                // chevron already say what is inside what.
                 background: root.drag-into == idx ? #7db8ec55
                           : ta.has-hover ? #ffffff1a
-                          : row.is-group ? #ffffff12
-                          : row.depth > 0 ? #ffffff08
                           : transparent;
                 // Where the arrow keys are. An outline rather than a brighter fill: the fill
                 // already carries the hover and which folder a row is in, and a third shade
@@ -926,6 +1027,36 @@ export component ListWindow inherits Window {
                         color: row.title == "" ? #9a9384 : #ece7db;
                         vertical-alignment: center;
                         overflow: elide;
+                        // A memo's title shares the line with its preview, which takes the
+                        // slack; a folder's name has the line to itself.
+                        horizontal-stretch: row.preview == "" || !row-box.preview-fits ? 1 : 0;
+                    }
+                    // What the memo goes on to say, after its title, in the quiet colour —
+                    // one line of it, so a list of titles tells two similar notes apart.
+                    // Nothing, rather than a lone "…", when the title needs the line: see
+                    // `preview-fits` on the row.
+                    if root.coloring-id != row.id && root.editing-id != row.id && row.has-snippet
+                        && row-box.preview-fits: Rectangle {
+                        horizontal-stretch: 1;
+                        // StyledText has no ellipsis; the snippet is short and this cuts the rest.
+                        clip: true;
+                        StyledText {
+                            x: 8px;
+                            width: 100000px;
+                            height: parent.height;
+                            text: row.snippet;
+                            default-font-size: 12px;
+                            default-color: #8d8778;
+                            vertical-alignment: center;
+                        }
+                    }
+                    if root.coloring-id != row.id && root.editing-id != row.id && row.preview != ""
+                        && !row.has-snippet && row-box.preview-fits: Text {
+                        text: "  " + row.preview;
+                        font-size: 12px;
+                        color: #8d8778;
+                        vertical-alignment: center;
+                        overflow: elide;
                         horizontal-stretch: 1;
                     }
 
@@ -961,97 +1092,160 @@ export component ListWindow inherits Window {
                         }
                     }
 
-                    if row.is-group: Text {
-                        text: row.child-count > 0 ? row.child-count : "";
+                    // At the right edge: how many things a folder holds, when a memo was last
+                    // written. The row's buttons come in over this on hover.
+                    if root.coloring-id != row.id && root.editing-id != row.id: Text {
+                        text: row.is-group ? (row.child-count > 0 ? row.child-count : "") : row.when;
                         font-size: 11px;
                         color: #8d8778;
                         vertical-alignment: center;
+                        horizontal-alignment: right;
                     }
+                }
 
-                    // Past versions and delete, for folders and memos alike. Both appear on
-                    // hover only, so neither competes with the name for room — and, more to
-                    // the point, so they behave alike: delete used to be the one icon always
-                    // drawn on every row, which left the only button that loses writing
-                    // permanently on screen while the harmless one beside it hid. What
-                    // softens it now is the undo bar above, not a dialog in front of it.
-                    //
-                    // The two live in one `if` so each can see the other's hover: the row's
-                    // own TouchArea loses `has-hover` to whichever of these the pointer is
-                    // over, and without the other two terms an icon would blink out exactly
-                    // as it was being aimed at.
-                    if root.coloring-id != row.id: HorizontalLayout {
-                        spacing: 0px;
-                        // Start a note **in this folder**. Every other way of making one puts
-                        // it at the top level, so filing anything meant making it and then
-                        // dragging it in — on an app whose folders are the point.
-                        //
-                        // Folders only, but **not** behind an `if`: an id declared in a
-                        // conditional cannot be reached from its siblings, and the two icons
-                        // beside it have to see this one's hover or they blink out exactly as
-                        // the pointer arrives here. Zero-wide on a memo instead, which has
-                        // nothing to put inside it.
-                        Rectangle {
-                            width: row.is-group ? 20px : 0px;
-                            opacity: row.is-group && (ta.has-hover || hist-ta.has-hover
-                                || del-ta.has-hover || add-ta.has-hover) ? 1 : 0;
-                            Glyph {
-                                x: (parent.width - self.width) / 2;
-                                y: (parent.height - self.height) / 2;
-                                width: 14px;
-                                height: 14px;
-                                name: "plus";
-                                stroke: add-ta.has-hover ? #ece7db : #b0a99a;
+                // The row's buttons, laid **over** its right end rather than beside it. Kept
+                // in the row's layout they held their width even while invisible, so every
+                // count and time sat a thumb's width in from the edge with nothing after it.
+                // On hover they come in over the time on a patch of the hover colour.
+                // Past versions and delete, for folders and memos alike. Both appear on
+                // hover only, so neither competes with the name for room — and, more to
+                // the point, so they behave alike: delete used to be the one icon always
+                // drawn on every row, which left the only button that loses writing
+                // permanently on screen while the harmless one beside it hid. What
+                // softens it now is the undo bar above, not a dialog in front of it.
+                //
+                // The two live in one `if` so each can see the other's hover: the row's
+                // own TouchArea loses `has-hover` to whichever of these the pointer is
+                // over, and without the other two terms an icon would blink out exactly
+                // as it was being aimed at.
+                if root.coloring-id != row.id && root.editing-id != row.id: Rectangle {
+                    x: parent.width - self.width - 4px;
+                    width: strip.preferred-width;
+                    height: parent.height;
+                    border-radius: 6px;
+                    background: ta.has-hover || hist-ta.has-hover || del-ta.has-hover
+                        || add-ta.has-hover ? #43403d : transparent;
+                        strip := HorizontalLayout {
+                            spacing: 0px;
+                            // Start a note **in this folder**. Every other way of making one puts
+                            // it at the top level, so filing anything meant making it and then
+                            // dragging it in — on an app whose folders are the point.
+                            //
+                            // Folders only, but **not** behind an `if`: an id declared in a
+                            // conditional cannot be reached from its siblings, and the two icons
+                            // beside it have to see this one's hover or they blink out exactly as
+                            // the pointer arrives here. Zero-wide on a memo instead, which has
+                            // nothing to put inside it.
+                            Rectangle {
+                                width: row.is-group ? 20px : 0px;
+                                opacity: row.is-group && (ta.has-hover || hist-ta.has-hover
+                                    || del-ta.has-hover || add-ta.has-hover) ? 1 : 0;
+                                Glyph {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    width: 14px;
+                                    height: 14px;
+                                    name: "plus";
+                                    stroke: add-ta.has-hover ? #ece7db : #b0a99a;
+                                }
+                                add-ta := TouchArea {
+                                    enabled: row.is-group;
+                                    mouse-cursor: pointer;
+                                    accessible-role: button;
+                                    accessible-label: Strings.ui_list_tip_new_memo_here;
+                                    clicked => {
+                                        root.commit-edit();
+                                        root.new-memo-in(row.id);
+                                    }
+                                }
                             }
-                            add-ta := TouchArea {
-                                enabled: row.is-group;
+                            Rectangle {
+                                width: 20px;
+                                opacity: ta.has-hover || hist-ta.has-hover || del-ta.has-hover
+                                    || add-ta.has-hover ? 1 : 0;
+                                Glyph {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    width: 14px;
+                                    height: 14px;
+                                    name: "history";
+                                    stroke: #b0a99a;
+                                }
+                                hist-ta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    accessible-role: button;
+                                    accessible-label: Strings.ui_sticky_history;
+                                    clicked => {
+                                        root.commit-edit();
+                                        root.show-history(row.id, row.is-group);
+                                    }
+                                }
+                            }
+                            del-ta := TouchArea {
+                                width: 28px;
                                 mouse-cursor: pointer;
                                 accessible-role: button;
-                                accessible-label: Strings.ui_list_tip_new_memo_here;
-                                clicked => {
+                                accessible-label: Strings.ui_list_tip_delete;
+                                Glyph {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    width: 15px;
+                                    height: 15px;
+                                    name: "trash";
+                                    stroke: del-ta.has-hover ? #e8a0a0 : #b0a99a;
+                                    opacity: !(ta.has-hover || hist-ta.has-hover || del-ta.has-hover
+                                        || add-ta.has-hover) ? 0
+                                        : del-ta.has-hover ? 1 : 0.4;
+                                }
+                                clicked => { root.commit-edit(); root.delete-row(row.id, row.is-group); }
+                            }
+                        }
+                }
+
+                // Right-click: the row's actions in one place, and the one that otherwise took
+                // a drag — moving a memo or a folder into another folder, which with a long
+                // list or a touchpad was the fiddliest thing in the window. Last child, so it
+                // sits on top; it takes only the right button and lets everything else through
+                // to the row below.
+                ContextMenuArea {
+                    enabled: root.editing-id != row.id;
+                    Menu {
+                        if !row.is-group: MenuItem {
+                            title: Strings.ui_list_menu_open;
+                            activated => { root.commit-edit(); root.open-memo(row.id); }
+                        }
+                        if row.is-group: MenuItem {
+                            title: Strings.ui_list_tip_new_memo_here;
+                            activated => { root.commit-edit(); root.new-memo-in(row.id); }
+                        }
+                        if row.is-group: MenuItem {
+                            title: Strings.ui_list_menu_rename;
+                            activated => {
+                                root.commit-edit();
+                                root.editing-text = row.title;
+                                root.editing-id = row.id;
+                            }
+                        }
+                        Menu {
+                            title: Strings.ui_list_menu_move_to;
+                            for folder in root.folder-choices: MenuItem {
+                                title: folder.name;
+                                // Not into itself; Rust also refuses its own subtree.
+                                enabled: folder.id != row.id;
+                                activated => {
                                     root.commit-edit();
-                                    root.new-memo-in(row.id);
+                                    root.move-to-folder(row.id, row.is-group, folder.id);
                                 }
                             }
                         }
-                        Rectangle {
-                            width: 20px;
-                            opacity: ta.has-hover || hist-ta.has-hover || del-ta.has-hover
-                                || add-ta.has-hover ? 1 : 0;
-                            Glyph {
-                                x: (parent.width - self.width) / 2;
-                                y: (parent.height - self.height) / 2;
-                                width: 14px;
-                                height: 14px;
-                                name: "history";
-                                stroke: #b0a99a;
-                            }
-                            hist-ta := TouchArea {
-                                mouse-cursor: pointer;
-                                accessible-role: button;
-                                accessible-label: Strings.ui_sticky_history;
-                                clicked => {
-                                    root.commit-edit();
-                                    root.show-history(row.id, row.is-group);
-                                }
-                            }
+                        MenuItem {
+                            title: Strings.ui_sticky_history;
+                            activated => { root.commit-edit(); root.show-history(row.id, row.is-group); }
                         }
-                        del-ta := TouchArea {
-                            width: 28px;
-                            mouse-cursor: pointer;
-                            accessible-role: button;
-                            accessible-label: Strings.ui_list_tip_delete;
-                            Glyph {
-                                x: (parent.width - self.width) / 2;
-                                y: (parent.height - self.height) / 2;
-                                width: 15px;
-                                height: 15px;
-                                name: "trash";
-                                stroke: del-ta.has-hover ? #e8a0a0 : #b0a99a;
-                                opacity: !(ta.has-hover || hist-ta.has-hover || del-ta.has-hover
-                                    || add-ta.has-hover) ? 0
-                                    : del-ta.has-hover ? 1 : 0.4;
-                            }
-                            clicked => { root.commit-edit(); root.delete-row(row.id, row.is-group); }
+                        MenuSeparator {}
+                        MenuItem {
+                            title: Strings.ui_list_tip_delete;
+                            activated => { root.commit-edit(); root.delete-row(row.id, row.is-group); }
                         }
                     }
                 }

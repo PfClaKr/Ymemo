@@ -79,6 +79,7 @@ fn reset_window(ctx: &Ctx, win: &SecurityWindow) {
     win.set_recovery_code(SharedString::new());
     win.set_status(SharedString::new());
     win.set_status_is_error(false);
+    win.set_confirm_reissue(false);
     win.set_has_recovery(
         ctx.vault_ref().is_some_and(|v| v.has_recovery_code()),
     );
@@ -89,7 +90,7 @@ fn reset_window(ctx: &Ctx, win: &SecurityWindow) {
 /// The window is sized for the two sections; the code and the line telling the user to write
 /// it down are another panel below them, and a window that does not grow puts the one thing
 /// that can never be shown again under the fold of a scroll view nobody knew to scroll.
-const CODE_PANEL_HEIGHT: f32 = 600.0;
+const CODE_PANEL_HEIGHT: f32 = 650.0;
 
 /// Grows the window so a freshly issued code is visible without scrolling. Only ever grows:
 /// a window the user has made larger is left alone.

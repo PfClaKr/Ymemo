@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'src/rust/api.dart';
+import 'ui_util.dart';
 
 /// Change the password, and issue or reissue the recovery code.
 class SecurityScreen extends StatefulWidget {
@@ -59,6 +60,10 @@ class _SecurityScreenState extends State<SecurityScreen> {
 
   Future<void> _changePassword() async {
     final s = widget.strings;
+    if (_next.text.characters.length < await passwordMinChars()) {
+      setState(() => _error = s.passwordTooShort);
+      return;
+    }
     if (_next.text != _confirm.text) {
       setState(() => _error = s.passwordMismatch);
       return;
@@ -85,6 +90,17 @@ class _SecurityScreenState extends State<SecurityScreen> {
   }
 
   Future<void> _issueRecovery() async {
+    // A new code kills the one already written down, so with one on record it asks first.
+    if (_hasRecovery) {
+      final s = widget.strings;
+      final sure = await confirmAction(
+        context,
+        message: s.reissueWarning,
+        confirm: s.reissueRecovery,
+        cancel: s.cancel,
+      );
+      if (!sure || !mounted) return;
+    }
     setState(() {
       _busy = true;
       _error = null;

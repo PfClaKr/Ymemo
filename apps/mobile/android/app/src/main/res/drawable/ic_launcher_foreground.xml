@@ -1,33 +1,44 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The launcher icon's foreground layer: the same sticky note the desktop draws in
-     `crates/ymemo-desktop/src/icon.rs` and `packaging/gen_icons.py` renders, so one picture
-     stands for the app everywhere. Flat, with no outline: the icon has to hold together at
-     16px in a tray, and a stroke at that size is what turned the old one into a smudge.
-
-     Adaptive icons are 108x108 with only the middle 72x72 guaranteed to survive the
-     launcher's mask, so the paper stays inside 32..76 both ways. The pre-API-26 PNGs in
-     mipmap-*/ are the same geometry, rendered by packaging/gen_icons.py. -->
+<!-- The launcher icon's foreground layer: two sticky notes, a gold one in front with its
+     bottom-right corner peeled up and a blue one behind it, turned. The same drawing
+     `packaging/gen_icons.py` renders (which is also what the desktop app embeds), in the same
+     1024-unit art coordinates: the outer group only places that art in the middle 72 of the
+     108dp adaptive canvas, the part every launcher mask keeps. Change the numbers there,
+     change them here. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- The paper: a square with its top-right corner taken off by the fold. -->
-    <path
-        android:pathData="M40,32 L63,32 L76,45 L76,68 A8,8 0 0 1 68,76 L40,76 A8,8 0 0 1 32,68 L32,40 A8,8 0 0 1 40,32 Z"
-        android:fillColor="#FFFDF5" />
+    <group
+        android:translateX="18"
+        android:translateY="18"
+        android:scaleX="0.0703125"
+        android:scaleY="0.0703125">
 
-    <!-- The lifted corner, a step darker than the badge: the back of the sheet. -->
-    <path
-        android:pathData="M63,32 L76,45 L63,45 Z"
-        android:fillColor="#BA9E1E" />
+        <!-- The note behind, turned 10 degrees clockwise. -->
+        <group android:rotation="10" android:pivotX="550" android:pivotY="470">
+            <path
+                android:pathData="M370,170 L730,170 A120,120 0 0 1 850,290 L850,650 A120,120 0 0 1 730,770 L370,770 A120,120 0 0 1 250,650 L250,290 A120,120 0 0 1 370,170 Z"
+                android:fillColor="#4285F4" />
+        </group>
 
-    <!-- Three lines of writing. The first stops short of the fold and the last is the end of
-         a sentence; three equal bars would read as a list. -->
-    <path
-        android:pathData="M40.75,52.75 L61.25,52.75 M40.75,61.25 L67.25,61.25 M40.75,69.75 L52.25,69.75"
-        android:strokeColor="#5C5010"
-        android:strokeWidth="5.5"
-        android:strokeLineCap="round" />
+        <!-- The note in front, its bottom-right corner cut off by the peel. -->
+        <path
+            android:pathData="M290,290 L650,290 A120,120 0 0 1 770,410 L770,700 L580,890 L290,890 A120,120 0 0 1 170,770 L170,410 A120,120 0 0 1 290,290 Z"
+            android:fillColor="#FDD663" />
+
+        <!-- The peeled corner: the back of the sheet, a step darker. -->
+        <path
+            android:pathData="M580,890 L580,700 L770,700 Z"
+            android:fillColor="#E5A800" />
+
+        <!-- Two lines of writing; the second is the end of a sentence. -->
+        <path
+            android:pathData="M290,480 L640,480 M290,600 L580,600"
+            android:strokeColor="#785400"
+            android:strokeWidth="64"
+            android:strokeLineCap="round" />
+    </group>
 </vector>

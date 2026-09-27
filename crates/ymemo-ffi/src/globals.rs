@@ -22,6 +22,11 @@ pub(crate) static VAULT: Mutex<Option<Vault>> = Mutex::new(None);
 /// memo's text, and that must not outlive the session that could read it.
 pub(crate) static LAST_DELETE: Mutex<Option<ymemo_core::vault::Deleted>> = Mutex::new(None);
 
+/// The photo the last removal took away, for [`crate::api::attachment_restore`]. Like
+/// [`LAST_DELETE`], one at a time and cleared when the vault closes.
+pub(crate) static LAST_PHOTO_REMOVAL: Mutex<Option<ymemo_core::vault::RemovedPhoto>> =
+    Mutex::new(None);
+
 /// Records what a delete removed, so [`memo_undelete`] can offer it back.
 pub(crate) fn remember_delete(removed: Option<ymemo_core::vault::Deleted>) {
     *relock(&LAST_DELETE) = removed;

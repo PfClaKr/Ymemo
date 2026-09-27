@@ -220,11 +220,19 @@ pub(crate) fn close_sticky(stickies: &Stickies, id: &str) {
 /// Local time, not UTC: the stamp exists to answer "when did I write this", and an offset
 /// answer is worse than none. The layout is the same in both languages, so it needs no
 /// catalog entry.
-pub(crate) fn format_created_at(millis: i64) -> String {
-    use chrono::{Local, TimeZone};
-    match Local.timestamp_millis_opt(millis) {
-        chrono::offset::LocalResult::Single(t) => t.format("%Y-%m-%d %H:%M").to_string(),
-        _ => String::new(),
+/// When a note was made, as its corner says it: the time if it was today, the day if it was
+/// this year, the full date otherwise — the list's phrasing (`msg.time_date*`), fixed rather
+/// than relative, because a note stays open for days and "5분 전" would go on saying so.
+pub(crate) fn note_date(millis: i64) -> String {
+    use chrono::{Datelike, Local, TimeZone};
+    let Some(t) = Local.timestamp_millis_opt(millis).single() else { return String::new() };
+    let now = Local::now();
+    if t.date_naive() == now.date_naive() {
+        t.format("%H:%M").to_string()
+    } else if t.year() == now.year() {
+        t!("msg.time_date", month = t.month(), day = t.day())
+    } else {
+        t!("msg.time_date_year", year = t.year(), month = t.month(), day = t.day())
     }
 }
 
@@ -261,7 +269,8 @@ fn build_window(ctx: &Ctx, memo: &Memo) -> Result<StickyWindow> {
     window.set_sticky_color(SharedString::from(memo.color.clone()));
     window.set_sticky_opacity(memo.opacity as f32);
     window.set_pinned(ctx.settings.borrow().memo_pinned(&memo.id));
-    window.set_created_at(SharedString::from(format_created_at(memo.created_at)));
+    window.set_text_scale(text_scale(ctx));
+    window.set_created_at(SharedString::from(note_date(memo.created_at)));
     if let Some(v) = ctx.vault_ref() {
         set_photo_models(&window, split_photo_rows(&v, &memo.id));
     }
@@ -311,6 +320,8 @@ pub(crate) fn open_sticky(ctx: &Ctx, memo: &Memo, focus: bool) -> Result<()> {
     wire_close(ctx, &window, &memo.id, &dirty);
     wire_wm_close(&window);
     wire_new_memo(ctx, &window);
+    wire_zoom(ctx, &window);
+    wire_delete(&window, &memo.id);
     photos::wire(ctx, &window, &memo.id);
     appearance::wire(ctx, &window, &memo.id, &expanded_height);
     snap::wire_drag(ctx, &window, &memo.id);
@@ -519,4 +530,57 @@ fn wire_wm_close(window: &StickyWindow) {
 fn wire_new_memo(ctx: &Ctx, window: &StickyWindow) {
     let ctx = ctx.clone();
     window.on_new_memo(move || new_memo(&ctx));
+}
+
+/// Ctrl+= / Ctrl+- / Ctrl+0 on a note: the writing of every note larger, smaller, or back to
+/// the default. One size for the desk rather than one per note, because it is a matter of how
+/// well this screen reads, not of the note — and it is the same setting the dialog shows.
+fn wire_zoom(ctx: &Ctx, window: &StickyWindow) {
+    let ctx = ctx.clone();
+    window.on_zoom(move |step| {
+        let next = {
+            let mut s = ctx.settings.borrow_mut();
+            s.note_text_percent = if step == 0 {
+                crate::settings::NOTE_TEXT_PERCENT.0
+            } else {
+                s.note_text_percent + step.signum() * crate::settings::NOTE_TEXT_STEP
+            };
+            s.sanitize();
+            s.clone()
+        };
+        next.save(&ctx.dir);
+        apply_text_size(&ctx);
+    });
+}
+
+/// The note text size as the factor the sticky multiplies its font sizes by.
+fn text_scale(ctx: &Ctx) -> f32 {
+    ctx.settings.borrow().note_text_percent as f32 / 100.0
+}
+
+/// Puts the stored note text size on every open note.
+pub(crate) fn apply_text_size(ctx: &Ctx) {
+    let scale = text_scale(ctx);
+    for entry in ctx.stickies.borrow().values() {
+        entry.window.set_text_scale(scale);
+    }
+}
+
+/// Delete, from the note's colour panel. The list is brought up with its undo bar, since a
+/// deleted note leaves nothing else on screen to take it back from.
+fn wire_delete(window: &StickyWindow, id: &str) {
+    let id = id.to_string();
+    window.on_delete_memo(move || {
+        APP.with(|a| {
+            let borrow = a.borrow();
+            let Some(app) = borrow.as_ref() else { return };
+            touch(&app.ctx);
+            crate::list::actions::delete_and_offer_undo(&app.ctx, &app.list, &id, false);
+            if app.list.window().is_visible() {
+                crate::window::raise(&app.list);
+            } else {
+                crate::window::present(&app.list);
+            }
+        });
+    });
 }

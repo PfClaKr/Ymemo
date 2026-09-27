@@ -43,6 +43,10 @@ Future<String> vaultSetName({required String name}) =>
 /// Closes the vault (log out).
 Future<void> vaultClose() => RustLib.instance.api.crateApiVaultClose();
 
+/// Shortest new master password the app accepts; see `ymemo_core::crypto::MIN_PASSWORD_CHARS`.
+Future<int> passwordMinChars() =>
+    RustLib.instance.api.crateApiPasswordMinChars();
+
 /// Whether `vault_dir` already holds a vault.
 ///
 /// The lock screen asks before anything is unlocked, to tell "set a password" from "enter
@@ -169,6 +173,11 @@ Future<FfiAttachment> attachmentAdd(
         widthPx: widthPx,
         heightPx: heightPx);
 
+/// Every memo as Markdown files in a zip, photos included; see `ymemo_core::export`.
+/// **Plaintext** — for the user's own "save as" and nothing else.
+Future<Uint8List> exportMarkdownZip() =>
+    RustLib.instance.api.crateApiExportMarkdownZip();
+
 /// Photo bytes. Errors while the blob has not synced yet; draw a placeholder instead.
 Future<Uint8List> attachmentBytes({required String hash}) =>
     RustLib.instance.api.crateApiAttachmentBytes(hash: hash);
@@ -214,9 +223,17 @@ Future<String> attachmentPlaceInWriting(
 Future<String> attachmentTakeOutOfWriting({required String id}) =>
     RustLib.instance.api.crateApiAttachmentTakeOutOfWriting(id: id);
 
-/// Detaches a photo; the blob file stays (no GC).
-Future<void> attachmentRemove({required String id}) =>
+/// Removes a photo, closing its room in the writing if it stood in one, and keeps it for
+/// [`attachment_restore`]. Returns the memo's body afterwards, for the editor to show — the
+/// room's blank lines may just have gone from it. Save the editor first, as for moving a
+/// photo into the writing.
+Future<String> attachmentRemove({required String id}) =>
     RustLib.instance.api.crateApiAttachmentRemove(id: id);
+
+/// Puts back the photo [`attachment_remove`] last took, room and all. Returns the memo's body
+/// afterwards, or `None` when there was nothing to put back.
+Future<String?> attachmentRestore() =>
+    RustLib.instance.api.crateApiAttachmentRestore();
 
 /// All groups, sorted by name.
 Future<List<FfiGroup>> groupList() => RustLib.instance.api.crateApiGroupList();
@@ -835,6 +852,9 @@ class FfiSettings {
   /// When that last happened (epoch millis), so it is not asked on every start.
   final PlatformInt64 lastUpdateCheck;
 
+  /// Palette key a new memo starts with, as the desktop's setting of the same name.
+  final String defaultColor;
+
   const FfiSettings({
     required this.lang,
     required this.unlockDays,
@@ -847,6 +867,7 @@ class FfiSettings {
     required this.biometricUnlock,
     required this.updateCheck,
     required this.lastUpdateCheck,
+    required this.defaultColor,
   });
 
   static Future<FfiSettings> default_() =>
@@ -864,7 +885,8 @@ class FfiSettings {
       wifiOnlySync.hashCode ^
       biometricUnlock.hashCode ^
       updateCheck.hashCode ^
-      lastUpdateCheck.hashCode;
+      lastUpdateCheck.hashCode ^
+      defaultColor.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -881,7 +903,8 @@ class FfiSettings {
           wifiOnlySync == other.wifiOnlySync &&
           biometricUnlock == other.biometricUnlock &&
           updateCheck == other.updateCheck &&
-          lastUpdateCheck == other.lastUpdateCheck;
+          lastUpdateCheck == other.lastUpdateCheck &&
+          defaultColor == other.defaultColor;
 }
 
 /// Another device sharing this vault.
@@ -993,6 +1016,35 @@ class FfiStrings {
   final String moveTo;
   final String history;
   final String historyEmpty;
+  final String photoRemoved;
+
+  /// Relative times as templates, `{n}`/`{month}`/`{day}`/`{year}` left in for Dart to
+  /// fill — the desktop's own phrasing, so the two lists say "3시간 전" the same way.
+  final String timeNow;
+  final String timeMinutes;
+  final String timeHours;
+  final String timeYesterday;
+  final String timeDate;
+  final String timeDateYear;
+  final String whenToday;
+  final String whenYesterday;
+  final String whenDate;
+  final String whenDateYear;
+  final String otherNetwork;
+  final String reorder;
+  final String reorderDone;
+  final String firstMemo;
+  final String showPassword;
+  final String hidePassword;
+  final String clearSearch;
+  final String exportTitle;
+  final String exportHint;
+  final String exportButton;
+  final String exported;
+  final String exportFailed;
+  final String share;
+  final String defaultColor;
+  final String historyCurrent;
   final String historyRestore;
   final String historyRestored;
   final String newGroup;
@@ -1034,6 +1086,7 @@ class FfiStrings {
   final String titleHint;
   final String unlock;
   final String unpair;
+  final String unpairWarning;
   final String color;
   final String changePassword;
   final String confirmPassword;
@@ -1049,6 +1102,7 @@ class FfiStrings {
   final String passwordChanged;
   final String passwordHint;
   final String passwordMismatch;
+  final String passwordTooShort;
   final String recoveryAbsent;
   final String recoveryAck;
   final String recoveryCode;
@@ -1057,6 +1111,7 @@ class FfiStrings {
   final String recoveryPrompt;
   final String recoveryWarning;
   final String reissueRecovery;
+  final String reissueWarning;
   final String resetDone;
   final String resetPassword;
   final String resetVault;
@@ -1150,6 +1205,32 @@ class FfiStrings {
     required this.moveTo,
     required this.history,
     required this.historyEmpty,
+    required this.photoRemoved,
+    required this.timeNow,
+    required this.timeMinutes,
+    required this.timeHours,
+    required this.timeYesterday,
+    required this.timeDate,
+    required this.timeDateYear,
+    required this.whenToday,
+    required this.whenYesterday,
+    required this.whenDate,
+    required this.whenDateYear,
+    required this.otherNetwork,
+    required this.reorder,
+    required this.reorderDone,
+    required this.firstMemo,
+    required this.showPassword,
+    required this.hidePassword,
+    required this.clearSearch,
+    required this.exportTitle,
+    required this.exportHint,
+    required this.exportButton,
+    required this.exported,
+    required this.exportFailed,
+    required this.share,
+    required this.defaultColor,
+    required this.historyCurrent,
     required this.historyRestore,
     required this.historyRestored,
     required this.newGroup,
@@ -1189,6 +1270,7 @@ class FfiStrings {
     required this.titleHint,
     required this.unlock,
     required this.unpair,
+    required this.unpairWarning,
     required this.color,
     required this.changePassword,
     required this.confirmPassword,
@@ -1204,6 +1286,7 @@ class FfiStrings {
     required this.passwordChanged,
     required this.passwordHint,
     required this.passwordMismatch,
+    required this.passwordTooShort,
     required this.recoveryAbsent,
     required this.recoveryAck,
     required this.recoveryCode,
@@ -1212,6 +1295,7 @@ class FfiStrings {
     required this.recoveryPrompt,
     required this.recoveryWarning,
     required this.reissueRecovery,
+    required this.reissueWarning,
     required this.resetDone,
     required this.resetPassword,
     required this.resetVault,
@@ -1307,6 +1391,32 @@ class FfiStrings {
       moveTo.hashCode ^
       history.hashCode ^
       historyEmpty.hashCode ^
+      photoRemoved.hashCode ^
+      timeNow.hashCode ^
+      timeMinutes.hashCode ^
+      timeHours.hashCode ^
+      timeYesterday.hashCode ^
+      timeDate.hashCode ^
+      timeDateYear.hashCode ^
+      whenToday.hashCode ^
+      whenYesterday.hashCode ^
+      whenDate.hashCode ^
+      whenDateYear.hashCode ^
+      otherNetwork.hashCode ^
+      reorder.hashCode ^
+      reorderDone.hashCode ^
+      firstMemo.hashCode ^
+      showPassword.hashCode ^
+      hidePassword.hashCode ^
+      clearSearch.hashCode ^
+      exportTitle.hashCode ^
+      exportHint.hashCode ^
+      exportButton.hashCode ^
+      exported.hashCode ^
+      exportFailed.hashCode ^
+      share.hashCode ^
+      defaultColor.hashCode ^
+      historyCurrent.hashCode ^
       historyRestore.hashCode ^
       historyRestored.hashCode ^
       newGroup.hashCode ^
@@ -1346,6 +1456,7 @@ class FfiStrings {
       titleHint.hashCode ^
       unlock.hashCode ^
       unpair.hashCode ^
+      unpairWarning.hashCode ^
       color.hashCode ^
       changePassword.hashCode ^
       confirmPassword.hashCode ^
@@ -1361,6 +1472,7 @@ class FfiStrings {
       passwordChanged.hashCode ^
       passwordHint.hashCode ^
       passwordMismatch.hashCode ^
+      passwordTooShort.hashCode ^
       recoveryAbsent.hashCode ^
       recoveryAck.hashCode ^
       recoveryCode.hashCode ^
@@ -1369,6 +1481,7 @@ class FfiStrings {
       recoveryPrompt.hashCode ^
       recoveryWarning.hashCode ^
       reissueRecovery.hashCode ^
+      reissueWarning.hashCode ^
       resetDone.hashCode ^
       resetPassword.hashCode ^
       resetVault.hashCode ^
@@ -1466,6 +1579,32 @@ class FfiStrings {
           moveTo == other.moveTo &&
           history == other.history &&
           historyEmpty == other.historyEmpty &&
+          photoRemoved == other.photoRemoved &&
+          timeNow == other.timeNow &&
+          timeMinutes == other.timeMinutes &&
+          timeHours == other.timeHours &&
+          timeYesterday == other.timeYesterday &&
+          timeDate == other.timeDate &&
+          timeDateYear == other.timeDateYear &&
+          whenToday == other.whenToday &&
+          whenYesterday == other.whenYesterday &&
+          whenDate == other.whenDate &&
+          whenDateYear == other.whenDateYear &&
+          otherNetwork == other.otherNetwork &&
+          reorder == other.reorder &&
+          reorderDone == other.reorderDone &&
+          firstMemo == other.firstMemo &&
+          showPassword == other.showPassword &&
+          hidePassword == other.hidePassword &&
+          clearSearch == other.clearSearch &&
+          exportTitle == other.exportTitle &&
+          exportHint == other.exportHint &&
+          exportButton == other.exportButton &&
+          exported == other.exported &&
+          exportFailed == other.exportFailed &&
+          share == other.share &&
+          defaultColor == other.defaultColor &&
+          historyCurrent == other.historyCurrent &&
           historyRestore == other.historyRestore &&
           historyRestored == other.historyRestored &&
           newGroup == other.newGroup &&
@@ -1505,6 +1644,7 @@ class FfiStrings {
           titleHint == other.titleHint &&
           unlock == other.unlock &&
           unpair == other.unpair &&
+          unpairWarning == other.unpairWarning &&
           color == other.color &&
           changePassword == other.changePassword &&
           confirmPassword == other.confirmPassword &&
@@ -1520,6 +1660,7 @@ class FfiStrings {
           passwordChanged == other.passwordChanged &&
           passwordHint == other.passwordHint &&
           passwordMismatch == other.passwordMismatch &&
+          passwordTooShort == other.passwordTooShort &&
           recoveryAbsent == other.recoveryAbsent &&
           recoveryAck == other.recoveryAck &&
           recoveryCode == other.recoveryCode &&
@@ -1528,6 +1669,7 @@ class FfiStrings {
           recoveryPrompt == other.recoveryPrompt &&
           recoveryWarning == other.recoveryWarning &&
           reissueRecovery == other.reissueRecovery &&
+          reissueWarning == other.reissueWarning &&
           resetDone == other.resetDone &&
           resetPassword == other.resetPassword &&
           resetVault == other.resetVault &&

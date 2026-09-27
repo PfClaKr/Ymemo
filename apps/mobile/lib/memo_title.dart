@@ -91,3 +91,86 @@ String _rawTitleLine(String text) {
   }
   return '';
 }
+
+/// When a memo was last written, the way a person would say it: "방금", "5분 전", "3시간 전",
+/// "어제", then the date, with the year only once it is not this one. The phrasing is the
+/// catalog's, shared with the desktop's list (`relative_time` in its list module).
+String relativeTime(int millis, FfiStrings s, {DateTime? now}) {
+  final t = DateTime.fromMillisecondsSinceEpoch(millis);
+  final at = now ?? DateTime.now();
+  final secs = at.difference(t).inSeconds;
+  final days = DateTime(at.year, at.month, at.day).difference(DateTime(t.year, t.month, t.day)).inDays;
+  String fill(String template, Map<String, int> values) =>
+      values.entries.fold(template, (out, e) => out.replaceAll('{${e.key}}', '${e.value}'));
+  if (secs < 60) return s.timeNow;
+  if (secs < 3600) return fill(s.timeMinutes, {'n': secs ~/ 60});
+  if (days == 0) return fill(s.timeHours, {'n': secs ~/ 3600});
+  if (days == 1) return s.timeYesterday;
+  if (t.year == at.year) return fill(s.timeDate, {'month': t.month, 'day': t.day});
+  return fill(s.timeDateYear, {'year': t.year, 'month': t.month, 'day': t.day});
+}
+
+/// When a revision was made: "오늘 13:04", "어제 18:20", "9월 27일 13:04", with the year only
+/// once it is not this one — the desktop history window's phrasing (`revision_time`).
+String revisionTime(int millis, FfiStrings s, {DateTime? now}) {
+  final t = DateTime.fromMillisecondsSinceEpoch(millis);
+  final at = now ?? DateTime.now();
+  String two(int n) => n.toString().padLeft(2, '0');
+  final time = '${two(t.hour)}:${two(t.minute)}';
+  final days = DateTime(at.year, at.month, at.day).difference(DateTime(t.year, t.month, t.day)).inDays;
+  String fill(String template, Map<String, Object> values) =>
+      values.entries.fold(template, (out, e) => out.replaceAll('{${e.key}}', '${e.value}'));
+  if (days == 0) return fill(s.whenToday, {'time': time});
+  if (days == 1) return fill(s.whenYesterday, {'time': time});
+  if (t.year == at.year) return fill(s.whenDate, {'month': t.month, 'day': t.day, 'time': time});
+  return fill(s.whenDateYear, {'year': t.year, 'month': t.month, 'day': t.day, 'time': time});
+}
+
+/// Where in `text` the search `query` was found: a few words before the first match, more
+/// after, on one line, with "…" where it was cut — as three parts, so the caller can set the
+/// match apart. Null when there is no match. The desktop builds the same stretch
+/// (`search_snippet` in its list module).
+({String before, String match, String after})? searchSnippet(String text, String query) {
+  const before = 12, after = 40;
+  final q = query.trim().toLowerCase();
+  if (q.isEmpty) return null;
+  final flat = text.replaceAll('\n', ' ');
+  // Compared in runes, so a match cannot start or end halfway through a character.
+  final chars = flat.runes.toList();
+  final lower = flat.toLowerCase().runes.toList();
+  final want = q.runes.toList();
+  if (lower.length != chars.length) return null; // lower-casing changed the length; rare
+  var at = -1;
+  for (var i = 0; i + want.length <= lower.length; i++) {
+    var hit = true;
+    for (var j = 0; j < want.length; j++) {
+      if (lower[i + j] != want[j]) {
+        hit = false;
+        break;
+      }
+    }
+    if (hit) {
+      at = i;
+      break;
+    }
+  }
+  if (at < 0) return null;
+  final end = at + want.length;
+  // Start at a word, not in one: cut mid-word the snippet read "…ons ship on Friday".
+  var from = at - before < 0 ? 0 : at - before;
+  if (from > 0) {
+    for (var i = from; i < at; i++) {
+      if (String.fromCharCode(chars[i]).trim().isEmpty) {
+        from = i + 1;
+        break;
+      }
+    }
+  }
+  final to = end + after > chars.length ? chars.length : end + after;
+  String piece(int a, int b) => String.fromCharCodes(chars.sublist(a, b));
+  return (
+    before: '${from > 0 ? '…' : ''}${piece(from, at).trimLeft()}',
+    match: piece(at, end),
+    after: '${piece(end, to)}${to < chars.length ? '…' : ''}',
+  );
+}

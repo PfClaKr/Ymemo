@@ -138,6 +138,7 @@ class SettingsStore {
       keepVersionsDays: s.keepVersionsDays,
       wifiOnlySync: s.wifiOnlySync,
       lastUpdateCheck: DateTime.now().millisecondsSinceEpoch,
+      defaultColor: s.defaultColor,
     ));
   }
 

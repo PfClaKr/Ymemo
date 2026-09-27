@@ -181,6 +181,12 @@ export component IconButton inherits Rectangle {
     in property <string> label;
     in property <color> ink: #e8e2d2;
     in property <bool> enabled: true;
+    // A status dot in the corner: 0 none, 1 good (filled green), 2 waiting (hollow grey),
+    // 3 off (filled muted red).
+    in property <int> badge: 0;
+    // The window's main action: filled with the app's gold, the glyph dark on it, so the one
+    // button that makes something new stands out from the row of settings-like ones.
+    in property <bool> primary: false;
     out property <bool> hovering: ta.has-hover;
     callback clicked();
 
@@ -188,6 +194,7 @@ export component IconButton inherits Rectangle {
     height: 26px;
     border-radius: 5px;
     background: !root.enabled ? #ffffff08
+        : root.primary ? (ta.has-hover ? #f5d24a : #e2c22a)
         : ta.has-hover ? #ffffff33
         : #ffffff14;
     opacity: root.enabled ? 1.0 : 0.4;
@@ -201,7 +208,18 @@ export component IconButton inherits Rectangle {
         width: 16px;
         height: 16px;
         name: root.icon;
-        stroke: root.ink;
+        stroke: root.primary ? #3a3208 : root.ink;
+    }
+
+    if root.badge != 0: Rectangle {
+        x: parent.width - 9px;
+        y: 3px;
+        width: 6px;
+        height: 6px;
+        border-radius: 3px;
+        background: root.badge == 1 ? #6fae6f : root.badge == 3 ? #c97a6e : transparent;
+        border-width: root.badge == 2 ? 1.5px : 0px;
+        border-color: #a8a294;
     }
 
     ta := TouchArea {

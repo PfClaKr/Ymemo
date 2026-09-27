@@ -28,6 +28,7 @@ include!(concat!(env!("OUT_DIR"), "/i18n_apply.rs"));
 mod autostart;
 mod hangul;
 mod highlight;
+mod hint;
 mod history;
 mod icon;
 mod instance;
@@ -94,6 +95,10 @@ fn main() -> Result<()> {
         approve: ApproveWindow::new()?,
     };
 
+    let min_password = ymemo_core::crypto::MIN_PASSWORD_CHARS as i32;
+    ui.lock.set_min_password(min_password);
+    ui.security.set_min_password(min_password);
+
     // Syncthing starts before unlocking (it needs no key), so a new device can pair first,
     // receive vault.json and the logs, and only then be asked for the password.
     let vault_dir = dir.join("vault");
@@ -106,6 +111,7 @@ fn main() -> Result<()> {
 
     let ctx = Ctx::new(dir.clone(), startup::load_settings(&dir, &syncthing), syncthing.clone());
     ui.list.set_rows(ModelRc::from(ctx.model.clone()));
+    ui.list.set_folder_choices(list::folder_choices());
     let unlocked = Rc::new(Cell::new(false));
 
     settings_window::apply_lang(

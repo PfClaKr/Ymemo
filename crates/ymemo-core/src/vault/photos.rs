@@ -7,6 +7,14 @@ use ymemo_i18n::t;
 use crate::{clamp_permille, clamp_width_em_milli, Attachment};
 
 use super::Vault;
+
+/// What [`Vault::remove_attachment`] took away: the photo as it was, and how many blank lines
+/// of room were closed with it.
+#[derive(Debug, Clone)]
+pub struct RemovedPhoto {
+    pub attachment: Attachment,
+    pub rows: usize,
+}
 use super::doc::{put_i64_if_changed, put_str_if_changed};
 
 impl Vault {
@@ -183,6 +191,53 @@ impl Vault {
             self.upsert_attachment(&a)?;
         }
         Ok(())
+    }
+
+    /// Removes a photo from its memo and hands back what it took, so the removal can be
+    /// offered back the way a deleted memo is (see [`Vault::restore_attachment`]).
+    ///
+    /// A photo standing in the writing has its room closed with it — the blank lines it was
+    /// given, as far as they are still blank. Leaving them behind put an unexplained gap in
+    /// the note every time a picture was taken out of one.
+    ///
+    /// The history does not cover photos, which is why the snapshot exists at all: without it
+    /// a stray tap on the remove button lost the picture for good.
+    pub fn remove_attachment(&mut self, id: &str) -> Result<Option<RemovedPhoto>> {
+        let Some(a) = self.store.get_attachment(id)? else {
+            return Ok(None);
+        };
+        let mut rows = 0;
+        if a.mode() == crate::PhotoMode::Inline {
+            if let Some(mut memo) = self.store.get(&a.memo_id)? {
+                let closed = close_gap(&memo.body, a.anchor_line.max(0) as usize);
+                rows = memo.body.matches('\n').count() - closed.matches('\n').count();
+                if rows > 0 {
+                    memo.body = closed;
+                    // Detached first, so the re-anchoring `upsert` does has one photo fewer
+                    // to walk over and none pointing into the room being closed.
+                    self.detach(id)?;
+                    self.upsert(&memo)?;
+                    return Ok(Some(RemovedPhoto { attachment: a, rows }));
+                }
+            }
+        }
+        self.detach(id)?;
+        Ok(Some(RemovedPhoto { attachment: a, rows }))
+    }
+
+    /// Puts back a photo [`Vault::remove_attachment`] took away, room and all. Written as an
+    /// ordinary edit; the blob was never deleted, so the picture is simply there again.
+    pub fn restore_attachment(&mut self, removed: &RemovedPhoto) -> Result<()> {
+        let mut a = removed.attachment.clone();
+        if a.mode() == crate::PhotoMode::Inline && removed.rows > 0 {
+            // In as a floating photo first, then placed: placing is what opens the room, and
+            // it re-reads the attachment from the store.
+            let anchor = a.anchor_line;
+            a.mode = String::new();
+            self.upsert_attachment(&a)?;
+            return self.place_attachment_in_writing(&a.id, anchor, removed.rows);
+        }
+        self.upsert_attachment(&a)
     }
 
     /// Detaches a photo. **The blob file stays** — no GC, other devices may still show it.
