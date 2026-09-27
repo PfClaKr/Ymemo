@@ -880,6 +880,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
                   ? null
                   : IconButton(
                       icon: const Icon(Icons.close, size: 20),
+                      tooltip: widget.strings.clearSearch,
                       onPressed: () {
                         _search.clear();
                         _runSearch('');

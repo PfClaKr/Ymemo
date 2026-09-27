@@ -411,6 +411,7 @@ class _LockScreenState extends State<LockScreen> {
             labelText: _vaultExists ? s.masterPassword : s.newPassword,
             suffixIcon: IconButton(
               icon: Icon(_reveal ? Icons.visibility_off : Icons.visibility),
+              tooltip: _reveal ? s.hidePassword : s.showPassword,
               onPressed: () => setState(() => _reveal = !_reveal),
             ),
           ),

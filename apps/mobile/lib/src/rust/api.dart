@@ -223,9 +223,17 @@ Future<String> attachmentPlaceInWriting(
 Future<String> attachmentTakeOutOfWriting({required String id}) =>
     RustLib.instance.api.crateApiAttachmentTakeOutOfWriting(id: id);
 
-/// Detaches a photo; the blob file stays (no GC).
-Future<void> attachmentRemove({required String id}) =>
+/// Removes a photo, closing its room in the writing if it stood in one, and keeps it for
+/// [`attachment_restore`]. Returns the memo's body afterwards, for the editor to show — the
+/// room's blank lines may just have gone from it. Save the editor first, as for moving a
+/// photo into the writing.
+Future<String> attachmentRemove({required String id}) =>
     RustLib.instance.api.crateApiAttachmentRemove(id: id);
+
+/// Puts back the photo [`attachment_remove`] last took, room and all. Returns the memo's body
+/// afterwards, or `None` when there was nothing to put back.
+Future<String?> attachmentRestore() =>
+    RustLib.instance.api.crateApiAttachmentRestore();
 
 /// All groups, sorted by name.
 Future<List<FfiGroup>> groupList() => RustLib.instance.api.crateApiGroupList();
@@ -1008,6 +1016,10 @@ class FfiStrings {
   final String moveTo;
   final String history;
   final String historyEmpty;
+  final String photoRemoved;
+  final String showPassword;
+  final String hidePassword;
+  final String clearSearch;
   final String exportTitle;
   final String exportHint;
   final String exportButton;
@@ -1176,6 +1188,10 @@ class FfiStrings {
     required this.moveTo,
     required this.history,
     required this.historyEmpty,
+    required this.photoRemoved,
+    required this.showPassword,
+    required this.hidePassword,
+    required this.clearSearch,
     required this.exportTitle,
     required this.exportHint,
     required this.exportButton,
@@ -1344,6 +1360,10 @@ class FfiStrings {
       moveTo.hashCode ^
       history.hashCode ^
       historyEmpty.hashCode ^
+      photoRemoved.hashCode ^
+      showPassword.hashCode ^
+      hidePassword.hashCode ^
+      clearSearch.hashCode ^
       exportTitle.hashCode ^
       exportHint.hashCode ^
       exportButton.hashCode ^
@@ -1514,6 +1534,10 @@ class FfiStrings {
           moveTo == other.moveTo &&
           history == other.history &&
           historyEmpty == other.historyEmpty &&
+          photoRemoved == other.photoRemoved &&
+          showPassword == other.showPassword &&
+          hidePassword == other.hidePassword &&
+          clearSearch == other.clearSearch &&
           exportTitle == other.exportTitle &&
           exportHint == other.exportHint &&
           exportButton == other.exportButton &&

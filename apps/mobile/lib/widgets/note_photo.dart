@@ -31,6 +31,7 @@ class NotePhoto extends StatefulWidget {
     required this.selected,
     required this.onSelect,
     required this.onChanged,
+    required this.onRemove,
     this.flow = false,
     this.inWriting = false,
     this.placeAt,
@@ -63,6 +64,11 @@ class NotePhoto extends StatefulWidget {
   final bool selected;
   final VoidCallback onSelect;
   final Future<void> Function() onChanged;
+
+  /// Removing the photo. The editor does it, not this widget: a photo in the writing takes
+  /// its room with it, which changes the body the editor is holding, and the removal is
+  /// offered back from the editor's own snackbar.
+  final Future<void> Function() onRemove;
 
   @override
   State<NotePhoto> createState() => _NotePhotoState();
@@ -282,10 +288,7 @@ class _NotePhotoState extends State<NotePhoto> {
             label: widget.strings.photoRemove,
             button: true,
             child: GestureDetector(
-              onTap: () async {
-                await attachmentRemove(id: widget.attachment.id);
-                await widget.onChanged();
-              },
+              onTap: widget.onRemove,
               child: _chip(const Color(0xFFD64541), Icons.close),
             ),
           ),

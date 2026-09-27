@@ -23,7 +23,7 @@ use ymemo_core::diag;
 
 use crate::globals::{
     lan_lock, rejected_lock, relock, remember_delete, sync_lock, vault_lock, with_sync, with_vault,
-    LAST_DELETE,
+    LAST_DELETE, LAST_PHOTO_REMOVAL,
 };
 use ymemo_i18n::t;
 
@@ -238,6 +238,10 @@ pub struct FfiStrings {
     pub move_to: String,
     pub history: String,
     pub history_empty: String,
+    pub photo_removed: String,
+    pub show_password: String,
+    pub hide_password: String,
+    pub clear_search: String,
     pub export_title: String,
     pub export_hint: String,
     pub export_button: String,
@@ -413,6 +417,10 @@ pub fn mobile_strings() -> FfiStrings {
         move_to: t!("mobile.move_to"),
         history: t!("mobile.history"),
         history_empty: t!("mobile.history_empty"),
+        photo_removed: t!("mobile.photo_removed"),
+        show_password: t!("mobile.show_password"),
+        hide_password: t!("mobile.hide_password"),
+        clear_search: t!("mobile.clear_search"),
         export_title: t!("ui.settings_export"),
         export_hint: t!("mobile.export_hint"),
         export_button: t!("mobile.export_button"),
@@ -541,6 +549,7 @@ pub fn vault_close() -> Result<()> {
     // memo text behind it, and an undo offered across a lock would put a memo back into a
     // vault the user has just shut.
     remember_delete(None);
+    relock(&LAST_PHOTO_REMOVAL).take();
     Ok(())
 }
 
@@ -919,9 +928,29 @@ fn body_of_attachment(v: &mut Vault, attachment_id: &str) -> Result<String> {
     Ok(v.store().get(&a.memo_id)?.map(|m| m.body).unwrap_or_default())
 }
 
-/// Detaches a photo; the blob file stays (no GC).
-pub fn attachment_remove(id: String) -> Result<()> {
-    with_vault(|v| v.detach(&id))
+/// Removes a photo, closing its room in the writing if it stood in one, and keeps it for
+/// [`attachment_restore`]. Returns the memo's body afterwards, for the editor to show — the
+/// room's blank lines may just have gone from it. Save the editor first, as for moving a
+/// photo into the writing.
+pub fn attachment_remove(id: String) -> Result<String> {
+    with_vault(|v| {
+        let memo_id = v.store().get_attachment(&id)?.map(|a| a.memo_id).unwrap_or_default();
+        let removed = v.remove_attachment(&id)?;
+        *relock(&LAST_PHOTO_REMOVAL) = removed;
+        Ok(v.store().get(&memo_id)?.map(|m| m.body).unwrap_or_default())
+    })
+}
+
+/// Puts back the photo [`attachment_remove`] last took, room and all. Returns the memo's body
+/// afterwards, or `None` when there was nothing to put back.
+pub fn attachment_restore() -> Result<Option<String>> {
+    let Some(removed) = relock(&LAST_PHOTO_REMOVAL).take() else {
+        return Ok(None);
+    };
+    with_vault(|v| {
+        v.restore_attachment(&removed)?;
+        Ok(v.store().get(&removed.attachment.memo_id)?.map(|m| m.body))
+    })
 }
 
 /// All groups, sorted by name.

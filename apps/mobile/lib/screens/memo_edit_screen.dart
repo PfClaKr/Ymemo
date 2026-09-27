@@ -237,6 +237,50 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
     if (mounted) setState(() => _photos = list);
   }
 
+  /// Removes a photo and offers it back for a moment, the way a deleted memo is: the history
+  /// does not cover photos, so without the offer a stray tap on the ✕ lost the picture.
+  ///
+  /// Saved first, for the reason [_movePhoto] is: a photo in the writing takes its room with
+  /// it, and the room is closed in what the core has stored.
+  Future<void> _removePhoto(FfiAttachment photo) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await memoUpsert(id: widget.id, title: _title.text, body: _body.text);
+      _showBody(await attachmentRemove(id: photo.id));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
+    if (_selectedPhoto == photo.id) _selectedPhoto = null;
+    await _reloadPhotos();
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(
+      content: Text(widget.strings.photoRemoved),
+      action: SnackBarAction(label: widget.strings.undo, onPressed: _restorePhoto),
+    ));
+  }
+
+  Future<void> _restorePhoto() async {
+    try {
+      await memoUpsert(id: widget.id, title: _title.text, body: _body.text);
+      final body = await attachmentRestore();
+      if (body != null) _showBody(body);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+      return;
+    }
+    await _reloadPhotos();
+  }
+
+  /// The body the core now holds, after it opened or closed a photo's room. Left alone when
+  /// nothing moved, so the caret stays where it was.
+  void _showBody(String body) {
+    if (mounted && _body.text != body) _body.text = body;
+    _savedBody = body;
+  }
+
   /// Moves a photo into the writing at the caret, or takes it back out.
   ///
   /// The memo is written **first**. The room is opened in whatever the core has stored, and
@@ -562,6 +606,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                                       onSelect: () =>
                                           setState(() => _selectedPhoto = photo.id),
                                       onChanged: _reloadPhotos,
+                                      onRemove: () => _removePhoto(photo),
                                       onMove: (into) =>
                                           _movePhoto(photo, intoWriting: into),
                                     ),
@@ -577,6 +622,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                                       onSelect: () =>
                                           setState(() => _selectedPhoto = photo.id),
                                       onChanged: _reloadPhotos,
+                                      onRemove: () => _removePhoto(photo),
                                       onMove: (into) =>
                                           _movePhoto(photo, intoWriting: into),
                                     ),
@@ -614,6 +660,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                                     onSelect: () =>
                                         setState(() => _selectedPhoto = photo.id),
                                     onChanged: _reloadPhotos,
+                                    onRemove: () => _removePhoto(photo),
                                     onMove: (into) =>
                                         _movePhoto(photo, intoWriting: into),
                                   ),
