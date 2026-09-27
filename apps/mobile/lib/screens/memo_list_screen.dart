@@ -479,6 +479,34 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
         ],
       );
 
+  /// Under a memo's title: how it goes on — or, while searching, where in it the words were
+  /// found, with them in bold. The start of the body said nothing about why a memo was on the
+  /// list of results.
+  Widget? _subtitle(FfiMemo memo) {
+    final hit = _query.isEmpty ? null : searchSnippet(memo.body, _query);
+    if (hit != null) {
+      return Text.rich(
+        TextSpan(children: [
+          TextSpan(text: hit.before),
+          TextSpan(
+            text: hit.match,
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          TextSpan(text: hit.after),
+        ]),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+    final preview = rowPreview(memo);
+    return preview.isEmpty
+        ? null
+        : Text(preview, maxLines: 1, overflow: TextOverflow.ellipsis);
+  }
+
   /// One memo row. `dragIndex` is its position in the reorderable list, or null while the
   /// list is showing search results, where there is no arrangement to drag it into.
   Widget _memoTile(FfiMemo memo, int? dragIndex) => Column(
@@ -512,10 +540,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
                     ],
                   ],
                 ),
-                subtitle: rowPreview(memo).isEmpty
-                    ? null
-                    : Text(rowPreview(memo),
-                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                subtitle: _subtitle(memo),
                 onTap: () => _open(memo),
                 onLongPress: () => _memoMenu(memo),
                 // A handle of its own, rather than a long press: a long press already

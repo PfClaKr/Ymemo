@@ -125,3 +125,43 @@ String revisionTime(int millis, FfiStrings s, {DateTime? now}) {
   if (t.year == at.year) return fill(s.whenDate, {'month': t.month, 'day': t.day, 'time': time});
   return fill(s.whenDateYear, {'year': t.year, 'month': t.month, 'day': t.day, 'time': time});
 }
+
+/// Where in `text` the search `query` was found: a few words before the first match, more
+/// after, on one line, with "…" where it was cut — as three parts, so the caller can set the
+/// match apart. Null when there is no match. The desktop builds the same stretch
+/// (`search_snippet` in its list module).
+({String before, String match, String after})? searchSnippet(String text, String query) {
+  const before = 12, after = 40;
+  final q = query.trim().toLowerCase();
+  if (q.isEmpty) return null;
+  final flat = text.replaceAll('\n', ' ');
+  // Compared in runes, so a match cannot start or end halfway through a character.
+  final chars = flat.runes.toList();
+  final lower = flat.toLowerCase().runes.toList();
+  final want = q.runes.toList();
+  if (lower.length != chars.length) return null; // lower-casing changed the length; rare
+  var at = -1;
+  for (var i = 0; i + want.length <= lower.length; i++) {
+    var hit = true;
+    for (var j = 0; j < want.length; j++) {
+      if (lower[i + j] != want[j]) {
+        hit = false;
+        break;
+      }
+    }
+    if (hit) {
+      at = i;
+      break;
+    }
+  }
+  if (at < 0) return null;
+  final end = at + want.length;
+  final from = at - before < 0 ? 0 : at - before;
+  final to = end + after > chars.length ? chars.length : end + after;
+  String piece(int a, int b) => String.fromCharCodes(chars.sublist(a, b));
+  return (
+    before: '${from > 0 ? '…' : ''}${piece(from, at).trimLeft()}',
+    match: piece(at, end),
+    after: '${piece(end, to)}${to < chars.length ? '…' : ''}',
+  );
+}
