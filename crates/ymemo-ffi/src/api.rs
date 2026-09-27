@@ -238,6 +238,13 @@ pub struct FfiStrings {
     pub move_to: String,
     pub history: String,
     pub history_empty: String,
+    pub export_title: String,
+    pub export_hint: String,
+    pub export_button: String,
+    pub exported: String,
+    pub export_failed: String,
+    pub share: String,
+    pub default_color: String,
     pub history_current: String,
     pub history_restore: String,
     pub history_restored: String,
@@ -406,6 +413,13 @@ pub fn mobile_strings() -> FfiStrings {
         move_to: t!("mobile.move_to"),
         history: t!("mobile.history"),
         history_empty: t!("mobile.history_empty"),
+        export_title: t!("ui.settings_export"),
+        export_hint: t!("mobile.export_hint"),
+        export_button: t!("mobile.export_button"),
+        exported: t!("mobile.exported"),
+        export_failed: t!("mobile.export_failed"),
+        share: t!("mobile.share"),
+        default_color: t!("ui.settings_default_color"),
         history_current: t!("mobile.history_current"),
         history_restore: t!("mobile.history_restore"),
         history_restored: t!("mobile.history_restored"),
@@ -840,6 +854,12 @@ pub fn attachment_add(
         Ok(v.attach(&memo_id, &data, &name, &mime, width_px, height_px)?
             .into())
     })
+}
+
+/// Every memo as Markdown files in a zip, photos included; see `ymemo_core::export`.
+/// **Plaintext** — for the user's own "save as" and nothing else.
+pub fn export_markdown_zip() -> Result<Vec<u8>> {
+    with_vault(|v| ymemo_core::export::markdown_zip(v))
 }
 
 /// Photo bytes. Errors while the blob has not synced yet; draw a placeholder instead.
@@ -1555,6 +1575,8 @@ pub struct FfiSettings {
     pub update_check: bool,
     /// When that last happened (epoch millis), so it is not asked on every start.
     pub last_update_check: i64,
+    /// Palette key a new memo starts with, as the desktop's setting of the same name.
+    pub default_color: String,
 }
 
 impl Default for FfiSettings {
@@ -1572,6 +1594,7 @@ impl Default for FfiSettings {
             biometric_unlock: false,
             update_check: true,
             last_update_check: 0,
+            default_color: "yellow".into(),
         }
     }
 }
@@ -1590,6 +1613,9 @@ impl FfiSettings {
         self.rescan_seconds =
             self.rescan_seconds.clamp(RESCAN_SECONDS_RANGE.0, RESCAN_SECONDS_RANGE.1);
         self.keep_versions_days = self.keep_versions_days.clamp(0, KEEP_VERSIONS_DAYS_MAX);
+        if !matches!(self.default_color.as_str(), "yellow" | "pink" | "green" | "blue" | "purple") {
+            self.default_color = "yellow".into();
+        }
         if self.last_update_check < 0 || self.last_update_check > now_millis() {
             self.last_update_check = 0;
         }

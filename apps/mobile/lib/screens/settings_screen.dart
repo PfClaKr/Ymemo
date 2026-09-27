@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../host.dart' as host;
+import '../palette.dart';
 import '../security.dart';
 import '../settings.dart';
 import '../src/rust/api.dart';
@@ -84,6 +85,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     int? rescanSeconds,
     int? keepVersionsDays,
     bool? wifiOnlySync,
+    String? defaultColor,
   }) async {
     await widget.settings.save(FfiSettings(
       lang: lang ?? _s.lang,
@@ -97,6 +99,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       keepVersionsDays: keepVersionsDays ?? _s.keepVersionsDays,
       wifiOnlySync: wifiOnlySync ?? _s.wifiOnlySync,
       lastUpdateCheck: _s.lastUpdateCheck,
+      defaultColor: defaultColor ?? _s.defaultColor,
     ));
     // Flipping the switch has to take effect now, not at the next daemon start.
     if (wifiOnlySync != null) {
@@ -244,6 +247,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  /// Every memo as a zip of Markdown files, through the system's own "save as". The zip is
+  /// plaintext and exists only in memory until the user names a place for it.
+  Future<void> _export() async {
+    final s = widget.strings;
+    try {
+      final zip = await exportMarkdownZip();
+      final now = DateTime.now();
+      String two(int n) => n.toString().padLeft(2, '0');
+      final ok = await host.saveAs(
+        name: 'Ymemo-${now.year}-${two(now.month)}-${two(now.day)}.zip',
+        mime: 'application/zip',
+        bytes: zip,
+      );
+      if (ok) _say(s.exported);
+    } catch (e) {
+      _say('${s.exportFailed}: $e');
+    }
+  }
+
   void _say(String message) => ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
       );
@@ -302,6 +324,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const RadioListTile<String>(value: 'ko', title: Text('한국어')),
               const RadioListTile<String>(value: 'en', title: Text('English')),
             ]),
+          ),
+
+          const Divider(),
+          _header(s.defaultColor),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: ColorSwatches(
+              selected: _s.defaultColor,
+              onPick: (key) async {
+                await _save(defaultColor: key);
+                if (mounted) setState(() {});
+              },
+            ),
           ),
 
           const Divider(),
@@ -388,6 +423,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   DropdownMenuItem(value: days, child: Text('$days ${s.daysUnit}')),
               ],
             ),
+          ),
+          ListTile(
+            title: Text(s.exportTitle),
+            subtitle: Text(s.exportHint),
+            trailing: TextButton(onPressed: _export, child: Text(s.exportButton)),
           ),
           // A phone has no file manager worth sending someone to, so the log is shown here
           // and offered for copying rather than pointed at.

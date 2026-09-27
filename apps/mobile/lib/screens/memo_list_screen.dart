@@ -2,9 +2,9 @@
 library;
 
 import 'dart:async';
-import 'dart:io' show Directory, FileSystemEvent;
+import 'dart:io' show Directory, File, FileSystemEvent;
 
-import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/foundation.dart' show Uint8List, listEquals;
 import 'package:flutter/material.dart';
 
 import '../home_widgets.dart' as widgets;
@@ -148,6 +148,9 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
         break;
       case widgets.WidgetAction.openFolder:
         await _openFolderById(request.id);
+        break;
+      case widgets.WidgetAction.share:
+        await _addShared(request);
         break;
     }
   }
@@ -696,13 +699,61 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
     _query = '';
   }
 
-  Future<void> _add({bool withPhoto = false}) async {
+  /// What another app shared, as a new memo: the text (under its subject, when the text
+  /// does not already say it) and the picture, if one came. The copy the host made of the
+  /// picture is deleted once it is in the vault — or once it is known it will not be.
+  Future<void> _addShared(widgets.WidgetRequest shared) async {
+    final text = shared.text.trim();
+    final subject = shared.subject.trim();
+    final body = subject.isEmpty || text.contains(subject)
+        ? text
+        : text.isEmpty
+            ? subject
+            : '$subject\n$text';
+    _SharedPhoto? photo;
+    if (shared.file.isNotEmpty) {
+      final file = File(shared.file);
+      try {
+        final bytes = await file.readAsBytes();
+        final ext = switch (shared.mime) {
+          'image/png' => 'png',
+          'image/gif' => 'gif',
+          'image/webp' => 'webp',
+          _ => 'jpg',
+        };
+        photo = _SharedPhoto(bytes, 'shared.$ext', shared.mime);
+      } catch (e) {
+        debugPrint('could not read the shared picture: $e');
+      } finally {
+        try {
+          await file.delete();
+        } catch (_) {}
+      }
+    }
+    if (body.isEmpty && photo == null) return;
+    await _add(body: body, photo: photo);
+  }
+
+  Future<void> _add({bool withPhoto = false, String body = '', _SharedPhoto? photo}) async {
     _clearSearch();
     final messenger = ScaffoldMessenger.of(context);
+    final color = widget.settings.value.defaultColor;
     final String id;
     try {
-      id = await memoUpsert(title: '', body: '');
+      id = await memoUpsert(title: '', body: body);
+      if (color != defaultColor) await memoSetColor(id: id, color: color);
       if (!_atRoot) await memoSetGroup(id: id, groupId: widget.groupId);
+      if (photo != null) {
+        final size = await decodeImageSize(photo.bytes);
+        await attachmentAdd(
+          memoId: id,
+          data: photo.bytes,
+          name: photo.name,
+          mime: photo.mime,
+          widthPx: size?.width.toInt() ?? 0,
+          heightPx: size?.height.toInt() ?? 0,
+        );
+      }
     } catch (e) {
       // Without this the button simply did nothing, which reads as a broken app rather
       // than as storage the vault cannot be written to.
@@ -716,8 +767,8 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
           strings: widget.strings,
           id: id,
           title: '',
-          body: '',
-          color: defaultColor,
+          body: body,
+          color: color,
           pickPhotoOnOpen: withPhoto,
           isNew: true,
         ),
@@ -937,4 +988,12 @@ Future<String?> _askForName(
       ],
     ),
   );
+}
+
+/// A picture another app shared, read and ready to attach.
+class _SharedPhoto {
+  const _SharedPhoto(this.bytes, this.name, this.mime);
+  final Uint8List bytes;
+  final String name;
+  final String mime;
 }

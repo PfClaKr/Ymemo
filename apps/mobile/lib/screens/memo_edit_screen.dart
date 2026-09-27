@@ -3,12 +3,11 @@ library;
 
 import 'dart:async';
 import 'dart:math' show max;
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../host.dart' as host;
 import '../markdown_style.dart';
 import '../memo_title.dart';
 import '../palette.dart';
@@ -305,7 +304,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
     final picked = await ImagePicker().pickImage(source: source);
     if (picked == null) return;
     final bytes = await picked.readAsBytes();
-    final size = await _decodeSize(bytes);
+    final size = await decodeImageSize(bytes);
     await attachmentAdd(
       memoId: widget.id,
       data: bytes,
@@ -322,20 +321,6 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       _photos = added;
       if (added.isNotEmpty) _selectedPhoto = added.last.id;
     });
-  }
-
-  /// Original pixel size, or null when decoding fails; the core then assumes 1:1.
-  Future<ui.Size?> _decodeSize(Uint8List bytes) async {
-    try {
-      final codec = await ui.instantiateImageCodec(bytes);
-      final frame = await codec.getNextFrame();
-      final size = ui.Size(frame.image.width.toDouble(), frame.image.height.toDouble());
-      frame.image.dispose();
-      codec.dispose();
-      return size;
-    } catch (_) {
-      return null;
-    }
   }
 
   Future<void> _pickSource() async {
@@ -462,12 +447,16 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
               onSelected: (action) async {
                 if (action == 'history') {
                   await _openHistory();
+                } else if (action == 'share') {
+                  // What is on screen, not what was last saved: the words being looked at.
+                  await host.shareText(title: _title.text.trim(), text: _body.text);
                 } else if (action == MemoEditScreen.deleteResult) {
                   _autosave?.cancel();
                   Navigator.of(context).pop(MemoEditScreen.deleteResult);
                 }
               },
               itemBuilder: (context) => [
+                PopupMenuItem(value: 'share', child: Text(widget.strings.share)),
                 PopupMenuItem(value: 'history', child: Text(widget.strings.history)),
                 PopupMenuItem(
                   value: MemoEditScreen.deleteResult,

@@ -21,6 +21,11 @@ internal object Launch {
     const val ACTION_WIDGET = "dev.ymemo.action.WIDGET"
     const val EXTRA_ACTION = "dev.ymemo.extra.ACTION"
     const val EXTRA_ID = "dev.ymemo.extra.ID"
+    /** What another app shared (`ShareActivity`): its text, subject, and a copied picture. */
+    const val EXTRA_TEXT = "dev.ymemo.extra.TEXT"
+    const val EXTRA_SUBJECT = "dev.ymemo.extra.SUBJECT"
+    const val EXTRA_FILE = "dev.ymemo.extra.FILE"
+    const val EXTRA_MIME = "dev.ymemo.extra.MIME"
 
     /** The actions themselves, as Dart receives them (`lib/widgets.dart`). */
     const val NEW_MEMO = "new_memo"
@@ -28,6 +33,7 @@ internal object Launch {
     const val OPEN_LIST = "open_list"
     const val OPEN_MEMO = "open_memo"
     const val OPEN_FOLDER = "open_folder"
+    const val SHARE = "share"
 
     /** The launcher-shortcut actions, which have no extras to carry the above. */
     const val SHORTCUT_NEW_MEMO = "dev.ymemo.action.NEW_MEMO"

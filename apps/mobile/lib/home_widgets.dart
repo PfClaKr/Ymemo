@@ -22,14 +22,28 @@ import 'memo_title.dart';
 import 'src/rust/api.dart';
 
 /// What a tapped widget, or a launcher shortcut, asked the app to do.
-enum WidgetAction { newMemo, newPhotoMemo, openList, openMemo, openFolder }
+enum WidgetAction { newMemo, newPhotoMemo, openList, openMemo, openFolder, share }
 
 /// One request, with the memo or folder id for the two actions that name one.
 class WidgetRequest {
-  const WidgetRequest(this.action, [this.id = '']);
+  const WidgetRequest(
+    this.action, [
+    this.id = '',
+    this.text = '',
+    this.subject = '',
+    this.file = '',
+    this.mime = '',
+  ]);
 
   final WidgetAction action;
   final String id;
+
+  /// What another app shared, for [WidgetAction.share]: its text and subject, and a picture
+  /// the host copied into the app's cache (`ShareActivity.kt`) — to be attached and deleted.
+  final String text;
+  final String subject;
+  final String file;
+  final String mime;
 
   /// The names the Kotlin side sends; they are also the constants in `widget/Launch.kt`.
   static const _actions = {
@@ -38,6 +52,7 @@ class WidgetRequest {
     'open_list': WidgetAction.openList,
     'open_memo': WidgetAction.openMemo,
     'open_folder': WidgetAction.openFolder,
+    'share': WidgetAction.share,
   };
 
   /// Null for anything unrecognised. A PendingIntent outlives the install that created it,
@@ -46,7 +61,9 @@ class WidgetRequest {
   static WidgetRequest? parse(Map<Object?, Object?>? raw) {
     final action = _actions[raw?['action']];
     if (action == null) return null;
-    return WidgetRequest(action, raw?['id'] as String? ?? '');
+    String field(String key) => raw?[key] as String? ?? '';
+    return WidgetRequest(action, field('id'), field('text'), field('subject'), field('file'),
+        field('mime'));
   }
 }
 

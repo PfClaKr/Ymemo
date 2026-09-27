@@ -1,6 +1,9 @@
 /// Small layout helpers shared by the screens.
 library;
 
+import 'dart:ui' as ui;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// Height of the system navigation bar (or gesture pill) at the bottom of the screen.
@@ -29,4 +32,18 @@ Future<bool> confirmAction(
     ),
   );
   return answer ?? false;
+}
+
+/// A picture's pixel size, or null when it will not decode; the core then assumes 1:1.
+Future<ui.Size?> decodeImageSize(Uint8List bytes) async {
+  try {
+    final codec = await ui.instantiateImageCodec(bytes);
+    final frame = await codec.getNextFrame();
+    final size = ui.Size(frame.image.width.toDouble(), frame.image.height.toDouble());
+    frame.image.dispose();
+    codec.dispose();
+    return size;
+  } catch (_) {
+    return null;
+  }
 }

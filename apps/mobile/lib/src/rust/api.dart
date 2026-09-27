@@ -173,6 +173,11 @@ Future<FfiAttachment> attachmentAdd(
         widthPx: widthPx,
         heightPx: heightPx);
 
+/// Every memo as Markdown files in a zip, photos included; see `ymemo_core::export`.
+/// **Plaintext** — for the user's own "save as" and nothing else.
+Future<Uint8List> exportMarkdownZip() =>
+    RustLib.instance.api.crateApiExportMarkdownZip();
+
 /// Photo bytes. Errors while the blob has not synced yet; draw a placeholder instead.
 Future<Uint8List> attachmentBytes({required String hash}) =>
     RustLib.instance.api.crateApiAttachmentBytes(hash: hash);
@@ -839,6 +844,9 @@ class FfiSettings {
   /// When that last happened (epoch millis), so it is not asked on every start.
   final PlatformInt64 lastUpdateCheck;
 
+  /// Palette key a new memo starts with, as the desktop's setting of the same name.
+  final String defaultColor;
+
   const FfiSettings({
     required this.lang,
     required this.unlockDays,
@@ -851,6 +859,7 @@ class FfiSettings {
     required this.biometricUnlock,
     required this.updateCheck,
     required this.lastUpdateCheck,
+    required this.defaultColor,
   });
 
   static Future<FfiSettings> default_() =>
@@ -868,7 +877,8 @@ class FfiSettings {
       wifiOnlySync.hashCode ^
       biometricUnlock.hashCode ^
       updateCheck.hashCode ^
-      lastUpdateCheck.hashCode;
+      lastUpdateCheck.hashCode ^
+      defaultColor.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -885,7 +895,8 @@ class FfiSettings {
           wifiOnlySync == other.wifiOnlySync &&
           biometricUnlock == other.biometricUnlock &&
           updateCheck == other.updateCheck &&
-          lastUpdateCheck == other.lastUpdateCheck;
+          lastUpdateCheck == other.lastUpdateCheck &&
+          defaultColor == other.defaultColor;
 }
 
 /// Another device sharing this vault.
@@ -997,6 +1008,13 @@ class FfiStrings {
   final String moveTo;
   final String history;
   final String historyEmpty;
+  final String exportTitle;
+  final String exportHint;
+  final String exportButton;
+  final String exported;
+  final String exportFailed;
+  final String share;
+  final String defaultColor;
   final String historyCurrent;
   final String historyRestore;
   final String historyRestored;
@@ -1158,6 +1176,13 @@ class FfiStrings {
     required this.moveTo,
     required this.history,
     required this.historyEmpty,
+    required this.exportTitle,
+    required this.exportHint,
+    required this.exportButton,
+    required this.exported,
+    required this.exportFailed,
+    required this.share,
+    required this.defaultColor,
     required this.historyCurrent,
     required this.historyRestore,
     required this.historyRestored,
@@ -1319,6 +1344,13 @@ class FfiStrings {
       moveTo.hashCode ^
       history.hashCode ^
       historyEmpty.hashCode ^
+      exportTitle.hashCode ^
+      exportHint.hashCode ^
+      exportButton.hashCode ^
+      exported.hashCode ^
+      exportFailed.hashCode ^
+      share.hashCode ^
+      defaultColor.hashCode ^
       historyCurrent.hashCode ^
       historyRestore.hashCode ^
       historyRestored.hashCode ^
@@ -1482,6 +1514,13 @@ class FfiStrings {
           moveTo == other.moveTo &&
           history == other.history &&
           historyEmpty == other.historyEmpty &&
+          exportTitle == other.exportTitle &&
+          exportHint == other.exportHint &&
+          exportButton == other.exportButton &&
+          exported == other.exported &&
+          exportFailed == other.exportFailed &&
+          share == other.share &&
+          defaultColor == other.defaultColor &&
           historyCurrent == other.historyCurrent &&
           historyRestore == other.historyRestore &&
           historyRestored == other.historyRestored &&
