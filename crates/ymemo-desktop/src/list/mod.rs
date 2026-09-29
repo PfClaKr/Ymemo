@@ -472,7 +472,7 @@ fn with_snippet(row: ListRow, body: &str, needle: &str) -> ListRow {
 pub(crate) fn search_snippet(text: &str, needle: &str) -> Option<String> {
     const BEFORE: usize = 12;
     const AFTER: usize = 40;
-    let chars: Vec<char> = text.chars().map(|c| if c == '\n' { ' ' } else { c }).collect();
+    let chars: Vec<char> = searchable(text).chars().collect();
     let lower: Vec<char> = chars.iter().map(|c| c.to_lowercase().next().unwrap_or(*c)).collect();
     let want: Vec<char> = needle.chars().collect();
     if want.is_empty() {
@@ -496,6 +496,14 @@ pub(crate) fn search_snippet(text: &str, needle: &str) -> Option<String> {
         piece(end, to),
         if to < chars.len() { "…" } else { "" },
     ))
+}
+
+/// A memo's writing as one line to quote from: fence lines left out (they are markup, and a
+/// code memo's snippet ended in a stray "```"), and every run of spaces, indentation and line
+/// breaks one space — an indented line otherwise opened a gap in front of the match.
+fn searchable(text: &str) -> String {
+    let lines = text.lines().filter(|l| !l.trim_start().starts_with("```"));
+    lines.flat_map(str::split_whitespace).collect::<Vec<_>>().join(" ")
 }
 
 /// `text` with every character markdown would read as markup escaped, so a snippet is drawn
@@ -607,6 +615,14 @@ mod tests {
         assert_eq!(relative_time(march, now), t!("msg.time_date", month = 3, day = 1));
         let old = Utc.with_ymd_and_hms(2024, 12, 31, 9, 0, 0).unwrap().timestamp_millis();
         assert_eq!(relative_time(old, now), t!("msg.time_date_year", year = 2024, month = 12, day = 31));
+    }
+
+    #[test]
+    fn a_search_snippet_leaves_out_fences_and_indentation() {
+        let body = "코드\n```rust\nfn main() {\n    println!(\"hi\");\n}\n```";
+        let got = search_snippet(body, "print").unwrap();
+        assert!(!got.contains("\\`"), "{got}");
+        assert!(got.contains("\\{ **print**"), "{got}");
     }
 
     #[test]
