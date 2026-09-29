@@ -52,7 +52,6 @@ mod window;
 
 use state::{AppUi, Ctx, Ui, APP};
 use sync::{start_merge_timer, start_syncthing};
-use window::present;
 
 fn main() -> Result<()> {
     startup::prefer_x11();
@@ -219,7 +218,7 @@ fn main() -> Result<()> {
         // changed into anything — which is how a new device met the first-run choice with its
         // second card cut off by the bottom edge.
         ui.lock.invoke_apply_size();
-        present(&ui.lock);
+        crate::window::present_centered(&ui.lock, None);
     }
     slint::run_event_loop_until_quit()?;
 

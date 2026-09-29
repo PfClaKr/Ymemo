@@ -86,6 +86,25 @@ pub(crate) fn present_dialog<T: ComponentHandle + 'static>(
     });
 }
 
+/// Shows a window that sizes itself (the lock window does, per panel), centred over `anchor`
+/// or on the primary screen — only when it was hidden. It used to come up in the top left
+/// corner of the screen.
+pub(crate) fn present_centered<T: ComponentHandle + 'static>(component: &T, anchor: Option<[i32; 4]>) {
+    let was_visible = component.window().is_visible();
+    present(component);
+    if was_visible {
+        return;
+    }
+    with_window(component, move |window| {
+        let size = window.outer_size();
+        let own = (size.width as i32, size.height as i32);
+        let (screens, primary) = crate::screens::current(window);
+        if let Some((x, y)) = crate::screens::centered_on(anchor, own, &screens, primary) {
+            window.set_outer_position(i_slint_backend_winit::winit::dpi::PhysicalPosition::new(x, y));
+        }
+    });
+}
+
 /// Where a new note was asked for, which is where it should appear.
 pub(crate) enum MadeFrom<'a> {
     /// A note's `+`: the new one steps out of it.

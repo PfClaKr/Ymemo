@@ -1,3 +1,4 @@
+import { LineEdit } from "std-widgets.slint";
 // Pieces shared by several windows: the sticky palette and the tab button.
 // Palette keys ("yellow"/"pink"/"green"/"blue"/"purple") become real colors only here; the
 // core stores and syncs the key string alone.
@@ -230,6 +231,51 @@ export component IconButton inherits Rectangle {
         enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A text field: std `LineEdit` with the app's gold for its focus line.
+//
+// The std line is the OS accent (blue on Windows), read-only in the style's palette, and it
+// was the last blue thing on a gold screen — under the password on the lock window above all.
+// So the same field, with a gold line of the same size drawn over the blue one. Everything a
+// caller used on a `LineEdit` is passed through.
+// ---------------------------------------------------------------------------
+export component Field inherits Rectangle {
+    in-out property <string> text <=> le.text;
+    in property <string> placeholder-text <=> le.placeholder-text;
+    in property <InputType> input-type <=> le.input-type;
+    in property <bool> enabled <=> le.enabled;
+    in property <bool> read-only <=> le.read-only;
+    in property <length> font-size <=> le.font-size;
+    out property <bool> has-focus: le.has-focus;
+    callback accepted(string);
+    callback edited(string);
+    callback key-pressed(KeyEvent) -> EventResult;
+    public function select-all() { le.select-all(); }
+
+    forward-focus: le;
+    min-width: le.min-width;
+    min-height: le.min-height;
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
+
+    le := LineEdit {
+        width: 100%;
+        height: 100%;
+        accepted(t) => { root.accepted(t); }
+        edited(t) => { root.edited(t); }
+        key-pressed(ev) => { return root.key-pressed(ev); }
+    }
+    // Where the std field draws its focus line: inset by its corner radius, 2px, at the foot.
+    if le.has-focus && le.enabled: Rectangle {
+        x: 4px;
+        y: parent.height - 2px;
+        width: parent.width - 8px;
+        height: 2px;
+        border-radius: 1px;
+        background: #e2c22a;
     }
 }
 

@@ -1,6 +1,6 @@
 import { LineEdit, Button, ScrollView, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
-import { Scroll, PrimaryButton } from "theme.slint";
+import { Scroll, PrimaryButton, Field } from "theme.slint";
 
 // ---------------------------------------------------------------------------
 // Security window: change the master password, and issue the recovery code that is the
@@ -137,17 +137,17 @@ export component SecurityWindow inherits Window {
                         label: Strings.ui_security_change_password;
                         hint: Strings.ui_security_password_hint;
                         FieldLabel { text: Strings.ui_security_current_password; }
-                        LineEdit {
+                        Field {
                             input-type: InputType.password;
                             text <=> root.current-pw;
                         }
                         FieldLabel { text: Strings.ui_security_new_password; }
-                        LineEdit {
+                        Field {
                             input-type: InputType.password;
                             text <=> root.new-pw;
                         }
                         FieldLabel { text: Strings.ui_security_confirm_password; }
-                        LineEdit {
+                        Field {
                             input-type: InputType.password;
                             text <=> root.confirm-pw;
                             accepted => {

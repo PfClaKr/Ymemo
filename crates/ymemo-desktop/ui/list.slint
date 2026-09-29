@@ -1,6 +1,6 @@
 import { LineEdit, Button, TextEdit, ListView, ScrollView, Slider, SpinBox, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
-import { Palette, IconButton, Glyph, PrimaryButton } from "theme.slint";
+import { Palette, IconButton, Glyph, PrimaryButton, Field } from "theme.slint";
 import { PairingPanel, SharedDeviceRow } from "pairing.slint";
 
 
@@ -134,6 +134,7 @@ export component ListWindow inherits Window {
     callback move-row(int, int);           // source row, drop row (out of range = top level)
     callback reorder-row(int, int);        // source row, gap to drop it in (0 = above everything)
     callback add-peer(string);
+    callback get-sync();
     // Pairing panel open/close; Rust resizes the window, as in LockWindow.
     callback sync-toggled(bool);
     callback open-settings();
@@ -362,7 +363,7 @@ export component ListWindow inherits Window {
             // The heading is three things in one place: the vault's name, the field that
             // renames it, and — while the pointer is on a toolbar button — that button's
             // label. Cheaper than a tooltip and always in the same spot.
-            if root.naming: LineEdit {
+            if root.naming: Field {
                 horizontal-stretch: 1;
                 // A LineEdit asks for more room than the heading it replaces, and in a window
                 // at its minimum width that pushed the last toolbar button off the edge — so
@@ -533,6 +534,7 @@ export component ListWindow inherits Window {
                     add-peer(code) => { root.add-peer(code); }
                     lan-join(code) => { root.lan-join(code); }
                     unshare(id) => { root.unshare(id); }
+                    get-sync => { root.get-sync(); }
                 }
             }
         }
@@ -987,7 +989,7 @@ export component ListWindow inherits Window {
                     }
 
                     // The name turns into a LineEdit only for the group being renamed.
-                    if root.coloring-id != row.id && root.editing-id == row.id: LineEdit {
+                    if root.coloring-id != row.id && root.editing-id == row.id: Field {
                         horizontal-stretch: 1;
                         text: row.title;
                         // Selected as well as focused: a new folder arrives here already

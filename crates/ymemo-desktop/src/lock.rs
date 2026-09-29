@@ -72,6 +72,8 @@ pub(crate) fn lock_now(ctx: &Ctx, lock: &LockWindow, list: &ListWindow, unlocked
     // whatever vault happens to be open by then.
     forget_undo(ctx, list);
 
+    // Where the list was, for the lock window to come up over rather than in a corner.
+    let over = list.window().is_visible().then(|| crate::window::outer_rect(list.window()));
     let _ = list.hide();
     lock.invoke_clear_password();
     lock.invoke_leave_recovery();
@@ -79,7 +81,10 @@ pub(crate) fn lock_now(ctx: &Ctx, lock: &LockWindow, list: &ListWindow, unlocked
     lock.set_show_sync(false);
     // A code may have been issued during the session that just ended.
     lock.set_has_recovery(ymemo_core::vault::recovery_code_exists(ctx.dir.join("vault")));
-    present(lock);
+    // The size of the password prompt: nothing else would set it, since the panel was already
+    // the prompt, and the window came back at its bare minimum.
+    lock.invoke_apply_size();
+    crate::window::present_centered(lock, over);
 }
 
 /// Wipes this device's vault, cache and session: the way out of a forgotten password when
