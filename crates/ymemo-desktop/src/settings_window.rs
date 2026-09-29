@@ -13,7 +13,7 @@ use crate::session;
 use crate::settings::Settings;
 use crate::state::{touch, Ctx, Ui};
 use crate::sync::{apply_folder_settings, start_merge_timer};
-use crate::window::present;
+use crate::window::present_dialog;
 use crate::{
     apply_strings, autostart, tray, update, ApproveWindow, HistoryWindow, ListWindow,
     LockWindow, SecurityWindow, SettingsWindow, Strings,
@@ -93,6 +93,7 @@ fn wire_open(ctx: &Ctx, ui: &Ui, unlocked: &Rc<Cell<bool>>) {
     let ctx = ctx.clone();
     let win = settings_win.as_weak();
     let unlocked = unlocked.clone();
+    let list_weak = list.as_weak();
     list.on_open_settings(move || {
         touch(&ctx);
         let Some(w) = win.upgrade() else { return };
@@ -100,7 +101,7 @@ fn wire_open(ctx: &Ctx, ui: &Ui, unlocked: &Rc<Cell<bool>>) {
         w.set_unlocked(unlocked.get());
         w.set_status(SharedString::new());
         w.set_close_warned(false);
-        present(&w);
+        present_dialog(&w, (420.0, 600.0), list_weak.upgrade().as_ref().map(|l| l.window()));
     });
 }
 

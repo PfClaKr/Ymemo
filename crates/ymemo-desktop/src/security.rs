@@ -7,7 +7,7 @@ use slint::{ComponentHandle, SharedString};
 use ymemo_i18n::t;
 
 use crate::state::{touch, Ctx};
-use crate::window::present;
+use crate::window::present_dialog;
 use crate::{SecurityWindow, SettingsWindow};
 
 /// Connects the security window to the settings button that opens it.
@@ -15,11 +15,12 @@ pub(crate) fn wire(ctx: &Ctx, settings_win: &SettingsWindow, win: &SecurityWindo
     {
         let ctx = ctx.clone();
         let weak = win.as_weak();
+        let settings_weak = settings_win.as_weak();
         settings_win.on_open_security(move || {
             touch(&ctx);
             let Some(w) = weak.upgrade() else { return };
             reset_window(&ctx, &w);
-            present(&w);
+            present_dialog(&w, (400.0, 530.0), settings_weak.upgrade().as_ref().map(|s| s.window()));
         });
     }
     {

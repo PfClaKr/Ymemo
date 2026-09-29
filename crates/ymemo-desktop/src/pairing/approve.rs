@@ -10,7 +10,7 @@ use ymemo_i18n::t;
 
 use crate::ApproveWindow;
 use crate::sync::SYNC_FOLDER_ID;
-use crate::window::present;
+use crate::window::present_dialog;
 
 use super::{lift_revocation, PENDING_POLL};
 
@@ -75,7 +75,7 @@ pub(super) fn wire(
             win.set_status(SharedString::new());
             win.set_status_is_error(false);
             *shown.borrow_mut() = Some(next.id.clone());
-            present(&win);
+            present_dialog(&win, (400.0, 420.0), None);
         });
     }
 

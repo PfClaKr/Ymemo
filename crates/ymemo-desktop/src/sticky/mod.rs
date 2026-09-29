@@ -15,7 +15,7 @@ use ymemo_i18n::t;
 
 use crate::list::refresh_list;
 use crate::state::{Motion, touch, Ctx, StickyEntry, Stickies, APP};
-use crate::window::restore_geometry;
+use crate::window::{restore_geometry, MadeFrom};
 use crate::{apply_strings, StickyWindow, Strings};
 
 use desk::{next_stamp, present_sticky, raise_sticky, wire_window_events};
@@ -165,16 +165,17 @@ pub(crate) fn flush_dirty(ctx: &Ctx) -> Vec<String> {
     ids
 }
 
-/// Creates a memo and opens its sticky; shared by the + button in both windows.
-pub(crate) fn new_memo(ctx: &Ctx) {
-    new_memo_in(ctx, "");
+/// Creates a memo and opens its sticky; shared by the + button in both windows. `from` is
+/// where it was asked for, which decides where the new note appears.
+pub(crate) fn new_memo(ctx: &Ctx, from: MadeFrom<'_>) {
+    new_memo_in(ctx, "", from);
 }
 
 /// A new memo, already filed in `group_id` — empty for the top level.
 ///
 /// Every other way of starting one puts it at the top level, so a note that belonged in a
 /// folder had to be made and then dragged in.
-pub(crate) fn new_memo_in(ctx: &Ctx, group_id: &str) {
+pub(crate) fn new_memo_in(ctx: &Ctx, group_id: &str, from: MadeFrom<'_>) {
     touch(ctx);
     crate::list::clear_search(ctx);
     let mut memo = Memo::new("", "");
@@ -197,7 +198,24 @@ pub(crate) fn new_memo_in(ctx: &Ctx, group_id: &str) {
     }
     if let Err(e) = open_sticky(ctx, &memo, true) {
         diag!("could not open the sticky window: {e}");
+        return;
     }
+    if let Some(entry) = ctx.stickies.borrow().get(&memo.id) {
+        crate::window::place_new_note(&entry.window, from);
+    }
+}
+
+/// Where the open notes stand, for a new one from the list to keep clear of.
+pub(crate) fn note_positions(ctx: &Ctx) -> Vec<(i32, i32)> {
+    ctx.stickies
+        .borrow()
+        .values()
+        .filter(|e| e.window.window().is_visible())
+        .map(|e| {
+            let r = crate::window::outer_rect(e.window.window());
+            (r[0], r[1])
+        })
+        .collect()
 }
 
 /// Hides a sticky and schedules its removal from the registry; dropping the window inside
@@ -423,6 +441,7 @@ pub(crate) fn discard_if_blank(ctx: &Ctx, id: &str) {
 /// same thread_local the tray uses.
 fn wire_history(window: &StickyWindow, id: &str) {
     let id = id.to_string();
+    let weak = window.as_weak();
     window.on_show_history(move || {
         APP.with(|a| {
             let borrow = a.borrow();
@@ -434,6 +453,7 @@ fn wire_history(window: &StickyWindow, id: &str) {
                 &app.history_subject,
                 ymemo_core::history::Entity::Memo,
                 &id,
+                weak.upgrade().as_ref().map(|w| w.window()),
             );
         });
     });
@@ -529,7 +549,11 @@ fn wire_wm_close(window: &StickyWindow) {
 /// New memo.
 fn wire_new_memo(ctx: &Ctx, window: &StickyWindow) {
     let ctx = ctx.clone();
-    window.on_new_memo(move || new_memo(&ctx));
+    let weak = window.as_weak();
+    window.on_new_memo(move || {
+        let Some(w) = weak.upgrade() else { return };
+        new_memo(&ctx, MadeFrom::Note(w.window()));
+    });
 }
 
 /// Ctrl+= / Ctrl+- / Ctrl+0 on a note: the writing of every note larger, smaller, or back to

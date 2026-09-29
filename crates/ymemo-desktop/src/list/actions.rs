@@ -11,6 +11,7 @@ use crate::list::{self, move_row, refresh_list};
 use crate::lock::lock_now;
 use crate::state::{touch, Ctx, Ui};
 use crate::sticky::{self, close_sticky, new_memo, open_sticky};
+use crate::window::MadeFrom;
 use crate::{update, ListWindow};
 
 /// How long a delete can be taken back for.
@@ -67,14 +68,22 @@ fn wire_open_memo(ctx: &Ctx, ui: &Ui) {
 fn wire_new_memo(ctx: &Ctx, ui: &Ui) {
     let list = &ui.list;
     let ctx = ctx.clone();
-    list.on_new_memo(move || new_memo(&ctx));
+    let weak = list.as_weak();
+    list.on_new_memo(move || {
+        let Some(l) = weak.upgrade() else { return };
+        new_memo(&ctx, MadeFrom::List(l.window(), sticky::note_positions(&ctx)));
+    });
 }
 
 /// A new memo inside a folder, from the folder row's `+`.
 fn wire_new_memo_in(ctx: &Ctx, ui: &Ui) {
     let list = &ui.list;
     let ctx = ctx.clone();
-    list.on_new_memo_in(move |group| sticky::new_memo_in(&ctx, group.as_str()));
+    let weak = list.as_weak();
+    list.on_new_memo_in(move |group| {
+        let Some(l) = weak.upgrade() else { return };
+        sticky::new_memo_in(&ctx, group.as_str(), MadeFrom::List(l.window(), sticky::note_positions(&ctx)));
+    });
 }
 
 /// Delete, and the offer to take it back.

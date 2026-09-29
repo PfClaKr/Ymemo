@@ -11,7 +11,7 @@ use ymemo_core::history::{Entity, Revision, RevisionKind};
 use ymemo_i18n::t;
 
 use crate::state::{touch, Ctx};
-use crate::window::present;
+use crate::window::present_dialog;
 use crate::{HistoryWindow, ListWindow, RevisionRow};
 
 /// What the open history window is showing. `None` while it is closed.
@@ -72,25 +72,35 @@ pub(crate) fn wire(ctx: &Ctx, win: &HistoryWindow, subject: &Subject) {
 /// The list's history button: past versions of the memo or folder a row stands for.
 pub(crate) fn wire_list(ctx: &Ctx, list: &ListWindow, win: &HistoryWindow, subject: &Subject) {
     let ctx = ctx.clone();
+    let list_weak = list.as_weak();
     let win = win.as_weak();
     let subject = subject.clone();
     list.on_show_history(move |id, is_group| {
         touch(&ctx);
         let Some(w) = win.upgrade() else { return };
+        let Some(list) = list_weak.upgrade() else { return };
         let entity = if is_group { Entity::Group } else { Entity::Memo };
-        show(&ctx, &w, &subject, entity, &id);
+        show(&ctx, &w, &subject, entity, &id, Some(list.window()));
     });
 }
 
-/// Opens the window on one memo or folder.
-pub(crate) fn show(ctx: &Ctx, win: &HistoryWindow, subject: &Subject, entity: Entity, id: &str) {
+/// Opens the window on one memo or folder, over `from` — the list or the note it was asked
+/// for from.
+pub(crate) fn show(
+    ctx: &Ctx,
+    win: &HistoryWindow,
+    subject: &Subject,
+    entity: Entity,
+    id: &str,
+    from: Option<&slint::Window>,
+) {
     *subject.borrow_mut() = Some((entity, id.to_string()));
     win.set_status(SharedString::new());
     // Opened on the newest version, so the pane beside the list shows something straight away
     // — it used to open on a sentence asking for a click. Up and down step from there.
     win.set_selected(0);
     refresh(ctx, win, entity, id);
-    present(win);
+    present_dialog(win, (560.0, 480.0), from);
 }
 
 /// Reloads the revisions and the heading.

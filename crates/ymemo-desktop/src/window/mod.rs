@@ -56,6 +56,79 @@ pub(crate) fn present<T: ComponentHandle + 'static>(component: &T) {
     });
 }
 
+/// Shows a dialog window at its designed size, centred over `anchor` (or the middle of the
+/// screen when that is hidden).
+///
+/// Both halves only when it was hidden — one already up stays where the user put it. The
+/// size is needed because a Slint window whose root is a layout opens at that layout's
+/// **minimum**, not at `preferred-width/height`: the history window came up 420x320 instead
+/// of 560x480, its preview column squeezed to a strip. `size` is the `.slint`'s preferred
+/// size, in logical px.
+pub(crate) fn present_dialog<T: ComponentHandle + 'static>(
+    component: &T,
+    size: (f32, f32),
+    anchor: Option<&slint::Window>,
+) {
+    if component.window().is_visible() {
+        present(component);
+        return;
+    }
+    component.window().set_size(LogicalSize::new(size.0, size.1));
+    let anchor = anchor.filter(|a| a.is_visible()).map(outer_rect);
+    present(component);
+    let scale = component.window().scale_factor();
+    let own = ((size.0 * scale).round() as i32, (size.1 * scale).round() as i32);
+    with_window(component, move |window| {
+        let (screens, primary) = crate::screens::current(window);
+        if let Some((x, y)) = crate::screens::centered_on(anchor, own, &screens, primary) {
+            window.set_outer_position(i_slint_backend_winit::winit::dpi::PhysicalPosition::new(x, y));
+        }
+    });
+}
+
+/// Where a new note was asked for, which is where it should appear.
+pub(crate) enum MadeFrom<'a> {
+    /// A note's `+`: the new one steps out of it.
+    Note(&'a slint::Window),
+    /// The list's `+`: beside the list, clear of the notes already made there.
+    List(&'a slint::Window, Vec<(i32, i32)>),
+    /// The tray: nothing to stand by, so the window system decides.
+    Nowhere,
+}
+
+/// Puts a note that has never been placed next to what it was made from, instead of wherever
+/// the window system drops new windows (the top left corner, over the list).
+pub(crate) fn place_new_note<T: ComponentHandle + 'static>(component: &T, from: MadeFrom<'_>) {
+    let (anchor, taken) = match from {
+        MadeFrom::Note(w) => (w, None),
+        MadeFrom::List(w, taken) => (w, Some(taken)),
+        MadeFrom::Nowhere => return,
+    };
+    if !anchor.is_visible() {
+        return;
+    }
+    let from = outer_rect(anchor);
+    let step = (28.0 * component.window().scale_factor()).round() as i32;
+    with_window(component, move |window| {
+        // Asked of winit, which has the window by now; Slint's own size is not settled until
+        // the first layout.
+        let size = window.outer_size();
+        let own = (size.width as i32, size.height as i32);
+        let (screens, _) = crate::screens::current(window);
+        let (x, y) = match &taken {
+            Some(taken) => crate::screens::beside(from, own, step / 2, taken, &screens),
+            None => crate::screens::cascade_from(from, own, step, &screens),
+        };
+        window.set_outer_position(i_slint_backend_winit::winit::dpi::PhysicalPosition::new(x, y));
+    });
+}
+
+/// A window's place and size in physical px, the way the geometry is kept.
+pub(crate) fn outer_rect(w: &slint::Window) -> [i32; 4] {
+    let (p, s) = (w.position(), w.size());
+    [p.x, p.y, s.width as i32, s.height as i32]
+}
+
 /// The system's title bar in dark, over the windows that are always dark.
 ///
 /// Windows draws the title bar, and on a light-mode desktop — the default — it drew a white
