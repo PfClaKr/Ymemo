@@ -1,5 +1,6 @@
 import { Button, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
+import { PrimaryButton } from "theme.slint";
 
 // ---------------------------------------------------------------------------
 // Approval window: the other half of pairing.
@@ -151,9 +152,8 @@ export component ApproveWindow inherits Window {
                     text: Strings.ui_approve_reject;
                     clicked => { root.reject(); }
                 }
-                Button {
+                PrimaryButton {
                     text: Strings.ui_approve_allow;
-                    primary: true;
                     clicked => { root.allow(); }
                 }
             }

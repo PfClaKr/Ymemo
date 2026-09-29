@@ -1,7 +1,7 @@
 import { LineEdit, Button, TextEdit, ListView, ScrollView, Slider, SpinBox, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
 import { PairingPanel, SharedDeviceRow } from "pairing.slint";
-import { IconButton, SetupChoice } from "theme.slint";
+import { IconButton, SetupChoice, PrimaryButton } from "theme.slint";
 
 // The name of a field, kept above it rather than inside it.
 //
@@ -199,9 +199,8 @@ export component LockWindow inherits Window {
                         property <int> tries: root.wrong-tries;
                         changed tries => { self.focus(); self.select-all(); }
                     }
-                    Button {
+                    PrimaryButton {
                         text: Strings.ui_lock_open;
-                        primary: true;
                         clicked => { root.unlock(root.password-text); }
                     }
                 }
@@ -277,9 +276,8 @@ export component LockWindow inherits Window {
                     }
                     HorizontalLayout {
                         alignment: start;
-                        Button {
+                        PrimaryButton {
                             text: Strings.ui_lock_recover;
-                            primary: true;
                             enabled: code.text != "" && newpw.text.character-count >= root.min-password && newpw.text == newpw2.text;
                             clicked => { root.recover(code.text, newpw.text); }
                         }
@@ -310,9 +308,9 @@ export component LockWindow inherits Window {
                         text: Strings.ui_lock_reset;
                         clicked => { root.reset-armed = true; }
                     }
-                    if root.reset-armed: Button {
+                    if root.reset-armed: PrimaryButton {
                         text: Strings.ui_lock_reset_confirm;
-                        primary: true;
+                        danger: true;
                         clicked => { root.reset-vault(); }
                     }
                     Button {
@@ -395,9 +393,8 @@ export component LockWindow inherits Window {
                 HorizontalLayout {
                     alignment: start;
                     spacing: 6px;
-                    Button {
+                    PrimaryButton {
                         text: Strings.ui_lock_create;
-                        primary: true;
                         enabled: npw.text.character-count >= root.min-password && npw.text == npw2.text;
                         clicked => { root.create-vault(npw.text); }
                     }
@@ -446,9 +443,8 @@ export component LockWindow inherits Window {
                 HorizontalLayout {
                     alignment: start;
                     spacing: 6px;
-                    Button {
+                    PrimaryButton {
                         text: Strings.ui_lock_code_saved;
-                        primary: true;
                         clicked => { root.recovery-ack(); }
                     }
                     // The field above can be selected, but nothing says so, and this is a

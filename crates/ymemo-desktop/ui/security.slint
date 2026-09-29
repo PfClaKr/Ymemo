@@ -1,6 +1,6 @@
 import { LineEdit, Button, ScrollView, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
-import { Scroll } from "theme.slint";
+import { Scroll, PrimaryButton } from "theme.slint";
 
 // ---------------------------------------------------------------------------
 // Security window: change the master password, and issue the recovery code that is the
@@ -166,9 +166,8 @@ export component SecurityWindow inherits Window {
                         }
                         HorizontalLayout {
                             alignment: start;
-                            Button {
+                            PrimaryButton {
                                 text: Strings.ui_security_change_button;
-                                primary: true;
                                 enabled: root.can-change;
                                 clicked => { root.change-password(root.current-pw, root.new-pw); }
                             }

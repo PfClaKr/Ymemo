@@ -1,6 +1,6 @@
 import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox } from "std-widgets.slint";
 import { Strings } from "@i18n";
-import { Palette, TabButton } from "theme.slint";
+import { Palette, TabButton, PrimaryButton } from "theme.slint";
 
 // Device pairing panel.
 //  - Default: a 6-digit code on the same network (ours shown, theirs entered).
@@ -285,9 +285,9 @@ export component PairingPanel inherits VerticalLayout {
                     text: Strings.ui_pair_unshare_cancel;
                     clicked => { root.confirm-id = ""; }
                 }
-                if root.can-unshare && root.confirm-id == dev.id: Button {
+                if root.can-unshare && root.confirm-id == dev.id: PrimaryButton {
                     text: Strings.ui_pair_unshare;
-                    primary: true;
+                    danger: true;
                     clicked => {
                         root.confirm-id = "";
                         root.unshare(dev.id);

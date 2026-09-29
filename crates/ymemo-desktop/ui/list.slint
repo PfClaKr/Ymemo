@@ -1,6 +1,6 @@
 import { LineEdit, Button, TextEdit, ListView, ScrollView, Slider, SpinBox, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
-import { Palette, IconButton, Glyph } from "theme.slint";
+import { Palette, IconButton, Glyph, PrimaryButton } from "theme.slint";
 import { PairingPanel, SharedDeviceRow } from "pairing.slint";
 
 
@@ -741,9 +741,8 @@ export component ListWindow inherits Window {
             if root.query == "": HorizontalLayout {
                 alignment: center;
                 padding-top: 8px;
-                Button {
+                PrimaryButton {
                     text: Strings.ui_list_first_memo;
-                    primary: true;
                     clicked => { root.commit-edit(); root.new-memo(); }
                 }
             }

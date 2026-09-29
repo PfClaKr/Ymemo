@@ -234,6 +234,128 @@ export component IconButton inherits Rectangle {
 }
 
 // ---------------------------------------------------------------------------
+// A window's main action, in the app's gold — the `+` in the list is the same colour.
+//
+// Not std `Button { primary: true }`: that fills with the style's accent, which is the
+// operating system's accent colour (Windows' blue unless the user chose another), and the
+// palette that holds it is read-only. So "Save" and "Restore" were a light blue nobody had
+// picked, next to a gold `+`. Same metrics as the std button (32px, 12px sides, 4px corners)
+// so the two sit in one row. `danger` is for the confirming half of something that cannot be
+// undone, which should not look like the inviting choice.
+// ---------------------------------------------------------------------------
+export component PrimaryButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> danger: false;
+    callback clicked();
+
+    min-width: max(64px, label.preferred-width + 24px);
+    min-height: 32px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 4px;
+    forward-focus: fs;
+    background: !root.enabled ? #ffffff1f
+        : root.danger ? (ta.pressed ? #a4574b : ta.has-hover ? #c9705f : #b9624f)
+        : (ta.pressed ? #cfae1c : ta.has-hover ? #f0cf45 : #e2c22a);
+    animate background { duration: 150ms; }
+    accessible-role: button;
+    accessible-enabled: root.enabled;
+    accessible-label: root.text;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+
+    label := Text {
+        text: root.text;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: !root.enabled ? #ffffff66 : root.danger ? #ffffff : #3a3208;
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    // Space and Return press it once it has the focus, like the std buttons beside it.
+    fs := FocusScope {
+        width: 0px;
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    if fs.has-focus && root.enabled: Rectangle {
+        border-radius: root.border-radius + 2px;
+        x: -2px;
+        y: -2px;
+        width: parent.width + 4px;
+        height: parent.height + 4px;
+        border-width: 2px;
+        border-color: #f0ead6;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// An on/off switch. The settings used to offer a pair of "On" / "Off" tab buttons for each
+// yes-or-no setting, which asked a question with two answers where one control says it.
+// ---------------------------------------------------------------------------
+export component Toggle inherits Rectangle {
+    in-out property <bool> checked;
+    in property <string> label;
+    callback toggled(bool);
+
+    width: 36px;
+    height: 20px;
+    border-radius: 10px;
+    background: root.checked ? (ta.has-hover ? #f0cf45 : #e2c22a) : (ta.has-hover ? #ffffff38 : #ffffff24);
+    animate background { duration: 150ms; }
+    accessible-role: switch;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-label: root.label;
+    accessible-action-default => { root.flip(); }
+    forward-focus: fs;
+
+    function flip() {
+        root.checked = !root.checked;
+        root.toggled(root.checked);
+    }
+
+    Rectangle {
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        y: 3px;
+        x: root.checked ? parent.width - self.width - 3px : 3px;
+        animate x { duration: 150ms; easing: ease-out; }
+        background: root.checked ? #3a3208 : #d8d2c2;
+    }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.flip(); }
+    }
+
+    fs := FocusScope {
+        width: 0px;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                root.flip();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // One of the two ways to start, on the first run: a heading and the sentence that says what
 // pressing it will actually do.
 //
