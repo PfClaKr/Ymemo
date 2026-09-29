@@ -85,6 +85,11 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
 
   List<FfiMemo> _memos = [];
   List<FfiGroup> _folders = [];
+
+  /// Whether the lists above have been read at least once. Until then they are empty
+  /// because nothing has been asked yet, not because the vault is — and the "no memos yet"
+  /// screen shown for that second on every start read as the memos having been lost.
+  bool _loaded = false;
   Timer? _merge;
   final List<Timer> _catchUp = [];
   /// Watches `vault/logs` so an arriving change is merged as it lands.
@@ -288,8 +293,9 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
     final same = listEquals(_folders, folders) &&
         listEquals(_memos, memos) &&
         _vaultName == name;
-    if (mounted && !same) {
+    if (mounted && (!same || !_loaded)) {
       setState(() {
+        _loaded = true;
         _folders = folders;
         _memos = memos;
         _vaultName = name;
@@ -969,7 +975,9 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
             ),
           ),
         ),
-        if (_folders.isEmpty && _memos.isEmpty)
+        if (!_loaded)
+          const Spacer()
+        else if (_folders.isEmpty && _memos.isEmpty)
           Expanded(
             child: Center(
               child: Padding(
