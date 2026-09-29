@@ -151,6 +151,10 @@ export component Glyph inherits Path {
             ? "M 7.1 3.2 C 9.3 3.2 11 4.9 11 7.1 C 11 9.3 9.3 11 7.1 11 C 4.9 11 3.2 9.3 3.2 7.1 C 3.2 4.9 4.9 3.2 7.1 3.2 Z M 9.9 9.9 L 13 13"
         : root.name == "undo"
             ? "M 6.6 4.2 L 3.4 7.4 L 6.6 10.6 M 3.4 7.4 L 9.8 7.4 C 12.0 7.4 13.0 8.7 13.0 10.2 C 13.0 11.7 12.0 13.0 9.8 13.0"
+        // "Add a picture", on a note's bar: a frame, a hill and a small sun, all outlines. At
+        // 14px on the bar there is room for the sun that the list-size `photo` below leaves out.
+        : root.name == "image"
+            ? "M 2.6 3.4 L 13.4 3.4 L 13.4 12.6 L 2.6 12.6 Z M 2.6 11 L 6.2 7.4 L 9.2 10.4 M 8.2 9.4 L 10.4 7.4 L 13.4 10.2 M 10.2 4.9 C 10.8 4.9 11.3 5.4 11.3 6 C 11.3 6.6 10.8 7.1 10.2 7.1 C 9.6 7.1 9.1 6.6 9.1 6 C 9.1 5.4 9.6 4.9 10.2 4.9 Z"
         // A picture: a frame with a hill and a sun in it. The same silhouette as the sticky's
         // own attach button, at list size.
         // A frame with one hill in it, and nothing else. This is drawn at 13px in a list row,
