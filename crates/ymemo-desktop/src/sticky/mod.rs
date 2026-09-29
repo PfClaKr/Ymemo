@@ -62,7 +62,7 @@ pub(crate) const DEFAULT_SIZE: (f32, f32) = (200.0, 120.0);
 /// Height of the colour and opacity panel; **must match the one in `ui/sticky.slint`**.
 /// A sticky opens small enough that the panel would take most of the note, so the window
 /// makes room for it and gives it back on close.
-const PALETTE_HEIGHT: f32 = 62.0;
+pub(super) const PALETTE_HEIGHT: f32 = 62.0;
 
 /// Body text for the window; an older memo with only a title promotes it to the body.
 pub(crate) fn sticky_text(memo: &Memo) -> String {

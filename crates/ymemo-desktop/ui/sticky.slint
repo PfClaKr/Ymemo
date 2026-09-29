@@ -689,7 +689,9 @@ export component StickyWindow inherits Window {
     // seconds. The history does not cover photos, so this is the only way back to one.
     in property <bool> photo-undo: false;
     callback undo-photo();
-    private property <bool> show-palette: false;
+    // Out, because the window is this much taller while it is open and Rust has to know not
+    // to remember that as the note's size.
+    out property <bool> show-palette: false;
     changed show-palette => { root.palette-toggled(self.show-palette); }
     // The bar button under the pointer, by name; empty when there is none. The title bar
     // shows it in place of the memo's title.

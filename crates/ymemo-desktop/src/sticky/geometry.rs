@@ -34,13 +34,22 @@ pub(super) fn window_geometry(window: &slint::Window) -> [i32; 4] {
 /// the note back as a 24px strip that nothing had marked folded, so the whole button row was
 /// drawn squeezed against the title. So while a note is folded only where it moved to is new,
 /// and the height it had before it was folded is kept.
+///
+/// The colour panel is the same kind of thing: opening it grows the window by the panel's
+/// height, and a note closed or locked with it open came back that much taller — 62px more
+/// every time, with the panel shut. So its height is taken off while it is open.
 pub(super) fn geometry_to_remember(
     ctx: &Ctx,
     id: &str,
     window: &slint::Window,
     collapsed: bool,
+    palette_open: bool,
 ) -> [i32; 4] {
     let mut geometry = window_geometry(window);
+    if palette_open && !collapsed {
+        let extra = (super::PALETTE_HEIGHT * window.scale_factor()).round() as i32;
+        geometry[3] = (geometry[3] - extra).max(1);
+    }
     if collapsed {
         geometry[3] = ctx
             .settings
@@ -56,12 +65,12 @@ pub(crate) fn remember_one(ctx: &Ctx, id: &str, window: &slint::Window) {
     if !window.is_visible() {
         return;
     }
-    let collapsed = ctx
+    let (collapsed, palette_open) = ctx
         .stickies
         .borrow()
         .get(id)
-        .is_some_and(|e| e.window.get_collapsed());
-    let geometry = geometry_to_remember(ctx, id, window, collapsed);
+        .map_or((false, false), |e| (e.window.get_collapsed(), e.window.get_show_palette()));
+    let geometry = geometry_to_remember(ctx, id, window, collapsed, palette_open);
     if ctx.settings.borrow_mut().set_memo_window(id, geometry) {
         if let Some((screens, _)) = window.with_winit_window(crate::screens::current) {
             if let Some(s) = crate::screens::screen_of(geometry, &screens) {
@@ -165,7 +174,13 @@ pub(crate) fn remember_geometry(ctx: &Ctx, list: &crate::ListWindow) {
             .into_iter()
             .map(|(id, e)| {
                 e.motion.geometry_dirty.set(false);
-                let g = geometry_to_remember(ctx, id, e.window.window(), e.window.get_collapsed());
+                let g = geometry_to_remember(
+                    ctx,
+                    id,
+                    e.window.window(),
+                    e.window.get_collapsed(),
+                    e.window.get_show_palette(),
+                );
                 (id.clone(), g)
             })
             .collect()
