@@ -93,7 +93,7 @@
   "mobile.keep_versions_hint": "How long a replaced file's previous copy is kept; 0 keeps none. This is not the memo history, and it costs real storage.",
   "mobile.lan_connect": "Connect",
   "mobile.lan_done": "Both devices are linked — nothing to do on the other one.",
-  "mobile.lan_enter_code": "The other device's 6-digit code",
+  "mobile.lan_enter_code": "6-digit code",
   "mobile.lan_my_code": "This device's code — a new one every minute",
   "mobile.lan_not_found": "No device answered. Check that both are on the same network and that the code is still the one shown.",
   "mobile.lan_pairing": "Same network",
