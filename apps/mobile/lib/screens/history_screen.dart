@@ -102,9 +102,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
       },
       child: Scaffold(
         backgroundColor: paletteBg(widget.color),
+        // The paper, as in the editor: the bar and the cards were the note's strong bar
+        // colour, a screen of saturated yellow that did not look like the note it belongs to.
         appBar: AppBar(
           title: Text(widget.title.isEmpty ? widget.strings.newMemo : widget.title),
-          backgroundColor: paletteBar(widget.color),
+          backgroundColor: paletteBg(widget.color),
+          surfaceTintColor: Colors.transparent,
+          scrolledUnderElevation: 0,
           foregroundColor: ink,
         ),
         body: _loading
@@ -122,7 +126,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       final current = i == 0;
                       return Card(
                         margin: const EdgeInsets.only(bottom: 8),
-                        color: paletteBar(widget.color),
+                        elevation: 0,
+                        color: Colors.white.withValues(alpha: open ? 0.75 : 0.5),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          side: BorderSide(color: ink.withValues(alpha: open ? 0.3 : 0.12)),
+                        ),
+                        clipBehavior: Clip.antiAlias,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
@@ -148,7 +158,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                   color: ink),
                             ),
                             if (open) ...[
-                              const Divider(height: 1),
+                              Divider(height: 1, color: ink.withValues(alpha: 0.12)),
                               Padding(
                                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                                 child: SelectableText(
