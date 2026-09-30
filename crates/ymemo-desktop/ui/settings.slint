@@ -112,7 +112,9 @@ component NumberField inherits HorizontalLayout {
         font-size: 11px;
         color: #a8a294;
         vertical-alignment: center;
-        min-width: 22px;
+        // One width for every unit, so the fields stand in one column whether the unit is
+        // "days", "min" or "초".
+        width: 30px;
     }
 }
 
@@ -329,21 +331,26 @@ export component SettingsWindow inherits Window {
                         }
 
                         // ---- Updates ----
+                        // The check-now button beside the switch, at the right like every other
+                        // control: on a line of its own it was the one thing on the card that
+                        // sat under its text rather than beside it.
                         InlineRow {
                             label: Strings.ui_settings_update_check;
                             hint: Strings.ui_settings_update_check_hint;
                             hint-short: Strings.ui_settings_update_check_hint_short;
-                            Toggle {
-                                label: Strings.ui_settings_update_check;
-                                checked <=> root.update-check;
-                            }
-                        }
-
-                        HorizontalLayout {
-                            alignment: start;
-                            Button {
-                                text: Strings.ui_settings_check_now;
-                                clicked => { root.check-update(); }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Button {
+                                    text: Strings.ui_settings_check_now;
+                                    clicked => { root.check-update(); }
+                                }
+                                VerticalLayout {
+                                    alignment: center;
+                                    Toggle {
+                                        label: Strings.ui_settings_update_check;
+                                        checked <=> root.update-check;
+                                    }
+                                }
                             }
                         }
 
@@ -538,32 +545,26 @@ export component SettingsWindow inherits Window {
                         hint: "";
                         // The way out: a backup that does not need this app, or a move to another.
                         // Only while unlocked — there is nothing readable to write out otherwise.
-                        SettingRow {
+                        InlineRow {
                             label: Strings.ui_settings_export;
                             hint: Strings.ui_settings_export_hint;
                             hint-short: Strings.ui_settings_export_hint_short;
-                            HorizontalLayout {
-                                Button {
-                                    text: Strings.ui_settings_export_button;
-                                    enabled: root.unlocked;
-                                    clicked => { root.export-memos(); }
-                                }
-                                Rectangle { horizontal-stretch: 1; }
+                            Button {
+                                text: Strings.ui_settings_export_button;
+                                enabled: root.unlocked;
+                                clicked => { root.export-memos(); }
                             }
                         }
 
                         // Last in Advanced because it is the row someone is sent to rather than one
                         // they go looking for: a button, not a value.
-                        SettingRow {
+                        InlineRow {
                             label: Strings.ui_settings_log;
                             hint: Strings.ui_settings_log_hint;
                             hint-short: Strings.ui_settings_log_hint_short;
-                            HorizontalLayout {
-                                Button {
-                                    text: Strings.ui_settings_log_open;
-                                    clicked => { root.open-log(); }
-                                }
-                                Rectangle { horizontal-stretch: 1; }
+                            Button {
+                                text: Strings.ui_settings_log_open;
+                                clicked => { root.open-log(); }
                             }
                         }
                     }
