@@ -1049,6 +1049,9 @@ class FfiStrings {
   final String historyRestored;
   final String newGroup;
   final String ok;
+
+  /// The button that makes the thing a dialog names, where "OK" would not say what happens.
+  final String create;
   final String rename;
   final String rootFolder;
   final String listTitle;
@@ -1235,6 +1238,7 @@ class FfiStrings {
     required this.historyRestored,
     required this.newGroup,
     required this.ok,
+    required this.create,
     required this.rename,
     required this.rootFolder,
     required this.listTitle,
@@ -1421,6 +1425,7 @@ class FfiStrings {
       historyRestored.hashCode ^
       newGroup.hashCode ^
       ok.hashCode ^
+      create.hashCode ^
       rename.hashCode ^
       rootFolder.hashCode ^
       listTitle.hashCode ^
@@ -1609,6 +1614,7 @@ class FfiStrings {
           historyRestored == other.historyRestored &&
           newGroup == other.newGroup &&
           ok == other.ok &&
+          create == other.create &&
           rename == other.rename &&
           rootFolder == other.rootFolder &&
           listTitle == other.listTitle &&

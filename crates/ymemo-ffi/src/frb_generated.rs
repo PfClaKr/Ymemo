@@ -2849,6 +2849,7 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_historyRestored = <String>::sse_decode(deserializer);
         let mut var_newGroup = <String>::sse_decode(deserializer);
         let mut var_ok = <String>::sse_decode(deserializer);
+        let mut var_create = <String>::sse_decode(deserializer);
         let mut var_rename = <String>::sse_decode(deserializer);
         let mut var_rootFolder = <String>::sse_decode(deserializer);
         let mut var_listTitle = <String>::sse_decode(deserializer);
@@ -3032,6 +3033,7 @@ impl SseDecode for crate::api::FfiStrings {
             history_restored: var_historyRestored,
             new_group: var_newGroup,
             ok: var_ok,
+            create: var_create,
             rename: var_rename,
             root_folder: var_rootFolder,
             list_title: var_listTitle,
@@ -3675,6 +3677,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.history_restored.into_into_dart().into_dart(),
             self.new_group.into_into_dart().into_dart(),
             self.ok.into_into_dart().into_dart(),
+            self.create.into_into_dart().into_dart(),
             self.rename.into_into_dart().into_dart(),
             self.root_folder.into_into_dart().into_dart(),
             self.list_title.into_into_dart().into_dart(),
@@ -4015,6 +4018,7 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.history_restored, serializer);
         <String>::sse_encode(self.new_group, serializer);
         <String>::sse_encode(self.ok, serializer);
+        <String>::sse_encode(self.create, serializer);
         <String>::sse_encode(self.rename, serializer);
         <String>::sse_encode(self.root_folder, serializer);
         <String>::sse_encode(self.list_title, serializer);

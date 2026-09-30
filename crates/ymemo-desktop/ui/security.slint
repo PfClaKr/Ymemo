@@ -1,6 +1,6 @@
 import { LineEdit, Button, ScrollView, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
-import { Scroll } from "theme.slint";
+import { Scroll, PrimaryButton, Field } from "theme.slint";
 
 // ---------------------------------------------------------------------------
 // Security window: change the master password, and issue the recovery code that is the
@@ -137,17 +137,17 @@ export component SecurityWindow inherits Window {
                         label: Strings.ui_security_change_password;
                         hint: Strings.ui_security_password_hint;
                         FieldLabel { text: Strings.ui_security_current_password; }
-                        LineEdit {
+                        Field {
                             input-type: InputType.password;
                             text <=> root.current-pw;
                         }
                         FieldLabel { text: Strings.ui_security_new_password; }
-                        LineEdit {
+                        Field {
                             input-type: InputType.password;
                             text <=> root.new-pw;
                         }
                         FieldLabel { text: Strings.ui_security_confirm_password; }
-                        LineEdit {
+                        Field {
                             input-type: InputType.password;
                             text <=> root.confirm-pw;
                             accepted => {
@@ -166,9 +166,8 @@ export component SecurityWindow inherits Window {
                         }
                         HorizontalLayout {
                             alignment: start;
-                            Button {
+                            PrimaryButton {
                                 text: Strings.ui_security_change_button;
-                                primary: true;
                                 enabled: root.can-change;
                                 clicked => { root.change-password(root.current-pw, root.new-pw); }
                             }
@@ -205,19 +204,22 @@ export component SecurityWindow inherits Window {
                 HorizontalLayout {
                     alignment: start;
                     spacing: 6px;
-                    Button {
+                    // No code yet: issuing one is what this card is asking for, so it is the
+                    // gold button. Reissuing is a quiet button until it asks for confirmation,
+                    // and then red — the old code stops working, and that is not undone.
+                    if !root.has-recovery || root.confirm-reissue: PrimaryButton {
                         text: root.has-recovery
                             ? Strings.ui_security_reissue_button
                             : Strings.ui_security_issue_button;
-                        primary: root.confirm-reissue;
+                        danger: root.confirm-reissue;
                         clicked => {
-                            if (root.has-recovery && !root.confirm-reissue) {
-                                root.confirm-reissue = true;
-                            } else {
-                                root.confirm-reissue = false;
-                                root.issue-recovery();
-                            }
+                            root.confirm-reissue = false;
+                            root.issue-recovery();
                         }
+                    }
+                    if root.has-recovery && !root.confirm-reissue: Button {
+                        text: Strings.ui_security_reissue_button;
+                        clicked => { root.confirm-reissue = true; }
                     }
                     if root.confirm-reissue: Button {
                         text: Strings.ui_security_reissue_cancel;
@@ -251,6 +253,7 @@ export component SecurityWindow inherits Window {
                                     font-size: 15px;
                                     font-family: "monospace";
                                     color: #f7e98c;
+                                    horizontal-alignment: center;
                                     wrap: word-wrap;
                                     single-line: false;
                                 }

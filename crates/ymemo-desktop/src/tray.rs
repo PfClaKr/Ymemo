@@ -125,7 +125,7 @@ pub(crate) fn request_new_memo() {
                 present(&app.lock);
                 return;
             }
-            crate::sticky::new_memo(&app.ctx);
+            crate::sticky::new_memo(&app.ctx, crate::window::MadeFrom::Nowhere);
         });
     });
 }

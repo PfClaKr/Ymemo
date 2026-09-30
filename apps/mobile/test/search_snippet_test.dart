@@ -19,4 +19,10 @@ void main() {
     expect(searchSnippet('nothing here', 'zzz'), isNull);
     expect(searchSnippet('anything', '  '), isNull);
   });
+
+  test('fences and indentation stay out of the snippet', () {
+    final hit = searchSnippet('코드\n```rust\nfn main() {\n    println!("hi");\n}\n```', 'print')!;
+    expect(hit.before, '…main() { ');
+    expect(hit.after.contains('`'), isFalse);
+  });
 }

@@ -122,11 +122,11 @@ def memo_list(w=320, h=160):
     for cx in (w - 66, w - 34):
         d.ellipse([(cx * SS, 18 * SS), ((cx + 22) * SS, 40 * SS)], fill=(0, 0, 0, 16))
     d.rectangle([(4 * SS, 47 * SS), ((w - 4) * SS, 48 * SS)], fill=FAINT)
-    # The rows as the widget draws them now: rounded cards washed in their colour (16% of
-    # the swatch over the card, as MemoListService's `wash`), the stripe inside.
+    # The rows as the widget draws them now: rounded cards washed in their colour (8% of
+    # the swatch over the card, MemoListService's WASH), the stripe inside.
     for i, swatch in enumerate(SWATCHES):
         top = 54 + i * 34
-        wash = tuple((swatch[k] * 16 + CARD[k] * 84) // 100 for k in range(3)) + (255,)
+        wash = tuple((swatch[k] * 8 + CARD[k] * 92) // 100 for k in range(3)) + (255,)
         d.rounded_rectangle([(10 * SS, top * SS), ((w - 10) * SS, (top + 30) * SS)],
                             radius=9 * SS, fill=wash)
         bar(d, 18, top + 4, 4, 22, swatch, radius=2)

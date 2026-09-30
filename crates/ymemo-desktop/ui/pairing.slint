@@ -1,6 +1,6 @@
 import { LineEdit, Button, TextEdit, ListView, Slider, SpinBox } from "std-widgets.slint";
 import { Strings } from "@i18n";
-import { Palette, TabButton } from "theme.slint";
+import { Palette, TabButton, PrimaryButton, Field, Glyph } from "theme.slint";
 
 // Device pairing panel.
 //  - Default: a 6-digit code on the same network (ours shown, theirs entered).
@@ -30,6 +30,8 @@ export component PairingPanel inherits VerticalLayout {
     callback add-peer(string);
     callback lan-join(string);
     callback unshare(string);              // device id to unshare
+    // Opens the download page, when there is no sync program to pair with.
+    callback get-sync();
     // Whether removing a device is offered at all.
     //
     // False on the lock screen, where there is no open vault to record the decision in — and
@@ -113,7 +115,7 @@ export component PairingPanel inherits VerticalLayout {
             // Enter their code to connect over the LAN.
             HorizontalLayout {
                 spacing: 6px;
-                lan := LineEdit {
+                lan := Field {
                     placeholder-text: Strings.ui_pair_lan_placeholder;
                     input-type: InputType.number;
                     // Six digits or nothing: anything else only failed after the whole
@@ -188,7 +190,7 @@ export component PairingPanel inherits VerticalLayout {
             }
             HorizontalLayout {
                 spacing: 6px;
-                peer := LineEdit {
+                peer := Field {
                     placeholder-text: Strings.ui_pair_remote_placeholder;
                     accepted => { root.add-peer(self.text); }
                 }
@@ -285,9 +287,9 @@ export component PairingPanel inherits VerticalLayout {
                     text: Strings.ui_pair_unshare_cancel;
                     clicked => { root.confirm-id = ""; }
                 }
-                if root.can-unshare && root.confirm-id == dev.id: Button {
+                if root.can-unshare && root.confirm-id == dev.id: PrimaryButton {
                     text: Strings.ui_pair_unshare;
-                    primary: true;
+                    danger: true;
                     clicked => {
                         root.confirm-id = "";
                         root.unshare(dev.id);
@@ -302,10 +304,63 @@ export component PairingPanel inherits VerticalLayout {
             }
         }
     }
-    if !root.available: Text {
-        text: Strings.ui_pair_unavailable;
-        font-size: 12px;
-        color: #d98a8a;
-        wrap: word-wrap;
+    // No sync program: said as a state of the app, not as an error. It used to be a paragraph
+    // of red text alone at the top of an empty panel, which read as something having broken.
+    // The memos are fine; what is missing has one way to come back, and the button is it.
+    if !root.available: VerticalLayout {
+        spacing: 10px;
+        padding-top: 24px;
+        padding-left: 8px;
+        padding-right: 8px;
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 48px;
+                height: 48px;
+                border-radius: 24px;
+                background: #ffffff10;
+                Glyph {
+                    x: 12px;
+                    y: 12px;
+                    width: 24px;
+                    height: 24px;
+                    name: "link";
+                    stroke: #a8a294;
+                    stroke-width: 1.6px;
+                }
+                // Struck through: the link is what is off.
+                Path {
+                    width: 48px;
+                    height: 48px;
+                    viewbox-width: 48;
+                    viewbox-height: 48;
+                    commands: "M 15 33 L 33 15";
+                    stroke: #c97a6e;
+                    stroke-width: 2px;
+                }
+            }
+        }
+        Text {
+            text: Strings.ui_pair_unavailable_title;
+            font-size: 14px;
+            font-weight: 700;
+            color: #f0ead6;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: Strings.ui_pair_unavailable;
+            font-size: 11px;
+            color: #a8a294;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            alignment: center;
+            padding-top: 4px;
+            PrimaryButton {
+                text: Strings.ui_pair_unavailable_download;
+                clicked => { root.get-sync(); }
+            }
+        }
     }
 }

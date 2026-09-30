@@ -88,6 +88,60 @@ pub fn place(g: [i32; 4], was: Option<&Screen>, screens: &[Screen], primary: Opt
     inside([x, y, g[2], g[3]], *target)
 }
 
+/// Where a window `size` big goes to stand over `anchor` — centred on it, and wholly on the
+/// screen the anchor is on. With no anchor (it is hidden) it goes to the middle of the primary
+/// screen. Without this every dialog opened wherever the window system put a new window,
+/// which on X11 and Windows alike is the top left corner, on top of the list.
+pub fn centered_on(
+    anchor: Option<[i32; 4]>,
+    size: (i32, i32),
+    screens: &[Screen],
+    primary: Option<usize>,
+) -> Option<(i32, i32)> {
+    let primary_rect = screens.get(primary.unwrap_or(0)).or(screens.first()).map(|s| s.rect);
+    let (area, screen) = match anchor {
+        Some(a) => (a, screen_of(a, screens).map(|s| s.rect).or(primary_rect)),
+        None => (primary_rect?, primary_rect),
+    };
+    let x = area[0] + (area[2] - size.0) / 2;
+    let y = area[1] + (area[3] - size.1) / 2;
+    Some(match screen {
+        Some(s) => inside([x, y, size.0, size.1], s),
+        None => (x, y),
+    })
+}
+
+/// Where a new note goes: a step down and to the right of `from`, the note or list it was
+/// made from, so it is seen to come out of it and covers none of its title — and wholly on
+/// that screen.
+pub fn cascade_from(from: [i32; 4], size: (i32, i32), step: i32, screens: &[Screen]) -> (i32, i32) {
+    let (x, y) = (from[0] + step, from[1] + step);
+    match screen_of(from, screens) {
+        Some(s) => inside([x, y, size.0, size.1], s.rect),
+        None => (x, y),
+    }
+}
+
+/// Where a note made from the list goes: just right of it, level with its top — or left of
+/// it when the right side has no room — stepping down past any note already standing on
+/// exactly that spot, so a second new note is not hidden behind the first.
+pub fn beside(from: [i32; 4], size: (i32, i32), gap: i32, taken: &[(i32, i32)], screens: &[Screen]) -> (i32, i32) {
+    let screen = screen_of(from, screens).map(|s| s.rect);
+    let right = from[0] + from[2] + gap;
+    let x = match screen {
+        Some(s) if right + size.0 > s[0] + s[2] && from[0] - gap - size.0 >= s[0] => from[0] - gap - size.0,
+        _ => right,
+    };
+    let mut y = from[1];
+    while taken.contains(&(x, y)) {
+        y += gap * 2;
+    }
+    match screen {
+        Some(s) => inside([x, y, size.0, size.1], s),
+        None => (x, y),
+    }
+}
+
 /// `g` moved the least distance that puts it wholly on `screen`; its top-left corner wins
 /// when the window is larger than the screen, since that is where the title bar is.
 fn inside(g: [i32; 4], screen: [i32; 4]) -> (i32, i32) {
@@ -223,6 +277,39 @@ mod tests {
         assert!(!reachable([100, -1200 - 140, 220, 150], &s));
         // Only 10px of the bar's width is on a screen.
         assert!(!reachable([1910, 100, 220, 150], &[screen("A", [0, 0, 1920, 1080])]));
+    }
+
+    #[test]
+    fn a_dialog_stands_over_what_opened_it_and_stays_on_its_screen() {
+        let s = desk();
+        // Centred over a list in the middle of the laptop's screen.
+        assert_eq!(centered_on(Some([700, 300, 400, 500]), (560, 480), &s, Some(1)), Some((620, 310)));
+        // Over a list in the screen's top left corner, the dialog is pushed back onto it.
+        assert_eq!(centered_on(Some([0, 0, 200, 120]), (560, 480), &s, Some(1)), Some((0, 0)));
+        // Over the screen above, it stays on that one.
+        let (_, y) = centered_on(Some([100, -1200, 300, 200]), (400, 520), &s, Some(1)).unwrap();
+        assert_eq!(y, -1200);
+        // Nothing to stand over: the middle of the primary screen.
+        assert_eq!(centered_on(None, (400, 480), &s, Some(1)), Some((760, 300)));
+        assert_eq!(centered_on(None, (400, 480), &[], None), None);
+    }
+
+    #[test]
+    fn a_new_note_steps_out_of_the_one_it_came_from() {
+        let s = desk();
+        assert_eq!(cascade_from([300, 300, 220, 200], (200, 120), 28, &s), (328, 328));
+        // At the bottom right corner it stays on the screen.
+        assert_eq!(cascade_from([1700, 960, 220, 120], (200, 120), 28, &s), (1720, 960));
+    }
+
+    #[test]
+    fn a_note_from_the_list_opens_beside_it_and_not_on_another() {
+        let s = desk();
+        assert_eq!(beside([20, 40, 380, 520], (200, 120), 14, &[], &s), (414, 40));
+        // The spot is taken by the last new note: the next one goes below it.
+        assert_eq!(beside([20, 40, 380, 520], (200, 120), 14, &[(414, 40)], &s), (414, 68));
+        // A list against the right edge puts it on the left.
+        assert_eq!(beside([1500, 40, 400, 520], (200, 120), 14, &[], &s), (1286, 40));
     }
 
     #[test]

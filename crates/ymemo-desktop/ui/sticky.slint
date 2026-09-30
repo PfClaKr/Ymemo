@@ -689,7 +689,9 @@ export component StickyWindow inherits Window {
     // seconds. The history does not cover photos, so this is the only way back to one.
     in property <bool> photo-undo: false;
     callback undo-photo();
-    private property <bool> show-palette: false;
+    // Out, because the window is this much taller while it is open and Rust has to know not
+    // to remember that as the note's size.
+    out property <bool> show-palette: false;
     changed show-palette => { root.palette-toggled(self.show-palette); }
     // The bar button under the pointer, by name; empty when there is none. The title bar
     // shows it in place of the memo's title.
@@ -769,14 +771,14 @@ export component StickyWindow inherits Window {
         // the point of the setting and useless the moment you are trying to read your own
         // sentence through it, so the caret takes the fade off and leaving puts it back.
         //
-        // The trigger is the caret and not the pointer or the window's own focus: dragging
-        // the title bar or reaching for the palette is not writing, and the opacity slider
-        // sits below with the focus on itself, so it still previews what it is setting.
+        // The trigger is the window being the one in use — clicked anywhere, folded or not —
+        // and clicking anywhere else puts the fade back. It used to be the caret alone, so an
+        // unfolded note stayed faint until a click happened to land in its writing, while a
+        // folded one cleared the moment it was clicked; the two now behave alike.
         //
-        // **Except when folded.** A folded note has no body to put a caret in, so clicking it
-        // left it as faint as ever — and the bar is all there is to read. There the window
-        // being the active one takes the fade off, and clicking anywhere else puts it back.
-        opacity: body.has-focus || (root.collapsed && root.window-active) ? 1.0 : root.sticky-opacity / 100;
+        // **Except while the colour panel is open**: that is where the opacity is set, and
+        // the slider has to show what it is setting as it moves.
+        opacity: body.has-focus || (root.window-active && !root.show-palette) ? 1.0 : root.sticky-opacity / 100;
         animate opacity { duration: 120ms; }
 
         VerticalLayout {
@@ -850,45 +852,14 @@ export component StickyWindow inherits Window {
                             // the file dialog, the history window, the colour panel — either lands on
                             // a note that is not there or reopens it behind the user's back. Only the
                             // unfold (double-click), the pin and the close stay.
-                            if !root.collapsed && !root.narrow: photo-ta := TouchArea {
-                                width: 20px;
-                                mouse-cursor: pointer;
-                                accessible-role: button;
-                                accessible-label: Strings.ui_sticky_pick_photo;
-                                changed has-hover => {
-                                    if (self.has-hover) { root.tip = Strings.ui_sticky_pick_photo; }
-                                    else if (root.tip == Strings.ui_sticky_pick_photo) { root.tip = ""; }
-                                }
-                                // Drawn, not 📎: an emoji needs an emoji font, and where there is
-                                // none the glyph falls back to the default text colour and is all
-                                // but invisible on these pastel bars — the same reason the colour
-                                // chip below is a shape rather than a character.
-                                Rectangle {
-                                    width: 16px;
-                                    height: 13px;
-                                    border-width: 1.5px;
-                                    border-color: Palette.ink(root.sticky-color);
-                                    clip: true;
-                                    opacity: photo-ta.has-hover ? 1 : 0.75;
-                                    Rectangle {
-                                        x: 2.5px;
-                                        y: 2px;
-                                        width: 4px;
-                                        height: 4px;
-                                        border-radius: 2px;
-                                        background: Palette.ink(root.sticky-color);
-                                    }
-                                    Path {
-                                        x: 1.5px;
-                                        y: 4px;
-                                        width: 13px;
-                                        height: 7px;
-                                        viewbox-width: 12;
-                                        viewbox-height: 6;
-                                        commands: "M 0 6 L 4 1 L 6.5 3.5 L 8.5 2 L 12 6 Z";
-                                        fill: Palette.ink(root.sticky-color);
-                                    }
-                                }
+                            // A line drawing like the buttons beside it. It was a filled
+                            // picture — a solid hill and sun in a thick frame — and it was the
+                            // one heavy mark in a row of outlines.
+                            if !root.collapsed && !root.narrow: b-photo := BarButton {
+                                tip <=> root.tip;
+                                icon: "image";
+                                color-key: root.sticky-color;
+                                label: Strings.ui_sticky_pick_photo;
                                 clicked => { root.add-photo(); }
                             }
                             if !root.collapsed && !root.narrow: b-history := BarButton {

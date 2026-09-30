@@ -11,6 +11,8 @@ use crate::list::{self, move_row, refresh_list};
 use crate::lock::lock_now;
 use crate::state::{touch, Ctx, Ui};
 use crate::sticky::{self, close_sticky, new_memo, open_sticky};
+use crate::window::MadeFrom;
+use std::cell::RefCell;
 use crate::{update, ListWindow};
 
 /// How long a delete can be taken back for.
@@ -47,6 +49,7 @@ pub(crate) fn wire(ctx: &Ctx, ui: &Ui, unlocked: &Rc<Cell<bool>>) {
 fn wire_open_memo(ctx: &Ctx, ui: &Ui) {
     let list = &ui.list;
     let ctx = ctx.clone();
+    let weak = list.as_weak();
     list.on_open_memo(move |id| {
         touch(&ctx);
         let memo = {
@@ -57,8 +60,20 @@ fn wire_open_memo(ctx: &Ctx, ui: &Ui) {
                 _ => return,
             }
         };
+        // A note that has never been on this desk has no place of its own yet; it opens
+        // beside the list, as a new one does, rather than wherever the window system drops
+        // new windows — the top left corner, over the list.
+        let never_placed = ctx.settings.borrow().memo_window(&memo.id).is_none()
+            && !ctx.stickies.borrow().contains_key(&memo.id);
+        let taken = sticky::note_positions(&ctx);
         if let Err(e) = open_sticky(&ctx, &memo, false) {
             diag!("could not open the sticky window: {e}");
+            return;
+        }
+        if let (true, Some(list)) = (never_placed, weak.upgrade()) {
+            if let Some(entry) = ctx.stickies.borrow().get(&memo.id) {
+                crate::window::place_new_note(&entry.window, MadeFrom::List(list.window(), taken));
+            }
         }
     });
 }
@@ -67,14 +82,22 @@ fn wire_open_memo(ctx: &Ctx, ui: &Ui) {
 fn wire_new_memo(ctx: &Ctx, ui: &Ui) {
     let list = &ui.list;
     let ctx = ctx.clone();
-    list.on_new_memo(move || new_memo(&ctx));
+    let weak = list.as_weak();
+    list.on_new_memo(move || {
+        let Some(l) = weak.upgrade() else { return };
+        new_memo(&ctx, MadeFrom::List(l.window(), sticky::note_positions(&ctx)));
+    });
 }
 
 /// A new memo inside a folder, from the folder row's `+`.
 fn wire_new_memo_in(ctx: &Ctx, ui: &Ui) {
     let list = &ui.list;
     let ctx = ctx.clone();
-    list.on_new_memo_in(move |group| sticky::new_memo_in(&ctx, group.as_str()));
+    let weak = list.as_weak();
+    list.on_new_memo_in(move |group| {
+        let Some(l) = weak.upgrade() else { return };
+        sticky::new_memo_in(&ctx, group.as_str(), MadeFrom::List(l.window(), sticky::note_positions(&ctx)));
+    });
 }
 
 /// Delete, and the offer to take it back.
@@ -115,12 +138,23 @@ pub(crate) fn delete_and_offer_undo(ctx: &Ctx, list: &ListWindow, id: &str, is_g
         removed
     };
     if !is_group {
+        // Where it stood on the desk, if it was open, for the undo to put it back there.
+        let was_open = ctx.stickies.borrow().contains_key(id);
+        DESK_PLACE.with(|p| {
+            let s = ctx.settings.borrow();
+            *p.borrow_mut() = was_open.then(|| DeskPlace {
+                id: id.to_string(),
+                window: s.memo_window(id),
+                screen: s.memo_screen(id),
+                folded: s.memo_folded(id),
+                pinned: s.memo_pinned(id),
+            });
+        });
         close_sticky(&ctx.stickies, id); // clean up an open sticky
         // Drop its pin and its window too, or settings.json accumulates the ids of
         // memos that no longer exist. Only a local delete can do this; one that
         // arrives over sync leaves its entry behind, which costs a string and nothing
-        // else. Deliberately *not* undone by the undo below: a note put back belongs
-        // where the desk has room, not necessarily under whatever is there now.
+        // else. The undo below writes them back from `DESK_PLACE`.
         let mut settings = ctx.settings.borrow_mut();
         let changed = settings.forget_memo(id);
         if changed {
@@ -168,7 +202,51 @@ fn wire_undo(ctx: &Ctx, ui: &Ui) {
             return;
         }
         refresh_list(v, &ctx.model, &ctx.collapsed.borrow(), &ctx.query.borrow());
+        drop(guard);
+        if let ymemo_core::vault::Deleted::Memo(memo) = &deleted {
+            put_back_on_desk(&ctx, memo);
+        }
     });
+}
+
+/// Where a deleted memo's note stood, while its delete can still be taken back.
+struct DeskPlace {
+    id: String,
+    window: Option<[i32; 4]>,
+    screen: Option<crate::screens::Screen>,
+    folded: bool,
+    pinned: bool,
+}
+
+thread_local! {
+    /// The last deleted memo's place on the desk; `None` when it was not open. Holds no memo
+    /// text, only an id and a rectangle.
+    static DESK_PLACE: RefCell<Option<DeskPlace>> = const { RefCell::new(None) };
+}
+
+/// An undone delete of a note that was open opens it again, where it was, folded and pinned
+/// as it was. Taking a delete back used to bring the memo back to the list only, and the note
+/// someone had just been looking at stayed gone from the desk.
+fn put_back_on_desk(ctx: &Ctx, memo: &ymemo_core::Memo) {
+    let Some(place) = DESK_PLACE.with(|p| p.borrow_mut().take()) else { return };
+    if place.id != memo.id {
+        return;
+    }
+    {
+        let mut s = ctx.settings.borrow_mut();
+        if let Some(g) = place.window {
+            s.set_memo_window(&memo.id, g);
+        }
+        if let Some(screen) = place.screen {
+            s.set_memo_screen(&memo.id, screen);
+        }
+        s.set_memo_folded(&memo.id, place.folded);
+        s.set_memo_pinned(&memo.id, place.pinned);
+        s.save(&ctx.dir);
+    }
+    if let Err(e) = open_sticky(ctx, memo, false) {
+        diag!("could not reopen the note: {e}");
+    }
 }
 
 /// Find. The model is rebuilt from the query, so every later refresh honours it.

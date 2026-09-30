@@ -357,58 +357,79 @@ class _SyncScreenState extends State<SyncScreen> {
             // Wi-Fi-only is holding things back.
             _status(context),
             if (_waitingPeer != null) ...[
-              const Divider(height: 32),
-              _waitingSection(context),
+              const SizedBox(height: 12),
+              _card(context, _waitingSection(context)),
             ],
             // The easy way first — six digits on the same Wi-Fi — in a card of its own; the
             // long code for other networks after it. The desktop's panel is in the same
             // order, same-Wi-Fi tab first.
+            //
+            // Every section is a card, the easy one a shade stronger: the first was a card and
+            // the other two plain text under dividers, which read as one section and a
+            // leftover page.
             if (_lanCode != null || _lanMessage != null) ...[
               const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: _lanSection(context),
-              ),
+              _card(context, _lanSection(context), strong: true),
             ],
             if (widget.sync.pairingCode != null) ...[
-              const Divider(height: 40),
-              _remoteSection(context, widget.sync.pairingCode!),
+              const SizedBox(height: 12),
+              _card(context, _remoteSection(context, widget.sync.pairingCode!)),
             ],
-            const Divider(height: 40),
-            // Not `syncDevices` — that is this screen's own title, and the same words twice
-            // on one screen read as a heading that lost its section. This one is the list of
-            // devices already paired.
-            Text(widget.strings.connectedDevices,
-                style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            if (_devices.isEmpty)
-              Text(widget.strings.noDevices,
-                  style: Theme.of(context).textTheme.bodySmall)
-            else
-              for (final device in _devices)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    device.connected ? Icons.link : Icons.link_off,
-                    color: device.connected ? Colors.green : null,
-                  ),
-                  title: Text(device.name.isEmpty ? device.id : device.name),
-                  subtitle: Text(device.connected
-                      ? widget.strings.connected
-                      : widget.strings.disconnected),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete_outline),
-                    tooltip: widget.strings.unpair,
-                    onPressed: () => _unpair(device),
-                  ),
-                ),
+            const SizedBox(height: 12),
+            _card(context, _devicesSection(context)),
           ],
         ),
       ),
+    );
+  }
+
+  /// One section of this screen on its own rounded panel.
+  Widget _card(BuildContext context, Widget child, {bool strong = false}) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color:
+            strong ? scheme.surfaceContainerHighest : scheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: child,
+    );
+  }
+
+  /// The devices already paired, each with a way to let it go.
+  Widget _devicesSection(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Not `syncDevices` — that is this screen's own title, and the same words twice
+        // on one screen read as a heading that lost its section. This one is the list of
+        // devices already paired.
+        Text(widget.strings.connectedDevices,
+            style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        if (_devices.isEmpty)
+          Text(widget.strings.noDevices,
+              style: Theme.of(context).textTheme.bodySmall)
+        else
+          for (final device in _devices)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                device.connected ? Icons.link : Icons.link_off,
+                color: device.connected ? Colors.green : null,
+              ),
+              title: Text(device.name.isEmpty ? device.id : device.name),
+              subtitle: Text(device.connected
+                  ? widget.strings.connected
+                  : widget.strings.disconnected),
+              trailing: IconButton(
+                icon: const Icon(Icons.delete_outline),
+                tooltip: widget.strings.unpair,
+                onPressed: () => _unpair(device),
+              ),
+            ),
+      ],
     );
   }
 
@@ -420,10 +441,12 @@ class _SyncScreenState extends State<SyncScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(widget.strings.lanPairing, style: Theme.of(context).textTheme.titleMedium),
+        Text(widget.strings.lanPairing,
+            style: Theme.of(context).textTheme.titleMedium),
         if (_lanCode != null) ...[
           const SizedBox(height: 8),
-          Text(widget.strings.lanMyCode, style: Theme.of(context).textTheme.bodySmall),
+          Text(widget.strings.lanMyCode,
+              style: Theme.of(context).textTheme.bodySmall),
           const SizedBox(height: 4),
           Text(
             // In two groups of three, the way a code is read aloud across a room.
@@ -462,7 +485,9 @@ class _SyncScreenState extends State<SyncScreen> {
               child: ListenableBuilder(
                 listenable: _lanInput,
                 builder: (context, _) => FilledButton(
-                  onPressed: _joining || _lanInput.text.trim().length != 6 ? null : _joinLan,
+                  onPressed: _joining || _lanInput.text.trim().length != 6
+                      ? null
+                      : _joinLan,
                   child: Text(widget.strings.lanConnect),
                 ),
               ),
@@ -472,7 +497,8 @@ class _SyncScreenState extends State<SyncScreen> {
         if (_lanMessage != null)
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Text(_lanMessage!, style: Theme.of(context).textTheme.bodySmall),
+            child: Text(_lanMessage!,
+                style: Theme.of(context).textTheme.bodySmall),
           ),
       ],
     );
@@ -498,7 +524,8 @@ class _SyncScreenState extends State<SyncScreen> {
               children: [
                 const Icon(Icons.device_unknown, size: 20),
                 const SizedBox(width: 8),
-                Text(s.pairRequest, style: Theme.of(context).textTheme.titleMedium),
+                Text(s.pairRequest,
+                    style: Theme.of(context).textTheme.titleMedium),
               ],
             ),
             const SizedBox(height: 12),
@@ -525,7 +552,8 @@ class _SyncScreenState extends State<SyncScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            Text(s.pairRequestHint, style: Theme.of(context).textTheme.bodySmall),
+            Text(s.pairRequestHint,
+                style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 8),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
@@ -556,10 +584,13 @@ class _SyncScreenState extends State<SyncScreen> {
         Row(
           children: [
             const SizedBox(
-              width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2)),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(s.pairWaiting, style: Theme.of(context).textTheme.titleMedium),
+              child: Text(s.pairWaiting,
+                  style: Theme.of(context).textTheme.titleMedium),
             ),
           ],
         ),
@@ -567,7 +598,8 @@ class _SyncScreenState extends State<SyncScreen> {
         Text(s.pairWaitingHint, style: Theme.of(context).textTheme.bodySmall),
         if ((_waitingCode ?? '').isNotEmpty) ...[
           const SizedBox(height: 12),
-          Text(s.pairVerification, style: Theme.of(context).textTheme.labelSmall),
+          Text(s.pairVerification,
+              style: Theme.of(context).textTheme.labelSmall),
           Center(
             child: Text(
               _waitingCode!,
@@ -602,7 +634,10 @@ class _SyncScreenState extends State<SyncScreen> {
     if (sync.starting) {
       return Row(
         children: [
-          const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+          const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2)),
           const SizedBox(width: 12),
           Text(widget.strings.syncStarting),
         ],
@@ -617,7 +652,8 @@ class _SyncScreenState extends State<SyncScreen> {
           Text(sync.error ?? widget.strings.syncUnavailable,
               style: const TextStyle(color: Colors.red)),
           const SizedBox(height: 8),
-          OutlinedButton(onPressed: sync.start, child: Text(widget.strings.syncNow)),
+          OutlinedButton(
+              onPressed: sync.start, child: Text(widget.strings.syncNow)),
         ],
       );
     }
@@ -640,9 +676,11 @@ class _SyncScreenState extends State<SyncScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(widget.strings.otherNetwork, style: Theme.of(context).textTheme.titleMedium),
+        Text(widget.strings.otherNetwork,
+            style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
-        Text(widget.strings.myCode, style: Theme.of(context).textTheme.bodySmall),
+        Text(widget.strings.myCode,
+            style: Theme.of(context).textTheme.bodySmall),
         const SizedBox(height: 8),
         SelectableText(code, style: const TextStyle(fontFamily: 'monospace')),
         const SizedBox(height: 8),
@@ -662,7 +700,8 @@ class _SyncScreenState extends State<SyncScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        Text(widget.strings.peerCodeHint, style: Theme.of(context).textTheme.bodySmall),
+        Text(widget.strings.peerCodeHint,
+            style: Theme.of(context).textTheme.bodySmall),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

@@ -21,8 +21,10 @@ SystemUiOverlayStyle overlayFor(Brightness brightness) => SystemUiOverlayStyle(
       statusBarBrightness: brightness,
     );
 
-ThemeData ymemoTheme(Brightness brightness) => ThemeData(
-      colorScheme: ColorScheme.fromSeed(seedColor: _seed, brightness: brightness),
+ThemeData ymemoTheme(Brightness brightness) {
+  final scheme = ColorScheme.fromSeed(seedColor: _seed, brightness: brightness);
+  return ThemeData(
+      colorScheme: scheme,
       useMaterial3: true,
       fontFamily: 'Pretendard',
       // Rounded, filled fields with no outline — the search box and the dialogs' inputs —
@@ -34,8 +36,37 @@ ThemeData ymemoTheme(Brightness brightness) => ThemeData(
           borderSide: BorderSide.none,
         ),
       ),
-      appBarTheme: AppBarTheme(systemOverlayStyle: overlayFor(brightness)),
+      appBarTheme: AppBarTheme(
+        systemOverlayStyle: overlayFor(brightness),
+        // No change of colour when the list scrolls under the bar. Material 3 swaps the bar
+        // to a darker container colour (and a tint) the moment content passes beneath it,
+        // which read as the header turning a different colour halfway down the memos. The
+        // background is pinned to the page's own, in both states.
+        backgroundColor: scheme.surface,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+      ),
+      // A screen's main button in the app's gold, as the desktop's `PrimaryButton` is. The
+      // seed's own primary is a dark olive, which made "Create" and "First memo" a different
+      // colour from the + beside them.
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: const Color(0xFFE2C22A),
+          foregroundColor: const Color(0xFF3A3208),
+          textStyle: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+      ),
+      // The + in the app's gold on a dark list too. Material's dark primary container is a
+      // dim olive, which made the one button that starts a memo the dullest thing on screen —
+      // and unlike the gold + on the light list and on the desktop.
+      floatingActionButtonTheme: brightness == Brightness.dark
+          ? const FloatingActionButtonThemeData(
+              backgroundColor: Color(0xFFE2C22A),
+              foregroundColor: Color(0xFF3A3208),
+            )
+          : null,
     );
+}
 
 /// A note's own screens: always the light theme, whatever the phone is set to.
 ///

@@ -1,6 +1,6 @@
 import { LineEdit, Button, TextEdit, ListView, ScrollView, Slider, SpinBox, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
-import { Palette, IconButton, Glyph } from "theme.slint";
+import { Palette, IconButton, Glyph, PrimaryButton, Field } from "theme.slint";
 import { PairingPanel, SharedDeviceRow } from "pairing.slint";
 
 
@@ -134,6 +134,7 @@ export component ListWindow inherits Window {
     callback move-row(int, int);           // source row, drop row (out of range = top level)
     callback reorder-row(int, int);        // source row, gap to drop it in (0 = above everything)
     callback add-peer(string);
+    callback get-sync();
     // Pairing panel open/close; Rust resizes the window, as in LockWindow.
     callback sync-toggled(bool);
     callback open-settings();
@@ -313,7 +314,7 @@ export component ListWindow inherits Window {
                 return accept;
             }
             // Delete asks nothing, like the trash icon on the row does not: what softens both
-            // is the undo bar above, which is a click away for the next few seconds.
+            // is the undo bar, which is a click away for the next few seconds.
             if (ev.text == Key.Delete && root.selected >= 0
                 && root.selected < root.rows.length) {
                 root.commit-edit();
@@ -362,7 +363,7 @@ export component ListWindow inherits Window {
             // The heading is three things in one place: the vault's name, the field that
             // renames it, and — while the pointer is on a toolbar button — that button's
             // label. Cheaper than a tooltip and always in the same spot.
-            if root.naming: LineEdit {
+            if root.naming: Field {
                 horizontal-stretch: 1;
                 // A LineEdit asks for more room than the heading it replaces, and in a window
                 // at its minimum width that pushed the last toolbar button off the edge — so
@@ -503,7 +504,7 @@ export component ListWindow inherits Window {
                 Text {
                     text: Strings.ui_update_open;
                     font-size: 11px;
-                    color: #9ec5e8;
+                    color: #e2c22a;
                     vertical-alignment: center;
                 }
             }
@@ -533,6 +534,7 @@ export component ListWindow inherits Window {
                     add-peer(code) => { root.add-peer(code); }
                     lan-join(code) => { root.lan-join(code); }
                     unshare(id) => { root.unshare(id); }
+                    get-sync => { root.get-sync(); }
                 }
             }
         }
@@ -651,57 +653,6 @@ export component ListWindow inherits Window {
             }
         }
 
-        // What a delete left behind, for as long as it can still be taken back. A bar and not
-        // a dialog: the delete already happened, and a question in front of every one of them
-        // is a tax on the many that were meant.
-        if root.undo-message != "": Rectangle {
-            height: 26px;
-            border-radius: 6px;
-            background: #43352f;
-            HorizontalLayout {
-                padding-left: 8px;
-                padding-right: 4px;
-                spacing: 6px;
-                Text {
-                    text: root.undo-message;
-                    font-size: 11px;
-                    color: #e8d0c4;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                    overflow: elide;
-                }
-                undo-btn := TouchArea {
-                    width: 78px;
-                    mouse-cursor: pointer;
-                    accessible-role: button;
-                    accessible-label: Strings.ui_list_undo;
-                    HorizontalLayout {
-                        spacing: 4px;
-                        alignment: center;
-                        Rectangle {
-                            width: 13px;
-                            Glyph {
-                                x: (parent.width - self.width) / 2;
-                                y: (parent.height - self.height) / 2;
-                                width: 13px;
-                                height: 13px;
-                                name: "undo";
-                                stroke: undo-btn.has-hover ? #ffffff : #9ec5e8;
-                            }
-                        }
-                        Text {
-                            text: Strings.ui_list_undo;
-                            font-size: 11px;
-                            font-weight: 700;
-                            color: undo-btn.has-hover ? #ffffff : #9ec5e8;
-                            vertical-alignment: center;
-                        }
-                    }
-                    clicked => { root.undo-delete(); }
-                }
-            }
-        }
-
         // An empty list still has the whole window to fill, and the line saying so belongs in
         // the middle of that space rather than pinned to the top-left corner of it.
         if !root.show-sync && root.rows.length == 0: VerticalLayout {
@@ -741,9 +692,8 @@ export component ListWindow inherits Window {
             if root.query == "": HorizontalLayout {
                 alignment: center;
                 padding-top: 8px;
-                Button {
+                PrimaryButton {
                     text: Strings.ui_list_first_memo;
-                    primary: true;
                     clicked => { root.commit-edit(); root.new-memo(); }
                 }
             }
@@ -798,14 +748,14 @@ export component ListWindow inherits Window {
                 // filled. Every folder and everything in one used to carry its own shade,
                 // which striped the whole list; the indent, the folder's bold name and its
                 // chevron already say what is inside what.
-                background: root.drag-into == idx ? #7db8ec55
+                background: root.drag-into == idx ? #e2c22a40
                           : ta.has-hover ? #ffffff1a
                           : transparent;
                 // Where the arrow keys are. An outline rather than a brighter fill: the fill
                 // already carries the hover and which folder a row is in, and a third shade
                 // of the same grey would be one too many to tell apart.
                 border-width: root.selected == idx ? 1px : 0px;
-                border-color: #7db8ec;
+                border-color: #d8c765;
                 animate background { duration: 120ms; easing: ease-out; }
 
                 // The line the memo would land on, in the space the two rows either side have
@@ -819,7 +769,7 @@ export component ListWindow inherits Window {
                     width: parent.width - self.x - 8px;
                     height: 2px;
                     border-radius: 1px;
-                    background: #7db8ec;
+                    background: #e2c22a;
                 }
                 if root.drag-gap == idx + 1 && idx == root.rows.length - 1: Rectangle {
                     x: 6px + row.depth * 14px;
@@ -827,7 +777,7 @@ export component ListWindow inherits Window {
                     width: parent.width - self.x - 8px;
                     height: 2px;
                     border-radius: 1px;
-                    background: #7db8ec;
+                    background: #e2c22a;
                 }
 
                 // Touch area underneath: the Text above does not consume input, so it lands
@@ -988,7 +938,7 @@ export component ListWindow inherits Window {
                     }
 
                     // The name turns into a LineEdit only for the group being renamed.
-                    if root.coloring-id != row.id && root.editing-id == row.id: LineEdit {
+                    if root.coloring-id != row.id && root.editing-id == row.id: Field {
                         horizontal-stretch: 1;
                         text: row.title;
                         // Selected as well as focused: a new folder arrives here already
@@ -1112,7 +1062,7 @@ export component ListWindow inherits Window {
                 // the point, so they behave alike: delete used to be the one icon always
                 // drawn on every row, which left the only button that loses writing
                 // permanently on screen while the harmless one beside it hid. What
-                // softens it now is the undo bar above, not a dialog in front of it.
+                // softens it now is the undo bar, not a dialog in front of it.
                 //
                 // The two live in one `if` so each can see the other's hover: the row's
                 // own TouchArea loses `has-hover` to whichever of these the pointer is
@@ -1125,6 +1075,16 @@ export component ListWindow inherits Window {
                     border-radius: 6px;
                     background: ta.has-hover || hist-ta.has-hover || del-ta.has-hover
                         || add-ta.has-hover ? #43403d : transparent;
+                        // The preview fades into the buttons instead of being cut off at their
+                        // edge mid-letter. Drawn just left of this patch, in its colour.
+                        Rectangle {
+                            x: -24px;
+                            width: 24px;
+                            height: parent.height;
+                            visible: ta.has-hover || hist-ta.has-hover || del-ta.has-hover
+                                || add-ta.has-hover;
+                            background: @linear-gradient(90deg, #43403d00 0%, #43403d 100%);
+                        }
                         strip := HorizontalLayout {
                             spacing: 0px;
                             // Start a note **in this folder**. Every other way of making one puts
@@ -1252,5 +1212,69 @@ export component ListWindow inherits Window {
             }
         }
     }
+
+        // What a delete left behind, for as long as it can still be taken back. A bar and not
+        // a dialog: the delete already happened, and a question in front of every one of them
+        // is a tax on the many that were meant.
+        //
+        // Floating over the foot of the list, not a row at its top. At the top it pushed every
+        // row down by its own height the moment a delete landed, so the row under the pointer
+        // became the one above it — with its delete button right there, and a second click
+        // took a second memo. A bar that moves nothing cannot do that.
+        if root.undo-message != "": Rectangle {
+            x: 12px;
+            y: parent.height - self.height - 12px;
+            width: parent.width - 24px;
+            height: 34px;
+            border-radius: 8px;
+            background: #4a3b33;
+            drop-shadow-blur: 10px;
+            drop-shadow-offset-y: 2px;
+            drop-shadow-color: #00000080;
+            // Clicks on the bar stay on the bar, rather than reaching the row under it.
+            TouchArea {}
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 6px;
+                spacing: 6px;
+                Text {
+                    text: root.undo-message;
+                    font-size: 11px;
+                    color: #f0dccf;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                undo-btn := TouchArea {
+                    width: 84px;
+                    mouse-cursor: pointer;
+                    accessible-role: button;
+                    accessible-label: Strings.ui_list_undo;
+                    HorizontalLayout {
+                        spacing: 4px;
+                        alignment: center;
+                        Rectangle {
+                            width: 13px;
+                            Glyph {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: 13px;
+                                height: 13px;
+                                name: "undo";
+                                stroke: undo-btn.has-hover ? #fff3b0 : #e2c22a;
+                            }
+                        }
+                        Text {
+                            text: Strings.ui_list_undo;
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: undo-btn.has-hover ? #fff3b0 : #e2c22a;
+                            vertical-alignment: center;
+                        }
+                    }
+                    clicked => { root.undo-delete(); }
+                }
+            }
+        }
     }
 }

@@ -87,15 +87,19 @@ private class MemoListFactory(
     }
 
     /**
-     * A row's card: a thin pour of the memo's colour over the widget's own card, the same
-     * 16% the app's list uses (`paletteRow`), mixed opaque; the widget's opacity is applied
-     * to the card as a whole.
+     * A row's card: a thin pour of the memo's colour over the widget's own card, mixed
+     * opaque; the widget's opacity is applied to the card as a whole.
+     *
+     * [WASH] percent, half the app list's 16% (`paletteRow`). On a home screen, beside other
+     * apps' widgets and on a dark launcher especially, 16% turned every row a muddy band of
+     * colour — too loud for a list you glance at; the stripe beside each title already says
+     * which colour a memo is.
      */
     private fun wash(color: String): Int {
         val over = Palette.swatch(color)
         val under = chrome.card
         fun mix(shift: Int) =
-            (((over shr shift) and 0xFF) * 16 + ((under shr shift) and 0xFF) * 84) / 100
+            (((over shr shift) and 0xFF) * WASH + ((under shr shift) and 0xFF) * (100 - WASH)) / 100
         return (0xFF shl 24) or (mix(16) shl 16) or (mix(8) shl 8) or mix(0)
     }
 
@@ -108,3 +112,6 @@ private class MemoListFactory(
 
     override fun hasStableIds() = false
 }
+
+/** How much of a memo's colour washes its row in the list widget, in percent; see `wash`. */
+private const val WASH = 8

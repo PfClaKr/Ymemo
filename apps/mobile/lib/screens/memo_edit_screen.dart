@@ -509,14 +509,36 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                   Navigator.of(context).pop(MemoEditScreen.deleteResult);
                 }
               },
-              itemBuilder: (context) => [
-                PopupMenuItem(value: 'share', child: Text(widget.strings.share)),
-                PopupMenuItem(value: 'history', child: Text(widget.strings.history)),
-                PopupMenuItem(
-                  value: MemoEditScreen.deleteResult,
-                  child: Text(widget.strings.delete),
-                ),
-              ],
+              // Icons, and delete in red, like the list's long-press sheet for the same memo.
+              itemBuilder: (context) {
+                final danger = Theme.of(context).colorScheme.error;
+                return [
+                  PopupMenuItem(
+                    value: 'share',
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.share_outlined),
+                      title: Text(widget.strings.share),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'history',
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.history),
+                      title: Text(widget.strings.history),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: MemoEditScreen.deleteResult,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.delete_outline, color: danger),
+                      title: Text(widget.strings.delete, style: TextStyle(color: danger)),
+                    ),
+                  ),
+                ];
+              },
             ),
           ],
         ),

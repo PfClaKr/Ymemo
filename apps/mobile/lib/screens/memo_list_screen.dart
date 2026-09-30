@@ -4,7 +4,7 @@ library;
 import 'dart:async';
 import 'dart:io' show Directory, File, FileSystemEvent;
 
-import 'package:flutter/foundation.dart' show Uint8List, listEquals;
+import 'package:flutter/foundation.dart' show Uint8List, listEquals, mapEquals;
 import 'package:flutter/material.dart';
 
 import '../home_widgets.dart' as widgets;
@@ -85,6 +85,16 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
 
   List<FfiMemo> _memos = [];
   List<FfiGroup> _folders = [];
+
+  /// Whether the lists above have been read at least once. Until then they are empty
+  /// because nothing has been asked yet, not because the vault is — and the "no memos yet"
+  /// screen shown for that second on every start read as the memos having been lost.
+  bool _loaded = false;
+
+  /// How many things each folder on screen holds directly — its subfolders and its memos —
+  /// the number the desktop's tree shows beside a folder. Without it a folder row said nothing
+  /// about whether opening it was worth it.
+  Map<String, int> _counts = const {};
   Timer? _merge;
   final List<Timer> _catchUp = [];
   /// Watches `vault/logs` so an arriving change is merged as it lands.
@@ -257,7 +267,9 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
   /// Applies a new search term. Every later reload honours it, so a merge arriving from
   /// another device cannot quietly put the unfiltered list back mid-read.
   Future<void> _runSearch(String query) async {
-    _query = query;
+    // Redrawn now, not only when the matches change: the snippets bold the query itself, and
+    // typing "bread" after "br" finds the same memos, so `_reload` left "**br**ead" on screen.
+    setState(() => _query = query);
     await _reload();
   }
 
@@ -281,17 +293,32 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
     // Re-read on every reload rather than once: a merge can bring a rename from another
     // device, and the heading is where that shows up.
     final name = _atRoot ? await vaultName() : '';
+    var counts = const <String, int>{};
+    if (folders.isNotEmpty) {
+      final ids = {for (final f in folders) f.id};
+      final tally = <String, int>{};
+      for (final g in await groupList()) {
+        if (ids.contains(g.parentId)) tally[g.parentId] = (tally[g.parentId] ?? 0) + 1;
+      }
+      for (final m in await memoList()) {
+        if (ids.contains(m.groupId)) tally[m.groupId] = (tally[m.groupId] ?? 0) + 1;
+      }
+      counts = tally;
+    }
     // Nothing moved: leave the screen alone. Reloads are cheap to *ask* for and most of them
     // find nothing — the merge timer's, and now every save of your own, which the log watch
     // notices as a change to this device's own file. Rebuilding the list for those would be
     // work with nothing to show for it.
     final same = listEquals(_folders, folders) &&
         listEquals(_memos, memos) &&
+        mapEquals(_counts, counts) &&
         _vaultName == name;
-    if (mounted && !same) {
+    if (mounted && (!same || !_loaded)) {
       setState(() {
+        _loaded = true;
         _folders = folders;
         _memos = memos;
+        _counts = counts;
         _vaultName = name;
       });
     }
@@ -338,7 +365,8 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
   Future<void> _renameVault() async {
     final s = widget.strings;
     final name =
-        await _askForName(context, s, s.renameVault, _vaultName, label: s.vaultName);
+        await _askForName(context, s, s.renameVault, _vaultName,
+            label: s.vaultName, action: s.save);
     if (name == null) return;
     // The core trims it and cuts it to length, so show back what was actually stored.
     final stored = await vaultSetName(name: name);
@@ -361,7 +389,8 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
   }
 
   Future<void> _newFolder() async {
-    final name = await _askForName(context, widget.strings, widget.strings.newGroup, '');
+    final name = await _askForName(context, widget.strings, widget.strings.newGroup, '',
+        action: widget.strings.create);
     if (name == null || name.isEmpty) return;
     _clearSearch();
     if (!mounted) return;
@@ -401,6 +430,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            _sheetTitle(context, folder.name),
             _colorSection(context, s, folder.color),
             const Divider(height: 1),
             ListTile(
@@ -410,6 +440,8 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
             ),
             ListTile(
               leading: const Icon(Icons.delete_outline),
+              iconColor: Theme.of(context).colorScheme.error,
+              textColor: Theme.of(context).colorScheme.error,
               title: Text(s.delete),
               subtitle: Text(s.deleteGroupHint),
               onTap: () => Navigator.of(context).pop('delete'),
@@ -425,7 +457,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
       // up on the desktop's tree as the color it was given here.
       await groupSetColor(id: folder.id, color: action.substring(_colorAction.length));
     } else if (action == 'rename') {
-      final name = await _askForName(context, s, s.rename, folder.name);
+      final name = await _askForName(context, s, s.rename, folder.name, action: s.save);
       if (name != null && name.isNotEmpty) await groupRename(id: folder.id, name: name);
     } else if (action == 'delete') {
       final messenger = ScaffoldMessenger.of(context);
@@ -470,8 +502,17 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
               title: Text(folder.name, style: const TextStyle(fontWeight: FontWeight.w600)),
               // A folder is the one row here that goes somewhere rather than opening an
               // editor, and nothing on it said so.
-              trailing: Icon(Icons.chevron_right,
-                  color: paletteMark(folder.color, Theme.of(context).brightness)),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if ((_counts[folder.id] ?? 0) > 0)
+                    Text('${_counts[folder.id]}',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                  Icon(Icons.chevron_right,
+                      color: paletteMark(folder.color, Theme.of(context).brightness)),
+                ],
+              ),
               onTap: () => _openFolder(folder),
               onLongPress: () => _folderMenu(folder),
             ),
@@ -610,6 +651,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            _sheetTitle(context, rowTitle(memo, s.newMemo)),
             _colorSection(context, s, memo.color),
             const Divider(height: 1),
             ListTile(
@@ -624,6 +666,8 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
             ),
             ListTile(
               leading: const Icon(Icons.delete_outline),
+              iconColor: Theme.of(context).colorScheme.error,
+              textColor: Theme.of(context).colorScheme.error,
               title: Text(s.delete),
               onTap: () => Navigator.of(context).pop('delete'),
             ),
@@ -680,7 +724,25 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
         ),
       );
 
-  /// The palette, at the top of both long-press sheets.
+  /// What a long-press sheet is about, at its top. The sheet dims the list as it rises, and
+  /// with nothing naming the row it came from, "delete" did not say what it would delete.
+  Widget _sheetTitle(BuildContext sheetContext, String title) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(sheetContext)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+        ),
+      );
+
+  /// The palette, under the title of both long-press sheets.
   ///
   /// Picking pops the sheet with the chosen key rather than writing from in here: the sheet's
   /// own context is gone the moment it closes, and one return value keeps every write in the
@@ -969,7 +1031,9 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
             ),
           ),
         ),
-        if (_folders.isEmpty && _memos.isEmpty)
+        if (!_loaded)
+          const Spacer()
+        else if (_folders.isEmpty && _memos.isEmpty)
           Expanded(
             child: Center(
               child: Padding(
@@ -986,6 +1050,15 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
                         child: Image.asset('assets/logo.png', width: 96, height: 96),
                       ),
                       const SizedBox(height: 16),
+                    ] else ...[
+                      // An empty folder, or a search that found nothing: a mark for which
+                      // of the two it is, rather than a line of text alone on the screen.
+                      Icon(
+                        _query.isNotEmpty ? Icons.search_off_rounded : Icons.folder_open_rounded,
+                        size: 56,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                      ),
+                      const SizedBox(height: 12),
                     ],
                     Text(
                       _query.isNotEmpty
@@ -996,12 +1069,13 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodyLarge,
                     ),
-                    if (_query.isEmpty && _atRoot) ...[
+                    if (_query.isEmpty) ...[
                       const SizedBox(height: 16),
+                      // In a folder, the memo it makes goes into that folder.
                       FilledButton.icon(
                         onPressed: _add,
                         icon: const Icon(Icons.edit_outlined),
-                        label: Text(widget.strings.firstMemo),
+                        label: Text(_atRoot ? widget.strings.firstMemo : widget.strings.newMemo),
                       ),
                     ],
                   ],
@@ -1071,6 +1145,8 @@ Future<String?> _askForName(
   /// What the field is for. Folders are what this dialog was written for, so that stays the
   /// default; the vault's own name goes through it too and must not be labelled a folder.
   String? label,
+  /// The button's word: what pressing it does ("Create", "Save"), not "OK".
+  required String action,
 }) {
   final controller = TextEditingController(text: initial);
   return showDialog<String>(
@@ -1090,7 +1166,7 @@ Future<String?> _askForName(
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-          child: Text(strings.ok),
+          child: Text(action),
         ),
       ],
     ),

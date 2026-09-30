@@ -1,3 +1,4 @@
+import { LineEdit } from "std-widgets.slint";
 // Pieces shared by several windows: the sticky palette and the tab button.
 // Palette keys ("yellow"/"pink"/"green"/"blue"/"purple") become real colors only here; the
 // core stores and syncs the key string alone.
@@ -151,6 +152,10 @@ export component Glyph inherits Path {
             ? "M 7.1 3.2 C 9.3 3.2 11 4.9 11 7.1 C 11 9.3 9.3 11 7.1 11 C 4.9 11 3.2 9.3 3.2 7.1 C 3.2 4.9 4.9 3.2 7.1 3.2 Z M 9.9 9.9 L 13 13"
         : root.name == "undo"
             ? "M 6.6 4.2 L 3.4 7.4 L 6.6 10.6 M 3.4 7.4 L 9.8 7.4 C 12.0 7.4 13.0 8.7 13.0 10.2 C 13.0 11.7 12.0 13.0 9.8 13.0"
+        // "Add a picture", on a note's bar: a frame, a hill and a small sun, all outlines. At
+        // 14px on the bar there is room for the sun that the list-size `photo` below leaves out.
+        : root.name == "image"
+            ? "M 2.6 3.4 L 13.4 3.4 L 13.4 12.6 L 2.6 12.6 Z M 2.6 11 L 6.2 7.4 L 9.2 10.4 M 8.2 9.4 L 10.4 7.4 L 13.4 10.2 M 10.2 4.9 C 10.8 4.9 11.3 5.4 11.3 6 C 11.3 6.6 10.8 7.1 10.2 7.1 C 9.6 7.1 9.1 6.6 9.1 6 C 9.1 5.4 9.6 4.9 10.2 4.9 Z"
         // A picture: a frame with a hill and a sun in it. The same silhouette as the sticky's
         // own attach button, at list size.
         // A frame with one hill in it, and nothing else. This is drawn at 13px in a list row,
@@ -226,6 +231,173 @@ export component IconButton inherits Rectangle {
         enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A text field: std `LineEdit` with the app's gold for its focus line.
+//
+// The std line is the OS accent (blue on Windows), read-only in the style's palette, and it
+// was the last blue thing on a gold screen — under the password on the lock window above all.
+// So the same field, with a gold line of the same size drawn over the blue one. Everything a
+// caller used on a `LineEdit` is passed through.
+// ---------------------------------------------------------------------------
+export component Field inherits Rectangle {
+    in-out property <string> text <=> le.text;
+    in property <string> placeholder-text <=> le.placeholder-text;
+    in property <InputType> input-type <=> le.input-type;
+    in property <bool> enabled <=> le.enabled;
+    in property <bool> read-only <=> le.read-only;
+    in property <length> font-size <=> le.font-size;
+    out property <bool> has-focus: le.has-focus;
+    callback accepted(string);
+    callback edited(string);
+    callback key-pressed(KeyEvent) -> EventResult;
+    public function select-all() { le.select-all(); }
+
+    forward-focus: le;
+    min-width: le.min-width;
+    min-height: le.min-height;
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
+
+    le := LineEdit {
+        width: 100%;
+        height: 100%;
+        accepted(t) => { root.accepted(t); }
+        edited(t) => { root.edited(t); }
+        key-pressed(ev) => { return root.key-pressed(ev); }
+    }
+    // Where the std field draws its focus line: inset by its corner radius, 2px, at the foot.
+    if le.has-focus && le.enabled: Rectangle {
+        x: 4px;
+        y: parent.height - 2px;
+        width: parent.width - 8px;
+        height: 2px;
+        border-radius: 1px;
+        background: #e2c22a;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A window's main action, in the app's gold — the `+` in the list is the same colour.
+//
+// Not std `Button { primary: true }`: that fills with the style's accent, which is the
+// operating system's accent colour (Windows' blue unless the user chose another), and the
+// palette that holds it is read-only. So "Save" and "Restore" were a light blue nobody had
+// picked, next to a gold `+`. Same metrics as the std button (32px, 12px sides, 4px corners)
+// so the two sit in one row. `danger` is for the confirming half of something that cannot be
+// undone, which should not look like the inviting choice.
+// ---------------------------------------------------------------------------
+export component PrimaryButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> danger: false;
+    callback clicked();
+
+    min-width: max(64px, label.preferred-width + 24px);
+    min-height: 32px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 4px;
+    forward-focus: fs;
+    background: !root.enabled ? #ffffff1f
+        : root.danger ? (ta.pressed ? #a4574b : ta.has-hover ? #c9705f : #b9624f)
+        : (ta.pressed ? #cfae1c : ta.has-hover ? #f0cf45 : #e2c22a);
+    animate background { duration: 150ms; }
+    accessible-role: button;
+    accessible-enabled: root.enabled;
+    accessible-label: root.text;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+
+    label := Text {
+        text: root.text;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: !root.enabled ? #ffffff66 : root.danger ? #ffffff : #3a3208;
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    // Space and Return press it once it has the focus, like the std buttons beside it.
+    fs := FocusScope {
+        width: 0px;
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    if fs.has-focus && root.enabled: Rectangle {
+        border-radius: root.border-radius + 2px;
+        x: -2px;
+        y: -2px;
+        width: parent.width + 4px;
+        height: parent.height + 4px;
+        border-width: 2px;
+        border-color: #f0ead6;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// An on/off switch. The settings used to offer a pair of "On" / "Off" tab buttons for each
+// yes-or-no setting, which asked a question with two answers where one control says it.
+// ---------------------------------------------------------------------------
+export component Toggle inherits Rectangle {
+    in-out property <bool> checked;
+    in property <string> label;
+    callback toggled(bool);
+
+    width: 36px;
+    height: 20px;
+    border-radius: 10px;
+    background: root.checked ? (ta.has-hover ? #f0cf45 : #e2c22a) : (ta.has-hover ? #ffffff38 : #ffffff24);
+    animate background { duration: 150ms; }
+    accessible-role: switch;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-label: root.label;
+    accessible-action-default => { root.flip(); }
+    forward-focus: fs;
+
+    function flip() {
+        root.checked = !root.checked;
+        root.toggled(root.checked);
+    }
+
+    Rectangle {
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        y: 3px;
+        x: root.checked ? parent.width - self.width - 3px : 3px;
+        animate x { duration: 150ms; easing: ease-out; }
+        background: root.checked ? #3a3208 : #d8d2c2;
+    }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.flip(); }
+    }
+
+    fs := FocusScope {
+        width: 0px;
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                root.flip();
+                return accept;
+            }
+            return reject;
+        }
     }
 }
 

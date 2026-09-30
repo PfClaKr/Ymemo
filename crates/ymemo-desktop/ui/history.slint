@@ -1,5 +1,6 @@
 import { Button, ListView, ScrollView, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
+import { PrimaryButton } from "theme.slint";
 
 // ---------------------------------------------------------------------------
 // History window: every past version of one memo or folder, newest first, with the values
@@ -257,9 +258,8 @@ export component HistoryWindow inherits Window {
 
             HorizontalLayout {
                 spacing: 6px;
-                Button {
+                PrimaryButton {
                     text: Strings.ui_history_restore;
-                    primary: true;
                     enabled: root.selected >= 0 && root.current.restorable;
                     clicked => { root.restore(root.current.index); }
                 }

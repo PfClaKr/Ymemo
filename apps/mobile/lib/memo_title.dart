@@ -134,7 +134,15 @@ String revisionTime(int millis, FfiStrings s, {DateTime? now}) {
   const before = 12, after = 40;
   final q = query.trim().toLowerCase();
   if (q.isEmpty) return null;
-  final flat = text.replaceAll('\n', ' ');
+  // Fence lines left out (markup, not writing) and every run of whitespace one space, the
+  // same as the desktop's `searchable`: an indented code line opened a gap before the match.
+  final flat = text
+      .split('\n')
+      .where((l) => !l.trimLeft().startsWith('```'))
+      .join(' ')
+      .split(RegExp(r'\s+'))
+      .where((w) => w.isNotEmpty)
+      .join(' ');
   // Compared in runes, so a match cannot start or end halfway through a character.
   final chars = flat.runes.toList();
   final lower = flat.toLowerCase().runes.toList();
