@@ -196,13 +196,19 @@ pub(crate) fn show_desk(ctx: &Ctx, list_weak: &slint::Weak<ListWindow>) {
             let settings = ctx.settings.borrow();
             (settings.list_window, settings.list_screen.clone())
         };
-        present(&list);
         match saved {
-            Some(geometry) => crate::window::restore_geometry(&list, geometry, screen),
+            Some(geometry) => {
+                present(&list);
+                crate::window::restore_geometry(&list, geometry, screen);
+            }
             // First run: a Window whose root is a layout takes that layout's natural size and
             // ignores `preferred-height`, so without this the list opened at its own minimum —
-            // six rows tall on any screen — and stayed there.
-            None => list.window().set_size(slint::LogicalSize::new(340.0, 460.0)),
+            // six rows tall on any screen — and stayed there. And in the middle of the screen,
+            // where the setup window it follows was, not in the top left corner.
+            None => {
+                list.window().set_size(slint::LogicalSize::new(340.0, 460.0));
+                crate::window::present_centered(&list, None);
+            }
         }
     }
     // After the list, so the notes land in front of it rather than behind it — which the
@@ -319,7 +325,7 @@ fn wire_create_vault(
                 match v.issue_recovery_code() {
                     Ok(code) => {
                         lock.set_lock_message(SharedString::new());
-                        lock.set_new_recovery_code(SharedString::from(code));
+                        lock.set_new_recovery_code(SharedString::from(recovery_lines(&code)));
                         *pending_vault.borrow_mut() = Some(v);
                     }
                     // A vault without a recovery code still works, so this never blocks
@@ -465,4 +471,30 @@ pub(crate) fn unlock_from_session(
             }
         }
     })
+}
+
+/// A recovery code as it is shown: four groups to a line. Left to wrap, the field broke it
+/// wherever the width ran out — in the middle of a group, with the dash stranded at the end of
+/// the line — on the one screen where someone is copying it down by hand. Whitespace is
+/// ignored when a code is read back (`recovery::normalize`), so copying the lines is fine.
+pub(crate) fn recovery_lines(code: &str) -> String {
+    let groups: Vec<&str> = code.split('-').collect();
+    groups.chunks(4).map(|line| line.join("-")).collect::<Vec<_>>().join("\n")
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::recovery_lines;
+
+    #[test]
+    fn a_recovery_code_is_shown_four_groups_to_a_line_and_still_reads_back() {
+        let code = ymemo_core::recovery::generate();
+        let shown = recovery_lines(&code);
+        assert_eq!(shown.lines().count(), code.split('-').count().div_ceil(4));
+        assert!(shown.lines().all(|l| !l.starts_with('-') && !l.ends_with('-')));
+        assert_eq!(
+            ymemo_core::recovery::normalize(&shown).unwrap(),
+            ymemo_core::recovery::normalize(&code).unwrap()
+        );
+    }
 }

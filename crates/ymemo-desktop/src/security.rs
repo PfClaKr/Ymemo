@@ -63,7 +63,7 @@ pub(crate) fn wire(ctx: &Ctx, settings_win: &SettingsWindow, win: &SecurityWindo
             };
             match v.issue_recovery_code() {
                 Ok(code) => {
-                    w.set_recovery_code(SharedString::from(code));
+                    w.set_recovery_code(SharedString::from(crate::lock::recovery_lines(&code)));
                     w.set_has_recovery(true);
                     make_room_for_code(&w);
                     set_status(&w, t!("msg.recovery_issued"), false, false);

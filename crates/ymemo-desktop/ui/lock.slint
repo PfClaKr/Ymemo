@@ -103,7 +103,7 @@ export component LockWindow inherits Window {
         root.show-sync ? (root.sync-available ? 520px : 200px)
         : root.new-recovery-code != "" ? 245px
         : root.recovering ? (root.has-recovery ? 425px : 260px)
-        : !root.vault-exists ? (root.creating ? 285px : 265px)
+        : !root.vault-exists ? (root.creating ? 285px : 400px)
         // The password prompt, plus a line for whatever went wrong last time.
         : root.lock-message == "" ? 262px : 292px;
     // The password prompt is the screen the app opens on and returns to on every lock, so it
@@ -111,6 +111,11 @@ export component LockWindow inherits Window {
     // than a field under a header, which in a 300x150 window read as a leftover dialog.
     private property <bool> prompt: !root.show-sync && root.vault-exists && !root.recovering
         && root.new-recovery-code == "";
+    // The first screen a new device shows, which gets the same heading: it is the first
+    // impression of the app, and it was a small header over a question.
+    private property <bool> welcome: !root.show-sync && !root.vault-exists && !root.creating
+        && root.new-recovery-code == "";
+    private property <bool> hero: root.prompt || root.welcome;
     changed panel-height => { root.resize(root.panel-width, self.panel-height); }
     changed panel-width => { root.resize(self.panel-width, root.panel-height); }
     // The size of the panel a freshly opened window is already showing, which no `changed`
@@ -128,14 +133,14 @@ export component LockWindow inherits Window {
             spacing: 8px;
             // The app's mark beside its name: the same picture as the tray and the taskbar
             // (packaging/gen_icons.py), so the window reads as Ymemo, not as a dialog.
-            if !root.prompt: Image {
+            if !root.hero: Image {
                 source: @image-url("../../../packaging/assets/ymemo-64.png");
                 width: 22px;
                 height: 22px;
                 y: (parent.height - self.height) / 2;
             }
             Text {
-                text: root.prompt ? "" : Strings.ui_list_heading;
+                text: root.hero ? "" : Strings.ui_list_heading;
                 font-size: 16px;
                 font-weight: 700;
                 color: #f0ead6;
@@ -185,7 +190,7 @@ export component LockWindow inherits Window {
                 wrap: word-wrap;
             }
 
-            if root.prompt: VerticalLayout {
+            if root.hero: VerticalLayout {
                 spacing: 8px;
                 padding-bottom: 10px;
                 HorizontalLayout {
@@ -204,7 +209,7 @@ export component LockWindow inherits Window {
                     horizontal-alignment: center;
                 }
                 Text {
-                    text: Strings.ui_lock_prompt;
+                    text: root.prompt ? Strings.ui_lock_prompt : Strings.ui_lock_start_question;
                     font-size: 11px;
                     color: #a8a294;
                     horizontal-alignment: center;
@@ -317,7 +322,7 @@ export component LockWindow inherits Window {
                         wrap: word-wrap;
                     }
                     HorizontalLayout {
-                        alignment: start;
+                        alignment: end;
                         PrimaryButton {
                             text: Strings.ui_lock_recover;
                             enabled: code.text != "" && newpw.text.character-count >= root.min-password && newpw.text == newpw2.text;
@@ -341,11 +346,16 @@ export component LockWindow inherits Window {
                     color: #a8a294;
                     wrap: word-wrap;
                 }
-                // Left-aligned and no wider than their words: the way out of this screen is
-                // not a bar across the bottom of it, and neither is throwing every memo away.
+                // No wider than their words: the way out of this screen is not a bar across the
+                // bottom of it, and neither is throwing every memo away. The way back first and
+                // the action last, at the right, as in every other window.
                 HorizontalLayout {
-                    alignment: start;
+                    alignment: end;
                     spacing: 6px;
+                    Button {
+                        text: Strings.ui_lock_back;
+                        clicked => { root.leave-recovery(); }
+                    }
                     if !root.reset-armed: Button {
                         text: Strings.ui_lock_reset;
                         clicked => { root.reset-armed = true; }
@@ -355,22 +365,12 @@ export component LockWindow inherits Window {
                         danger: true;
                         clicked => { root.reset-vault(); }
                     }
-                    Button {
-                        text: Strings.ui_lock_back;
-                        clicked => { root.leave-recovery(); }
-                    }
                 }
             }
 
             // First run on a new device: the two ways in, each saying what it does.
-            if !root.vault-exists && !root.creating && root.new-recovery-code == "": VerticalLayout {
+            if root.welcome: VerticalLayout {
                 spacing: 10px;
-                Text {
-                    text: Strings.ui_lock_start_question;
-                    font-size: 13px;
-                    color: #f0ead6;
-                    wrap: word-wrap;
-                }
                 SetupChoice {
                     title: Strings.ui_lock_create_choice;
                     detail: Strings.ui_lock_create_detail;
@@ -429,20 +429,22 @@ export component LockWindow inherits Window {
                     color: #e79a9a;
                     wrap: word-wrap;
                 }
-                // What the screen is for comes first and is the marked one. It read the other
-                // way round: a small "create" tucked beside the field with a full-width
-                // "back" under it, which is the shape of a screen whose main move is to leave.
+                // What the screen is for is the marked one. It read the other way round once:
+                // a small "create" tucked beside the field with a full-width "back" under it,
+                // which is the shape of a screen whose main move is to leave. The main button
+                // sits at the right end, where the settings, history and approval windows put
+                // theirs.
                 HorizontalLayout {
-                    alignment: start;
+                    alignment: end;
                     spacing: 6px;
+                    Button {
+                        text: Strings.ui_lock_back;
+                        clicked => { root.creating = false; }
+                    }
                     PrimaryButton {
                         text: Strings.ui_lock_create;
                         enabled: npw.text.character-count >= root.min-password && npw.text == npw2.text;
                         clicked => { root.create-vault(npw.text); }
-                    }
-                    Button {
-                        text: Strings.ui_lock_back;
-                        clicked => { root.creating = false; }
                     }
                 }
             }
@@ -471,6 +473,7 @@ export component LockWindow inherits Window {
                             font-size: 14px;
                             font-family: "monospace";
                             color: #f7e98c;
+                            horizontal-alignment: center;
                             wrap: word-wrap;
                             single-line: false;
                         }
@@ -483,12 +486,8 @@ export component LockWindow inherits Window {
                     wrap: word-wrap;
                 }
                 HorizontalLayout {
-                    alignment: start;
+                    alignment: end;
                     spacing: 6px;
-                    PrimaryButton {
-                        text: Strings.ui_lock_code_saved;
-                        clicked => { root.recovery-ack(); }
-                    }
                     // The field above can be selected, but nothing says so, and this is a
                     // 39-character code shown exactly once. The phone has had this button
                     // since it shipped; the desktop was leaving people to transcribe it.
@@ -502,6 +501,10 @@ export component LockWindow inherits Window {
                             code-field.copy();
                             root.code-copied = true;
                         }
+                    }
+                    PrimaryButton {
+                        text: Strings.ui_lock_code_saved;
+                        clicked => { root.recovery-ack(); }
                     }
                 }
             }
