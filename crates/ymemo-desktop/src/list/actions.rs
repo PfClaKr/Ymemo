@@ -49,6 +49,7 @@ pub(crate) fn wire(ctx: &Ctx, ui: &Ui, unlocked: &Rc<Cell<bool>>) {
 fn wire_open_memo(ctx: &Ctx, ui: &Ui) {
     let list = &ui.list;
     let ctx = ctx.clone();
+    let weak = list.as_weak();
     list.on_open_memo(move |id| {
         touch(&ctx);
         let memo = {
@@ -59,8 +60,20 @@ fn wire_open_memo(ctx: &Ctx, ui: &Ui) {
                 _ => return,
             }
         };
+        // A note that has never been on this desk has no place of its own yet; it opens
+        // beside the list, as a new one does, rather than wherever the window system drops
+        // new windows — the top left corner, over the list.
+        let never_placed = ctx.settings.borrow().memo_window(&memo.id).is_none()
+            && !ctx.stickies.borrow().contains_key(&memo.id);
+        let taken = sticky::note_positions(&ctx);
         if let Err(e) = open_sticky(&ctx, &memo, false) {
             diag!("could not open the sticky window: {e}");
+            return;
+        }
+        if let (true, Some(list)) = (never_placed, weak.upgrade()) {
+            if let Some(entry) = ctx.stickies.borrow().get(&memo.id) {
+                crate::window::place_new_note(&entry.window, MadeFrom::List(list.window(), taken));
+            }
         }
     });
 }
