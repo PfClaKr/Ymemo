@@ -344,7 +344,8 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
   Future<void> _renameVault() async {
     final s = widget.strings;
     final name =
-        await _askForName(context, s, s.renameVault, _vaultName, label: s.vaultName);
+        await _askForName(context, s, s.renameVault, _vaultName,
+            label: s.vaultName, action: s.save);
     if (name == null) return;
     // The core trims it and cuts it to length, so show back what was actually stored.
     final stored = await vaultSetName(name: name);
@@ -367,7 +368,8 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
   }
 
   Future<void> _newFolder() async {
-    final name = await _askForName(context, widget.strings, widget.strings.newGroup, '');
+    final name = await _askForName(context, widget.strings, widget.strings.newGroup, '',
+        action: widget.strings.create);
     if (name == null || name.isEmpty) return;
     _clearSearch();
     if (!mounted) return;
@@ -407,6 +409,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            _sheetTitle(context, folder.name),
             _colorSection(context, s, folder.color),
             const Divider(height: 1),
             ListTile(
@@ -416,6 +419,8 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
             ),
             ListTile(
               leading: const Icon(Icons.delete_outline),
+              iconColor: Theme.of(context).colorScheme.error,
+              textColor: Theme.of(context).colorScheme.error,
               title: Text(s.delete),
               subtitle: Text(s.deleteGroupHint),
               onTap: () => Navigator.of(context).pop('delete'),
@@ -431,7 +436,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
       // up on the desktop's tree as the color it was given here.
       await groupSetColor(id: folder.id, color: action.substring(_colorAction.length));
     } else if (action == 'rename') {
-      final name = await _askForName(context, s, s.rename, folder.name);
+      final name = await _askForName(context, s, s.rename, folder.name, action: s.save);
       if (name != null && name.isNotEmpty) await groupRename(id: folder.id, name: name);
     } else if (action == 'delete') {
       final messenger = ScaffoldMessenger.of(context);
@@ -616,6 +621,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            _sheetTitle(context, rowTitle(memo, s.newMemo)),
             _colorSection(context, s, memo.color),
             const Divider(height: 1),
             ListTile(
@@ -630,6 +636,8 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
             ),
             ListTile(
               leading: const Icon(Icons.delete_outline),
+              iconColor: Theme.of(context).colorScheme.error,
+              textColor: Theme.of(context).colorScheme.error,
               title: Text(s.delete),
               onTap: () => Navigator.of(context).pop('delete'),
             ),
@@ -686,7 +694,25 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
         ),
       );
 
-  /// The palette, at the top of both long-press sheets.
+  /// What a long-press sheet is about, at its top. The sheet dims the list as it rises, and
+  /// with nothing naming the row it came from, "delete" did not say what it would delete.
+  Widget _sheetTitle(BuildContext sheetContext, String title) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(sheetContext)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+        ),
+      );
+
+  /// The palette, under the title of both long-press sheets.
   ///
   /// Picking pops the sheet with the chosen key rather than writing from in here: the sheet's
   /// own context is gone the moment it closes, and one return value keeps every write in the
@@ -1079,6 +1105,8 @@ Future<String?> _askForName(
   /// What the field is for. Folders are what this dialog was written for, so that stays the
   /// default; the vault's own name goes through it too and must not be labelled a folder.
   String? label,
+  /// The button's word: what pressing it does ("Create", "Save"), not "OK".
+  required String action,
 }) {
   final controller = TextEditingController(text: initial);
   return showDialog<String>(
@@ -1098,7 +1126,7 @@ Future<String?> _askForName(
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-          child: Text(strings.ok),
+          child: Text(action),
         ),
       ],
     ),

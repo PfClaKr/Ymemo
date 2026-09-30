@@ -270,6 +270,8 @@ pub struct FfiStrings {
     pub history_restored: String,
     pub new_group: String,
     pub ok: String,
+    /// The button that makes the thing a dialog names, where "OK" would not say what happens.
+    pub create: String,
     pub rename: String,
     pub root_folder: String,
     pub list_title: String,
@@ -463,6 +465,7 @@ pub fn mobile_strings() -> FfiStrings {
         history_restored: t!("mobile.history_restored"),
         new_group: t!("mobile.new_group"),
         ok: t!("mobile.ok"),
+        create: t!("mobile.create"),
         rename: t!("mobile.rename"),
         root_folder: t!("mobile.root_folder"),
         list_title: t!("mobile.list_title"),
