@@ -254,9 +254,30 @@ class _YmemoAppState extends State<YmemoApp> with WidgetsBindingObserver {
       darkTheme: ymemoTheme(Brightness.dark),
       themeMode: ThemeMode.system,
       home: _restoring
-          // Brief: reading one key out of the keystore. Showing the lock screen first would
-          // make an auto-unlock look like a password prompt that flashed past.
-          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+          // Reading one key out of the keystore and opening the vault. Showing the lock screen
+          // first would make an auto-unlock look like a password prompt that flashed past. The
+          // app's mark and what it is doing, rather than a lone spinner on a blank page, which
+          // on a slow start read as the app having hung.
+          ? Scaffold(
+              body: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Image.asset('assets/logo.png', width: 88, height: 88),
+                    const SizedBox(height: 20),
+                    Text(_strings.opening),
+                    const SizedBox(height: 14),
+                    const SizedBox(
+                      width: 120,
+                      child: LinearProgressIndicator(
+                        minHeight: 3,
+                        borderRadius: BorderRadius.all(Radius.circular(2)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
           : _unlocked
               ? MemoListScreen(
                   strings: _strings,
