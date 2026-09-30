@@ -314,7 +314,7 @@ export component ListWindow inherits Window {
                 return accept;
             }
             // Delete asks nothing, like the trash icon on the row does not: what softens both
-            // is the undo bar above, which is a click away for the next few seconds.
+            // is the undo bar, which is a click away for the next few seconds.
             if (ev.text == Key.Delete && root.selected >= 0
                 && root.selected < root.rows.length) {
                 root.commit-edit();
@@ -649,57 +649,6 @@ export component ListWindow inherits Window {
                         stroke: dismiss.has-hover ? #ffffff : #f0c9c9;
                     }
                     clicked => { root.notice = ""; }
-                }
-            }
-        }
-
-        // What a delete left behind, for as long as it can still be taken back. A bar and not
-        // a dialog: the delete already happened, and a question in front of every one of them
-        // is a tax on the many that were meant.
-        if root.undo-message != "": Rectangle {
-            height: 26px;
-            border-radius: 6px;
-            background: #43352f;
-            HorizontalLayout {
-                padding-left: 8px;
-                padding-right: 4px;
-                spacing: 6px;
-                Text {
-                    text: root.undo-message;
-                    font-size: 11px;
-                    color: #e8d0c4;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                    overflow: elide;
-                }
-                undo-btn := TouchArea {
-                    width: 78px;
-                    mouse-cursor: pointer;
-                    accessible-role: button;
-                    accessible-label: Strings.ui_list_undo;
-                    HorizontalLayout {
-                        spacing: 4px;
-                        alignment: center;
-                        Rectangle {
-                            width: 13px;
-                            Glyph {
-                                x: (parent.width - self.width) / 2;
-                                y: (parent.height - self.height) / 2;
-                                width: 13px;
-                                height: 13px;
-                                name: "undo";
-                                stroke: undo-btn.has-hover ? #ffffff : #9ec5e8;
-                            }
-                        }
-                        Text {
-                            text: Strings.ui_list_undo;
-                            font-size: 11px;
-                            font-weight: 700;
-                            color: undo-btn.has-hover ? #ffffff : #9ec5e8;
-                            vertical-alignment: center;
-                        }
-                    }
-                    clicked => { root.undo-delete(); }
                 }
             }
         }
@@ -1113,7 +1062,7 @@ export component ListWindow inherits Window {
                 // the point, so they behave alike: delete used to be the one icon always
                 // drawn on every row, which left the only button that loses writing
                 // permanently on screen while the harmless one beside it hid. What
-                // softens it now is the undo bar above, not a dialog in front of it.
+                // softens it now is the undo bar, not a dialog in front of it.
                 //
                 // The two live in one `if` so each can see the other's hover: the row's
                 // own TouchArea loses `has-hover` to whichever of these the pointer is
@@ -1253,5 +1202,69 @@ export component ListWindow inherits Window {
             }
         }
     }
+
+        // What a delete left behind, for as long as it can still be taken back. A bar and not
+        // a dialog: the delete already happened, and a question in front of every one of them
+        // is a tax on the many that were meant.
+        //
+        // Floating over the foot of the list, not a row at its top. At the top it pushed every
+        // row down by its own height the moment a delete landed, so the row under the pointer
+        // became the one above it — with its delete button right there, and a second click
+        // took a second memo. A bar that moves nothing cannot do that.
+        if root.undo-message != "": Rectangle {
+            x: 12px;
+            y: parent.height - self.height - 12px;
+            width: parent.width - 24px;
+            height: 34px;
+            border-radius: 8px;
+            background: #4a3b33;
+            drop-shadow-blur: 10px;
+            drop-shadow-offset-y: 2px;
+            drop-shadow-color: #00000080;
+            // Clicks on the bar stay on the bar, rather than reaching the row under it.
+            TouchArea {}
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 6px;
+                spacing: 6px;
+                Text {
+                    text: root.undo-message;
+                    font-size: 11px;
+                    color: #f0dccf;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                undo-btn := TouchArea {
+                    width: 84px;
+                    mouse-cursor: pointer;
+                    accessible-role: button;
+                    accessible-label: Strings.ui_list_undo;
+                    HorizontalLayout {
+                        spacing: 4px;
+                        alignment: center;
+                        Rectangle {
+                            width: 13px;
+                            Glyph {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: 13px;
+                                height: 13px;
+                                name: "undo";
+                                stroke: undo-btn.has-hover ? #fff3b0 : #e2c22a;
+                            }
+                        }
+                        Text {
+                            text: Strings.ui_list_undo;
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: undo-btn.has-hover ? #fff3b0 : #e2c22a;
+                            vertical-alignment: center;
+                        }
+                    }
+                    clicked => { root.undo-delete(); }
+                }
+            }
+        }
     }
 }
