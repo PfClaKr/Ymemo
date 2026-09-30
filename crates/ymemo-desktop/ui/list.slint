@@ -1075,6 +1075,16 @@ export component ListWindow inherits Window {
                     border-radius: 6px;
                     background: ta.has-hover || hist-ta.has-hover || del-ta.has-hover
                         || add-ta.has-hover ? #43403d : transparent;
+                        // The preview fades into the buttons instead of being cut off at their
+                        // edge mid-letter. Drawn just left of this patch, in its colour.
+                        Rectangle {
+                            x: -24px;
+                            width: 24px;
+                            height: parent.height;
+                            visible: ta.has-hover || hist-ta.has-hover || del-ta.has-hover
+                                || add-ta.has-hover;
+                            background: @linear-gradient(90deg, #43403d00 0%, #43403d 100%);
+                        }
                         strip := HorizontalLayout {
                             spacing: 0px;
                             // Start a note **in this folder**. Every other way of making one puts
