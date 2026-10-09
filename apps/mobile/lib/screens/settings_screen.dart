@@ -73,6 +73,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   FfiSettings get _s => widget.settings.value;
 
+  /// The running version, asked once rather than on every redraw.
+  late final Future<String> _version = appVersion();
+
   /// Writes one changed field and redraws with whatever Rust kept.
   Future<void> _save({
     String? lang,
@@ -199,8 +202,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       items.sort();
     }
     return ListTile(
-      title: _title(label, hint),
-      subtitle: _hint(hint),
+      title: Text(label),
+      subtitle: Text(hint),
       trailing: DropdownButton<int>(
         value: value,
         onChanged: (v) => v == null ? null : onPick(v),
@@ -210,48 +213,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
-  }
-
-  /// A setting's explanation, as its subtitle: the **first sentence** of it. Most of them
-  /// ran three and four lines, and a screen of those read as a wall of text; the whole of it
-  /// is one tap away, behind the ⓘ beside the title ([_title]).
-  Widget _hint(String text) => Text(_firstSentence(text));
-
-  /// A setting's name, with an ⓘ that shows the whole explanation when the subtitle had to
-  /// stop short of it.
-  Widget _title(String title, String hint) {
-    if (_firstSentence(hint) == hint.trim()) return Text(title);
-    return Row(
-      children: [
-        Flexible(child: Text(title)),
-        IconButton(
-          icon: const Icon(Icons.info_outline, size: 18),
-          visualDensity: VisualDensity.compact,
-          tooltip: title,
-          onPressed: () => showDialog<void>(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: Text(title),
-              content: Text(hint),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text(widget.strings.ok),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// Up to and including the first full stop that ends a sentence (". ", or the same with
-  /// "?"/"!"), or all of it when there is only one.
-  static String _firstSentence(String text) {
-    final t = text.trim();
-    final end = RegExp(r'[.!?](\s)').firstMatch(t);
-    return end == null ? t : t.substring(0, end.start + 1);
   }
 
   /// Shows the tail of the problem log, with one button that puts it on the clipboard —
@@ -350,29 +311,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final s = widget.strings;
+    // The desktop's settings pages, as sections: general, notes, lock and security, sync,
+    // data, about. Every setting carries its whole explanation, written to be read in full —
+    // it used to be cut to a first sentence with an ⓘ for the rest, which read as a column of
+    // half-finished sentences.
     return Scaffold(
       appBar: AppBar(title: Text(s.settings)),
       body: ListView(
         padding: EdgeInsets.fromLTRB(0, 8, 0, 8 + bottomInset(context)),
         children: [
-          _header(s.language),
+          _header(s.sectionGeneral),
           // Language names stay untranslated: written in their own language they are findable
           // even by someone stuck in one they cannot read.
-          RadioGroup<String>(
-            groupValue: _s.lang,
-            onChanged: (v) => v == null ? null : _setLanguage(v),
-            child: Column(children: [
-              RadioListTile<String>(value: 'auto', title: Text(s.languageAuto)),
-              const RadioListTile<String>(value: 'ko', title: Text('한국어')),
-              const RadioListTile<String>(value: 'en', title: Text('English')),
-            ]),
+          ListTile(
+            title: Text(s.language),
+            trailing: DropdownButton<String>(
+              value: const ['auto', 'ko', 'en'].contains(_s.lang) ? _s.lang : 'auto',
+              onChanged: (v) => v == null ? null : _setLanguage(v),
+              items: [
+                DropdownMenuItem(value: 'auto', child: Text(s.languageAuto)),
+                const DropdownMenuItem(value: 'ko', child: Text('한국어')),
+                const DropdownMenuItem(value: 'en', child: Text('English')),
+              ],
+            ),
           ),
 
           const Divider(),
-          _header(s.defaultColor),
+          _header(s.sectionNotes),
+          ListTile(title: Text(s.defaultColor)),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: ColorSwatches(
+              strings: s,
               selected: _s.defaultColor,
               onPick: (key) async {
                 await _save(defaultColor: key);
@@ -382,48 +352,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           const Divider(),
-          _header(s.lockSection),
+          _header(s.sectionLock),
           SwitchListTile(
             value: _s.lockOnBackground,
             onChanged: (v) => _save(lockOnBackground: v),
-            title: _title(s.lockOnBackground, s.lockOnBackgroundHint),
-            subtitle: _hint(s.lockOnBackgroundHint),
+            title: Text(s.lockOnBackground),
+            subtitle: Text(s.lockOnBackgroundHint),
           ),
           SwitchListTile(
             value: _s.biometricUnlock,
             onChanged: _setBiometric,
-            title: _title(s.biometricUnlock, s.biometricUnlockHint),
-            subtitle: _hint(s.biometricUnlockHint),
+            title: Text(s.biometricUnlock),
+            subtitle: Text(s.biometricUnlockHint),
           ),
           ListTile(
-            title: _title(s.unlockDays, s.unlockDaysHint),
-            subtitle: _hint(s.unlockDaysHint),
+            title: Text(s.unlockDays),
+            subtitle: Text(s.unlockDaysHint),
             trailing: DropdownButton<int>(
               value: _dayChoices.contains(_s.unlockDays) ? _s.unlockDays : 0,
               onChanged: (v) => v == null ? null : _setUnlockDays(v),
               items: [
+                // The unit on every choice, 0 included, as the retention list does.
                 for (final days in _dayChoices)
-                  DropdownMenuItem(
-                    value: days,
-                    child: Text(days == 0 ? '0' : '$days ${s.daysUnit}'),
-                  ),
+                  DropdownMenuItem(value: days, child: Text('$days ${s.daysUnit}')),
               ],
             ),
           ),
           ListTile(
-            leading: const Icon(Icons.lock_outline),
-            title: Text(s.lockNow),
-            // No pop here. Locking already pops back to the root and swaps in the lock
-            // screen; popping again would take the root with it and leave a black screen.
-            onTap: widget.onLock,
-          ),
-
-          const Divider(),
-          _header(s.securitySection),
-          ListTile(
             leading: const Icon(Icons.password),
-            title: Text(s.changePassword),
-            subtitle: Text(s.recoveryCode),
+            title: Text(s.securityTitle),
+            subtitle: Text(s.securityHint),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => SecurityScreen(
@@ -432,9 +390,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             )),
           ),
+          ListTile(
+            leading: const Icon(Icons.lock_outline),
+            title: Text(s.lockNow),
+            subtitle: Text(s.lockNowHint),
+            // No pop here. Locking already pops back to the root and swaps in the lock
+            // screen; popping again would take the root with it and leave a black screen.
+            onTap: widget.onLock,
+          ),
 
           const Divider(),
-          _header(s.advanced),
+          _header(s.sectionSync),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Text(s.advancedHint, style: Theme.of(context).textTheme.bodySmall),
@@ -451,12 +417,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SwitchListTile(
             value: _s.wifiOnlySync,
             onChanged: (v) => _save(wifiOnlySync: v),
-            title: _title(s.wifiOnly, s.wifiOnlyHint),
-            subtitle: _hint(s.wifiOnlyHint),
+            title: Text(s.wifiOnly),
+            subtitle: Text(s.wifiOnlyHint),
           ),
           ListTile(
-            title: _title(s.keepVersions, s.keepVersionsHint),
-            subtitle: _hint(s.keepVersionsHint),
+            title: Text(s.keepVersions),
+            subtitle: Text(s.keepVersionsHint),
             trailing: DropdownButton<int>(
               value: _keepChoices.contains(_s.keepVersionsDays) ? _s.keepVersionsDays : 30,
               onChanged: (v) => v == null ? null : _save(keepVersionsDays: v),
@@ -466,35 +432,69 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
+
+          // Export and the problem log are about the vault and the app, not about how fast
+          // a change travels; the desktop keeps them on a page of their own, and so does this.
+          const Divider(),
+          _header(s.dataSection),
           ListTile(
-            title: _title(s.exportTitle, s.exportHint),
-            subtitle: _hint(s.exportHint),
+            title: Text(s.exportTitle),
+            subtitle: Text(s.exportHint),
             trailing: TextButton(onPressed: _export, child: Text(s.exportButton)),
           ),
           // A phone has no file manager worth sending someone to, so the log is shown here
           // and offered for copying rather than pointed at.
           ListTile(
-            title: _title(s.log, s.logHint),
-            subtitle: _hint(s.logHint),
+            title: Text(s.log),
+            subtitle: Text(s.logHint),
             trailing: TextButton(onPressed: _showLog, child: Text(s.logView)),
           ),
 
           const Divider(),
-          _header(s.updateSection),
+          _header(s.sectionAbout),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Row(
+              children: [
+                Image.asset('assets/logo.png', width: 44, height: 44),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Ymemo',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700)),
+                      Text(s.tagline, style: Theme.of(context).textTheme.bodySmall),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
           SwitchListTile(
             value: _s.updateCheck,
             onChanged: (v) => _save(updateCheck: v),
-            title: _title(s.updateCheck, s.updateCheckHint),
-            subtitle: _hint(s.updateCheckHint),
+            title: Text(s.updateCheck),
+            subtitle: Text(s.updateCheckHint),
           ),
-          ListTile(
-            title: Text(s.updateNow),
-            subtitle: _updateStatus == null ? null : Text(_updateStatus!),
-            trailing: _checking
-                ? const SizedBox(
-                    width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.refresh),
-            onTap: _checking ? null : _checkNow,
+          // The version, and what the last check said about it; tapping asks again.
+          FutureBuilder<String>(
+            future: _version,
+            builder: (context, snapshot) => ListTile(
+              title: Text('${s.version} ${snapshot.data ?? ''}'),
+              subtitle: _updateStatus == null ? null : Text(_updateStatus!),
+              trailing: _checking
+                  ? const SizedBox(
+                      width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  : IconButton(
+                      icon: const Icon(Icons.refresh),
+                      tooltip: s.updateNow,
+                      onPressed: _checkNow,
+                    ),
+            ),
           ),
           if (_update != null)
             ListTile(
@@ -508,13 +508,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
               onTap: () => host.openUrl(_update!.url),
             ),
-
-          const Divider(),
-          FutureBuilder<String>(
-            future: appVersion(),
-            builder: (context, snapshot) => ListTile(
-              dense: true,
-              title: Text('${s.version} ${snapshot.data ?? ''}'),
+          ListTile(
+            title: Text(s.projectPage),
+            subtitle: const Text('github.com/PfClaKr/Ymemo'),
+            trailing: TextButton(
+              onPressed: () => host.openUrl('https://github.com/PfClaKr/Ymemo'),
+              child: Text(s.open),
             ),
           ),
         ],

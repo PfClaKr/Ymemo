@@ -33,7 +33,7 @@ pub(crate) use desk::{hide_open_notes_from_taskbar, raise_open, stack_desk};
 pub(crate) use geometry::{remember_geometry, rescue_offscreen};
 pub(crate) use photos::{forget_all_photos, set_photo_models, split_photo_rows};
 pub(crate) use snap::snap_tick;
-pub(crate) use title::derive_title;
+pub(crate) use title::{derive_title, display_title};
 
 /// Body font size (logical px) that photo sizes in em are measured against.
 /// **Must match the body `font-size` in `ui/sticky.slint`.**
@@ -57,7 +57,7 @@ pub(crate) const SNAP_INTERVAL: Duration = Duration::from_millis(90);
 /// reach for something else, and a close records its own window immediately anyway.
 pub(crate) const GEOMETRY_INTERVAL: Duration = Duration::from_secs(2);
 /// The size a sticky opens at (logical px); **must match the preferred size in
-/// `ui/sticky.slint`**, which is what the window is actually given.
+/// `ui/sticky.slint`**. Set explicitly on a note with no geometry of its own (`put_back`).
 pub(crate) const DEFAULT_SIZE: (f32, f32) = (200.0, 120.0);
 /// Height of the colour and opacity panel; **must match the one in `ui/sticky.slint`**.
 /// A sticky opens small enough that the panel would take most of the note, so the window
@@ -119,7 +119,7 @@ pub(crate) fn save_memo(ctx: &Ctx, id: &str, text: &str) -> bool {
     }
     // Reflect the new title in the title bar.
     if let Some(entry) = ctx.stickies.borrow().get(id) {
-        set_title(&entry.window, &memo.title);
+        set_title(&entry.window, &display_title(&memo));
         // The save went through, so whatever the last one said no longer holds.
         entry.window.set_notice(SharedString::new());
     }
@@ -282,7 +282,7 @@ fn build_window(ctx: &Ctx, memo: &Memo) -> Result<StickyWindow> {
     let window = StickyWindow::new()?;
     // The globals are per instance, so fill this one with the current strings.
     apply_strings(&window.global::<Strings>());
-    set_title(&window, &memo.title);
+    set_title(&window, &display_title(memo));
     set_body_text(&window, &sticky_text(memo));
     window.set_sticky_color(SharedString::from(memo.color.clone()));
     window.set_sticky_opacity(memo.opacity as f32);
@@ -310,6 +310,10 @@ fn put_back(ctx: &Ctx, window: &StickyWindow, id: &str, expanded_height: &Rc<Cel
         // What it should go back to when it is unfolded; the geometry above is always the
         // note's expanded size, folded or not.
         expanded_height.set(geometry[3] as f32 / window.window().scale_factor());
+    } else {
+        // Asked for, not left to the window: under a window manager a new note opened at
+        // the layout's minimum, a 140x24 strip with no room to write (measured under openbox).
+        window.window().set_size(LogicalSize::new(DEFAULT_SIZE.0, DEFAULT_SIZE.1));
     }
     // Folded is a state of its own, applied after the size above rather than instead of it.
     if folded {

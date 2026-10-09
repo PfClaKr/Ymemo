@@ -166,20 +166,22 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                   style: TextStyle(color: ink),
                                 ),
                               ),
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-                                child: Align(
-                                  alignment: Alignment.centerLeft,
-                                  // A deletion is a revision with nothing in it; the version
-                                  // before it is the one to go back to.
-                                  child: revision.restorable && !current
-                                      ? FilledButton(
-                                          onPressed: () => _restore(revision),
-                                          child: Text(widget.strings.historyRestore),
-                                        )
-                                      : null,
-                                ),
-                              ),
+                              // A deletion is a revision with nothing in it; the version
+                              // before it is the one to go back to. At the right end, where
+                              // the main button sits everywhere else in the app.
+                              if (revision.restorable && !current)
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                                  child: Align(
+                                    alignment: Alignment.centerRight,
+                                    child: FilledButton(
+                                      onPressed: () => _restore(revision),
+                                      child: Text(widget.strings.historyRestore),
+                                    ),
+                                  ),
+                                )
+                              else
+                                const SizedBox(height: 8),
                             ],
                           ],
                         ),

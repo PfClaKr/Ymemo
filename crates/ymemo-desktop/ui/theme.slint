@@ -1,4 +1,5 @@
 import { LineEdit } from "std-widgets.slint";
+import { Strings } from "@i18n";
 // Pieces shared by several windows: the sticky palette and the tab button.
 // Palette keys ("yellow"/"pink"/"green"/"blue"/"purple") become real colors only here; the
 // core stores and syncs the key string alone.
@@ -71,9 +72,15 @@ export component TabButton inherits Rectangle {
     callback clicked();
 
     height: 26px;
-    background: root.active ? #ffffff26 : #ffffff08;
+    // Rounded like every other control in these windows; the square segments were the one
+    // hard corner among the cards, switches and buttons around them.
+    border-radius: 5px;
+    background: root.active ? #ffffff26 : ta.has-hover ? #ffffff14 : #ffffff08;
     border-width: 1px;
     border-color: root.active ? #ffffff59 : #ffffff1f;
+    accessible-role: tab;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
     // The label in a layout rather than filling the box, so the button has a width of its
     // own. It had none: in a row that ends in a stretchy spacer the two update toggles
     // collapsed onto their own letters, 켜기/끄기 pressed against the border.
@@ -90,7 +97,8 @@ export component TabButton inherits Rectangle {
             vertical-alignment: center;
         }
     }
-    TouchArea {
+    ta := TouchArea {
+        mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
 }
@@ -172,6 +180,21 @@ export component Glyph inherits Path {
             ? "M 8 3.2 L 8 9.6 M 5.2 7.2 L 8 10 L 10.8 7.2 M 3.2 11.2 L 3.2 12.4 C 3.2 12.9 3.6 13.2 4 13.2 L 12 13.2 C 12.4 13.2 12.8 12.9 12.8 12.4 L 12.8 11.2"
         : root.name == "photo-flow"
             ? "M 2.4 3.6 L 13.6 3.6 M 2.4 6.0 L 10.0 6.0 M 4.0 8.4 L 12.0 8.4 L 12.0 13.0 L 4.0 13.0 Z"
+        // The settings' side menu. A note is the app's own silhouette: a sheet peeled at the
+        // bottom right with two lines on it.
+        : root.name == "note"
+            ? "M 3.4 2.8 L 12.6 2.8 L 12.6 9.6 L 9.2 13.2 L 3.4 13.2 Z M 12.6 9.6 L 9.2 9.6 L 9.2 13.2 M 5.6 6 L 10.4 6 M 5.6 8.2 L 8.4 8.2"
+        : root.name == "keyboard"
+            ? "M 2 4.4 L 14 4.4 L 14 11.6 L 2 11.6 Z M 4.4 6.9 L 4.8 6.9 M 7 6.9 L 7.4 6.9 M 9.6 6.9 L 10 6.9 M 11.6 6.9 L 12 6.9 M 5.4 9.2 L 10.6 9.2"
+        : root.name == "info"
+            ? "M 8 2.6 C 11 2.6 13.4 5 13.4 8 C 13.4 11 11 13.4 8 13.4 C 5 13.4 2.6 11 2.6 8 C 2.6 5 5 2.6 8 2.6 Z M 8 7.4 L 8 11 M 8 5 L 8 5.5"
+        // Arrow keys, in the settings' list of shortcuts: typed as ↑ ↓ they depend on a font.
+        : root.name == "arrow-up"
+            ? "M 8 12.6 L 8 3.6 M 4.6 7 L 8 3.6 L 11.4 7"
+        : root.name == "arrow-down"
+            ? "M 8 3.4 L 8 12.4 M 4.6 9 L 8 12.4 L 11.4 9"
+        : root.name == "data"
+            ? "M 3.4 4.2 C 3.4 2.6 12.6 2.6 12.6 4.2 C 12.6 5.8 3.4 5.8 3.4 4.2 Z M 3.4 4.2 L 3.4 11.8 C 3.4 13.4 12.6 13.4 12.6 11.8 L 12.6 4.2 M 3.4 8 C 3.4 9.6 12.6 9.6 12.6 8"
             : "";
 }
 
@@ -192,6 +215,10 @@ export component IconButton inherits Rectangle {
     // The window's main action: filled with the app's gold, the glyph dark on it, so the one
     // button that makes something new stands out from the row of settings-like ones.
     in property <bool> primary: false;
+    // Pressed in: the panel this button opens is the one on screen. The pairing panel takes
+    // the window's whole body, and nothing else said that pressing the same button again is
+    // the way back to the memos.
+    in property <bool> active: false;
     out property <bool> hovering: ta.has-hover;
     callback clicked();
 
@@ -200,10 +227,14 @@ export component IconButton inherits Rectangle {
     border-radius: 5px;
     background: !root.enabled ? #ffffff08
         : root.primary ? (ta.has-hover ? #f5d24a : #e2c22a)
+        : root.active ? (ta.has-hover ? #e2c22a59 : #e2c22a40)
         : ta.has-hover ? #ffffff33
         : #ffffff14;
+    border-width: root.active ? 1px : 0px;
+    border-color: #e2c22a99;
     opacity: root.enabled ? 1.0 : 0.4;
     accessible-role: button;
+    accessible-enabled: root.enabled;
     accessible-label: root.label;
     accessible-action-default => { if (root.enabled) { root.clicked(); } }
 
@@ -213,7 +244,7 @@ export component IconButton inherits Rectangle {
         width: 16px;
         height: 16px;
         name: root.icon;
-        stroke: root.primary ? #3a3208 : root.ink;
+        stroke: root.primary ? #3a3208 : root.active ? #f0dc80 : root.ink;
     }
 
     if root.badge != 0: Rectangle {
@@ -399,6 +430,18 @@ export component Toggle inherits Rectangle {
             return reject;
         }
     }
+
+    // Where Tab has landed, as on `PrimaryButton`: without it a keyboard user flipped
+    // switches they could not see were the ones being pointed at.
+    if fs.has-focus: Rectangle {
+        x: -2px;
+        y: -2px;
+        width: parent.width + 4px;
+        height: parent.height + 4px;
+        border-radius: root.border-radius + 2px;
+        border-width: 2px;
+        border-color: #f0ead6;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -452,5 +495,140 @@ export component SetupChoice inherits Rectangle {
         enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// One colour to pick, as a round chip: the note's own colour panel, the list's inline palette
+// and the settings' default colour all choose from these five, and all three drew the chip by
+// hand — with no pointer cursor on two of them, nothing under the pointer on any, and nothing
+// a screen reader could say about which colour it was.
+// ---------------------------------------------------------------------------
+export component ColorChip inherits Rectangle {
+    in property <string> key;
+    in property <bool> selected;
+    in property <length> size: 19px;
+    callback picked();
+
+    width: root.size;
+    height: root.size;
+    border-radius: root.size / 2;
+    background: Palette.swatch(root.key);
+    border-width: root.selected ? 3px : ta.has-hover ? 2px : 1px;
+    border-color: root.selected ? #ffffff : ta.has-hover ? #ffffffb3 : #00000040;
+    accessible-role: button;
+    accessible-label: root.key == "pink" ? Strings.ui_color_pink
+        : root.key == "green" ? Strings.ui_color_green
+        : root.key == "blue" ? Strings.ui_color_blue
+        : root.key == "purple" ? Strings.ui_color_purple
+        : Strings.ui_color_yellow;
+    accessible-checkable: true;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.picked(); }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A slider in the app's own ink. The standard one is the platform's accent — Windows' blue —
+// which was the loudest thing on a scrap of yellow paper and the one blue control left in the
+// gold settings window. The note's colour panel passes the note's ink; the dark windows keep
+// the gold default.
+// ---------------------------------------------------------------------------
+export component InkSlider inherits Rectangle {
+    in property <float> minimum: 0;
+    in property <float> maximum: 100;
+    // Snaps to multiples of this when above zero.
+    in property <float> step: 0;
+    in property <float> value;
+    in property <color> ink: #e2c22a;
+    in property <color> track: root.ink.with-alpha(0.22);
+    in property <string> label;
+    callback changed(float);
+    callback released(float);
+    min-height: 18px;
+    horizontal-stretch: 1;
+    private property <float> fraction: (root.value - root.minimum) / (root.maximum - root.minimum);
+    private property <length> knob: 12px;
+    accessible-role: slider;
+    accessible-label: root.label;
+    accessible-value: root.value;
+    accessible-value-minimum: root.minimum;
+    accessible-value-maximum: root.maximum;
+    accessible-value-step: root.step > 0 ? root.step : 1;
+    accessible-action-increment => { root.nudge(1); }
+    accessible-action-decrement => { root.nudge(-1); }
+    forward-focus: fs;
+
+    function snap(v: float) -> float {
+        root.step > 0 ? Math.round(v / root.step) * root.step : v
+    }
+    // Arrow keys move it one step (or a twentieth of the range), and land at once, the way
+    // a release of the pointer does.
+    function nudge(dir: int) {
+        let by = root.step > 0 ? root.step : (root.maximum - root.minimum) / 20;
+        let v = Math.clamp(root.snap(root.value + dir * by), root.minimum, root.maximum);
+        root.changed(v);
+        root.released(v);
+    }
+
+    // The track, and the part of it to the left of the knob. Both pinned to the left edge:
+    // a child with no `x` is centred, and the filled part used to grow out from the middle.
+    Rectangle {
+        x: 0px;
+        y: (parent.height - self.height) / 2;
+        height: 3px;
+        border-radius: 1.5px;
+        background: root.track;
+    }
+    Rectangle {
+        x: 0px;
+        y: (parent.height - self.height) / 2;
+        width: root.fraction * (parent.width - root.knob) + root.knob / 2;
+        height: 3px;
+        border-radius: 1.5px;
+        background: root.ink.with-alpha(0.7);
+    }
+    Rectangle {
+        x: root.fraction * (parent.width - root.knob);
+        y: (parent.height - self.height) / 2;
+        width: root.knob;
+        height: root.knob;
+        border-radius: root.knob / 2;
+        background: root.ink;
+        border-width: 2px;
+        border-color: fs.has-focus ? #ffffff : #ffffffcc;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        function at(x: length) -> float {
+            root.snap(root.minimum + Math.clamp((x - root.knob / 2) / (root.width - root.knob), 0, 1)
+                * (root.maximum - root.minimum))
+        }
+        pointer-event(ev) => {
+            if (ev.kind == PointerEventKind.down) {
+                fs.focus();
+                root.changed(self.at(self.mouse-x));
+            }
+            if (ev.kind == PointerEventKind.up) { root.released(self.at(self.mouse-x)); }
+        }
+        moved => { if (self.pressed) { root.changed(self.at(self.mouse-x)); } }
+    }
+    fs := FocusScope {
+        width: 0px;
+        key-pressed(ev) => {
+            if (ev.text == Key.RightArrow || ev.text == Key.UpArrow) {
+                root.nudge(1);
+                return accept;
+            }
+            if (ev.text == Key.LeftArrow || ev.text == Key.DownArrow) {
+                root.nudge(-1);
+                return accept;
+            }
+            return reject;
+        }
     }
 }

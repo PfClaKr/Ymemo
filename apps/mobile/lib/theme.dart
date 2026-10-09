@@ -56,15 +56,13 @@ ThemeData ymemoTheme(Brightness brightness) {
           textStyle: const TextStyle(fontWeight: FontWeight.w700),
         ),
       ),
-      // The + in the app's gold on a dark list too. Material's dark primary container is a
-      // dim olive, which made the one button that starts a memo the dullest thing on screen —
-      // and unlike the gold + on the light list and on the desktop.
-      floatingActionButtonTheme: brightness == Brightness.dark
-          ? const FloatingActionButtonThemeData(
-              backgroundColor: Color(0xFFE2C22A),
-              foregroundColor: Color(0xFF3A3208),
-            )
-          : null,
+      // The + in the app's gold, in both modes. Material's primary container is a dim olive in
+      // the dark and a pale cream in the light, which made the one button that starts a memo
+      // a different colour from "first memo" right above it and from the desktop's +.
+      floatingActionButtonTheme: const FloatingActionButtonThemeData(
+        backgroundColor: Color(0xFFE2C22A),
+        foregroundColor: Color(0xFF3A3208),
+      ),
     );
 }
 

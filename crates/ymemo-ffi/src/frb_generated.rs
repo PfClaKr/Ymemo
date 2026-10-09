@@ -2769,7 +2769,6 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_language = <String>::sse_decode(deserializer);
         let mut var_languageAuto = <String>::sse_decode(deserializer);
         let mut var_lockNow = <String>::sse_decode(deserializer);
-        let mut var_advanced = <String>::sse_decode(deserializer);
         let mut var_advancedHint = <String>::sse_decode(deserializer);
         let mut var_mergeSeconds = <String>::sse_decode(deserializer);
         let mut var_mergeSecondsHint = <String>::sse_decode(deserializer);
@@ -2788,7 +2787,6 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_biometricUnlockHint = <String>::sse_decode(deserializer);
         let mut var_lockOnBackground = <String>::sse_decode(deserializer);
         let mut var_lockOnBackgroundHint = <String>::sse_decode(deserializer);
-        let mut var_lockSection = <String>::sse_decode(deserializer);
         let mut var_saved = <String>::sse_decode(deserializer);
         let mut var_settings = <String>::sse_decode(deserializer);
         let mut var_unlockDays = <String>::sse_decode(deserializer);
@@ -2807,12 +2805,12 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_updateLatest = <String>::sse_decode(deserializer);
         let mut var_updateNow = <String>::sse_decode(deserializer);
         let mut var_updateOpen = <String>::sse_decode(deserializer);
-        let mut var_updateSection = <String>::sse_decode(deserializer);
         let mut var_version = <String>::sse_decode(deserializer);
         let mut var_cancel = <String>::sse_decode(deserializer);
         let mut var_delete = <String>::sse_decode(deserializer);
         let mut var_deleteGroupHint = <String>::sse_decode(deserializer);
         let mut var_deleted = <String>::sse_decode(deserializer);
+        let mut var_deletedGroup = <String>::sse_decode(deserializer);
         let mut var_undo = <String>::sse_decode(deserializer);
         let mut var_emptyFolder = <String>::sse_decode(deserializer);
         let mut var_folderName = <String>::sse_decode(deserializer);
@@ -2887,6 +2885,11 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_unpair = <String>::sse_decode(deserializer);
         let mut var_unpairWarning = <String>::sse_decode(deserializer);
         let mut var_color = <String>::sse_decode(deserializer);
+        let mut var_colorYellow = <String>::sse_decode(deserializer);
+        let mut var_colorPink = <String>::sse_decode(deserializer);
+        let mut var_colorGreen = <String>::sse_decode(deserializer);
+        let mut var_colorBlue = <String>::sse_decode(deserializer);
+        let mut var_colorPurple = <String>::sse_decode(deserializer);
         let mut var_changePassword = <String>::sse_decode(deserializer);
         let mut var_confirmPassword = <String>::sse_decode(deserializer);
         let mut var_repeatPassword = <String>::sse_decode(deserializer);
@@ -2928,6 +2931,19 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_pairWaiting = <String>::sse_decode(deserializer);
         let mut var_pairWaitingHint = <String>::sse_decode(deserializer);
         let mut var_reject = <String>::sse_decode(deserializer);
+        let mut var_dataSection = <String>::sse_decode(deserializer);
+        let mut var_sectionGeneral = <String>::sse_decode(deserializer);
+        let mut var_sectionNotes = <String>::sse_decode(deserializer);
+        let mut var_sectionLock = <String>::sse_decode(deserializer);
+        let mut var_sectionSync = <String>::sse_decode(deserializer);
+        let mut var_sectionAbout = <String>::sse_decode(deserializer);
+        let mut var_securityTitle = <String>::sse_decode(deserializer);
+        let mut var_securityHint = <String>::sse_decode(deserializer);
+        let mut var_lockNowHint = <String>::sse_decode(deserializer);
+        let mut var_tagline = <String>::sse_decode(deserializer);
+        let mut var_projectPage = <String>::sse_decode(deserializer);
+        let mut var_open = <String>::sse_decode(deserializer);
+        let mut var_back = <String>::sse_decode(deserializer);
         return crate::api::FfiStrings {
             add_photo: var_addPhoto,
             body_hint: var_bodyHint,
@@ -2953,7 +2969,6 @@ impl SseDecode for crate::api::FfiStrings {
             language: var_language,
             language_auto: var_languageAuto,
             lock_now: var_lockNow,
-            advanced: var_advanced,
             advanced_hint: var_advancedHint,
             merge_seconds: var_mergeSeconds,
             merge_seconds_hint: var_mergeSecondsHint,
@@ -2972,7 +2987,6 @@ impl SseDecode for crate::api::FfiStrings {
             biometric_unlock_hint: var_biometricUnlockHint,
             lock_on_background: var_lockOnBackground,
             lock_on_background_hint: var_lockOnBackgroundHint,
-            lock_section: var_lockSection,
             saved: var_saved,
             settings: var_settings,
             unlock_days: var_unlockDays,
@@ -2991,12 +3005,12 @@ impl SseDecode for crate::api::FfiStrings {
             update_latest: var_updateLatest,
             update_now: var_updateNow,
             update_open: var_updateOpen,
-            update_section: var_updateSection,
             version: var_version,
             cancel: var_cancel,
             delete: var_delete,
             delete_group_hint: var_deleteGroupHint,
             deleted: var_deleted,
+            deleted_group: var_deletedGroup,
             undo: var_undo,
             empty_folder: var_emptyFolder,
             folder_name: var_folderName,
@@ -3071,6 +3085,11 @@ impl SseDecode for crate::api::FfiStrings {
             unpair: var_unpair,
             unpair_warning: var_unpairWarning,
             color: var_color,
+            color_yellow: var_colorYellow,
+            color_pink: var_colorPink,
+            color_green: var_colorGreen,
+            color_blue: var_colorBlue,
+            color_purple: var_colorPurple,
             change_password: var_changePassword,
             confirm_password: var_confirmPassword,
             repeat_password: var_repeatPassword,
@@ -3112,6 +3131,19 @@ impl SseDecode for crate::api::FfiStrings {
             pair_waiting: var_pairWaiting,
             pair_waiting_hint: var_pairWaitingHint,
             reject: var_reject,
+            data_section: var_dataSection,
+            section_general: var_sectionGeneral,
+            section_notes: var_sectionNotes,
+            section_lock: var_sectionLock,
+            section_sync: var_sectionSync,
+            section_about: var_sectionAbout,
+            security_title: var_securityTitle,
+            security_hint: var_securityHint,
+            lock_now_hint: var_lockNowHint,
+            tagline: var_tagline,
+            project_page: var_projectPage,
+            open: var_open,
+            back: var_back,
         };
     }
 }
@@ -3597,7 +3629,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.language.into_into_dart().into_dart(),
             self.language_auto.into_into_dart().into_dart(),
             self.lock_now.into_into_dart().into_dart(),
-            self.advanced.into_into_dart().into_dart(),
             self.advanced_hint.into_into_dart().into_dart(),
             self.merge_seconds.into_into_dart().into_dart(),
             self.merge_seconds_hint.into_into_dart().into_dart(),
@@ -3616,7 +3647,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.biometric_unlock_hint.into_into_dart().into_dart(),
             self.lock_on_background.into_into_dart().into_dart(),
             self.lock_on_background_hint.into_into_dart().into_dart(),
-            self.lock_section.into_into_dart().into_dart(),
             self.saved.into_into_dart().into_dart(),
             self.settings.into_into_dart().into_dart(),
             self.unlock_days.into_into_dart().into_dart(),
@@ -3635,12 +3665,12 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.update_latest.into_into_dart().into_dart(),
             self.update_now.into_into_dart().into_dart(),
             self.update_open.into_into_dart().into_dart(),
-            self.update_section.into_into_dart().into_dart(),
             self.version.into_into_dart().into_dart(),
             self.cancel.into_into_dart().into_dart(),
             self.delete.into_into_dart().into_dart(),
             self.delete_group_hint.into_into_dart().into_dart(),
             self.deleted.into_into_dart().into_dart(),
+            self.deleted_group.into_into_dart().into_dart(),
             self.undo.into_into_dart().into_dart(),
             self.empty_folder.into_into_dart().into_dart(),
             self.folder_name.into_into_dart().into_dart(),
@@ -3715,6 +3745,11 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.unpair.into_into_dart().into_dart(),
             self.unpair_warning.into_into_dart().into_dart(),
             self.color.into_into_dart().into_dart(),
+            self.color_yellow.into_into_dart().into_dart(),
+            self.color_pink.into_into_dart().into_dart(),
+            self.color_green.into_into_dart().into_dart(),
+            self.color_blue.into_into_dart().into_dart(),
+            self.color_purple.into_into_dart().into_dart(),
             self.change_password.into_into_dart().into_dart(),
             self.confirm_password.into_into_dart().into_dart(),
             self.repeat_password.into_into_dart().into_dart(),
@@ -3756,6 +3791,19 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.pair_waiting.into_into_dart().into_dart(),
             self.pair_waiting_hint.into_into_dart().into_dart(),
             self.reject.into_into_dart().into_dart(),
+            self.data_section.into_into_dart().into_dart(),
+            self.section_general.into_into_dart().into_dart(),
+            self.section_notes.into_into_dart().into_dart(),
+            self.section_lock.into_into_dart().into_dart(),
+            self.section_sync.into_into_dart().into_dart(),
+            self.section_about.into_into_dart().into_dart(),
+            self.security_title.into_into_dart().into_dart(),
+            self.security_hint.into_into_dart().into_dart(),
+            self.lock_now_hint.into_into_dart().into_dart(),
+            self.tagline.into_into_dart().into_dart(),
+            self.project_page.into_into_dart().into_dart(),
+            self.open.into_into_dart().into_dart(),
+            self.back.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3938,7 +3986,6 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.language, serializer);
         <String>::sse_encode(self.language_auto, serializer);
         <String>::sse_encode(self.lock_now, serializer);
-        <String>::sse_encode(self.advanced, serializer);
         <String>::sse_encode(self.advanced_hint, serializer);
         <String>::sse_encode(self.merge_seconds, serializer);
         <String>::sse_encode(self.merge_seconds_hint, serializer);
@@ -3957,7 +4004,6 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.biometric_unlock_hint, serializer);
         <String>::sse_encode(self.lock_on_background, serializer);
         <String>::sse_encode(self.lock_on_background_hint, serializer);
-        <String>::sse_encode(self.lock_section, serializer);
         <String>::sse_encode(self.saved, serializer);
         <String>::sse_encode(self.settings, serializer);
         <String>::sse_encode(self.unlock_days, serializer);
@@ -3976,12 +4022,12 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.update_latest, serializer);
         <String>::sse_encode(self.update_now, serializer);
         <String>::sse_encode(self.update_open, serializer);
-        <String>::sse_encode(self.update_section, serializer);
         <String>::sse_encode(self.version, serializer);
         <String>::sse_encode(self.cancel, serializer);
         <String>::sse_encode(self.delete, serializer);
         <String>::sse_encode(self.delete_group_hint, serializer);
         <String>::sse_encode(self.deleted, serializer);
+        <String>::sse_encode(self.deleted_group, serializer);
         <String>::sse_encode(self.undo, serializer);
         <String>::sse_encode(self.empty_folder, serializer);
         <String>::sse_encode(self.folder_name, serializer);
@@ -4056,6 +4102,11 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.unpair, serializer);
         <String>::sse_encode(self.unpair_warning, serializer);
         <String>::sse_encode(self.color, serializer);
+        <String>::sse_encode(self.color_yellow, serializer);
+        <String>::sse_encode(self.color_pink, serializer);
+        <String>::sse_encode(self.color_green, serializer);
+        <String>::sse_encode(self.color_blue, serializer);
+        <String>::sse_encode(self.color_purple, serializer);
         <String>::sse_encode(self.change_password, serializer);
         <String>::sse_encode(self.confirm_password, serializer);
         <String>::sse_encode(self.repeat_password, serializer);
@@ -4097,6 +4148,19 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.pair_waiting, serializer);
         <String>::sse_encode(self.pair_waiting_hint, serializer);
         <String>::sse_encode(self.reject, serializer);
+        <String>::sse_encode(self.data_section, serializer);
+        <String>::sse_encode(self.section_general, serializer);
+        <String>::sse_encode(self.section_notes, serializer);
+        <String>::sse_encode(self.section_lock, serializer);
+        <String>::sse_encode(self.section_sync, serializer);
+        <String>::sse_encode(self.section_about, serializer);
+        <String>::sse_encode(self.security_title, serializer);
+        <String>::sse_encode(self.security_hint, serializer);
+        <String>::sse_encode(self.lock_now_hint, serializer);
+        <String>::sse_encode(self.tagline, serializer);
+        <String>::sse_encode(self.project_page, serializer);
+        <String>::sse_encode(self.open, serializer);
+        <String>::sse_encode(self.back, serializer);
     }
 }
 

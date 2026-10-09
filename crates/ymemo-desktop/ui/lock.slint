@@ -1,7 +1,7 @@
 import { LineEdit, Button, TextEdit, ListView, ScrollView, Slider, SpinBox, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
 import { PairingPanel, SharedDeviceRow } from "pairing.slint";
-import { IconButton, SetupChoice, PrimaryButton, Field } from "theme.slint";
+import { IconButton, SetupChoice, PrimaryButton, Field, Scroll } from "theme.slint";
 
 // The name of a field, kept above it rather than inside it.
 //
@@ -35,7 +35,9 @@ export component LockWindow inherits Window {
     min-height: 150px;
     background: #2e2b27;
 
-    in property <string> lock-message;
+    // in-out so moving between panels can clear it: a "wrong password" from the prompt was
+    // still standing over the recovery form it had nothing to do with.
+    in-out property <string> lock-message;
     in property <bool> sync-available: false;
     in property <string> my-pairing-code;
     in property <image> qr-image;
@@ -95,12 +97,13 @@ export component LockWindow inherits Window {
     public function leave-recovery() {
         root.recovering = false;
         root.reset-armed = false;
+        root.lock-message = "";
     }
     // Measured against what each panel draws, at the width beside it.
     private property <length> panel-width: root.show-sync && root.sync-available ? 360px : 340px;
     private property <length> panel-height:
         // With no sync daemon the panel is one line saying so, not a screenful of codes.
-        root.show-sync ? (root.sync-available ? 520px : 200px)
+        root.show-sync ? (root.sync-available ? 540px : 320px)
         : root.new-recovery-code != "" ? 245px
         : root.recovering ? (root.has-recovery ? 425px : 260px)
         : !root.vault-exists ? (root.creating ? 285px : 400px)
@@ -147,9 +150,32 @@ export component LockWindow inherits Window {
                 horizontal-stretch: 1;
                 vertical-alignment: center;
             }
+            // The way back from the pairing panel, in words. A first run arrives there from the
+            // "connect" card, and the only other way out is pressing the link button again.
+            // Up here rather than under the panel, which measures itself shorter than it draws
+            // and had anything placed after it painted over its own last button.
+            if root.show-sync: Text {
+                text: Strings.ui_lock_back;
+                font-size: 12px;
+                color: back-ta.has-hover ? #f0dc80 : #d8c765;
+                vertical-alignment: center;
+                back-ta := TouchArea {
+                    mouse-cursor: pointer;
+                    accessible-role: button;
+                    accessible-label: Strings.ui_lock_back;
+                    clicked => { root.show-sync = false; }
+                }
+                Rectangle {
+                    y: parent.height / 2 + 8px;
+                    height: 1px;
+                    background: parent.color;
+                    visible: back-ta.has-hover;
+                }
+            }
             IconButton {
                 icon: "link";
                 label: Strings.ui_list_tip_sync;
+                active: root.show-sync;
                 clicked => { root.show-sync = !root.show-sync; }
             }
         }
@@ -157,10 +183,20 @@ export component LockWindow inherits Window {
         // Scrolls: the panel is taller than the window as soon as a request is waiting and a
         // device or two is listed, and without this the rows at the bottom — the remove
         // button and what it warns about — were cut off with no way to reach them.
-        if root.show-sync: ScrollView {
+        //
+        // The content is given the view's width less the scrollbar's, as in the settings
+        // window, so nothing in it runs under the bar.
+        if root.show-sync: sync-scroll := ScrollView {
             vertical-stretch: 1;
-            VerticalLayout {
+            viewport-width: self.visible-width;
+            viewport-height: sync-content.preferred-height;
+            sync-content := VerticalLayout {
+                width: sync-scroll.visible-width - Scroll.gutter;
                 alignment: start;
+                // Slack under the last row: the panel's wrapped paragraphs measure themselves
+                // shorter than they draw (169px measured against about 195px drawn, for the
+                // no-sync state), and the bottom of the panel would sit out of reach.
+                padding-bottom: 32px;
                 PairingPanel {
                     // No open vault here to record a removal in; see `can-unshare`.
                     can-unshare: false;
@@ -183,7 +219,9 @@ export component LockWindow inherits Window {
 
         if !root.show-sync: VerticalLayout {
             spacing: 8px;
-            if root.new-recovery-code == "" && !root.prompt: Text {
+            // Only when there is something to say: an empty Text still takes a line, and the
+            // panels under it opened with a blank gap at the top.
+            if root.new-recovery-code == "" && !root.prompt && root.lock-message != "": Text {
                 text: root.lock-message;
                 font-size: 12px;
                 color: #e79a9a;
@@ -262,7 +300,12 @@ export component LockWindow inherits Window {
                         color: forgot-ta.has-hover ? #f0dc80 : #d8c765;
                         forgot-ta := TouchArea {
                             mouse-cursor: pointer;
-                            clicked => { root.recovering = true; }
+                            accessible-role: button;
+                            accessible-label: Strings.ui_lock_forgot;
+                            clicked => {
+                                root.lock-message = "";
+                                root.recovering = true;
+                            }
                         }
                         Rectangle {
                             y: parent.height - 1px;
@@ -287,7 +330,11 @@ export component LockWindow inherits Window {
                         wrap: word-wrap;
                     }
                     FieldLabel { text: Strings.ui_lock_recovery_placeholder; }
-                    code := Field { }
+                    code := Field {
+                        // The first thing this panel asks for, and nothing else wants the caret.
+                        init => { self.focus(); }
+                        accepted => { newpw.focus(); }
+                    }
                     FieldLabel { text: Strings.ui_lock_recovery_new_password; }
                     newpw := Field {
                         input-type: InputType.password;
@@ -439,7 +486,10 @@ export component LockWindow inherits Window {
                     spacing: 6px;
                     Button {
                         text: Strings.ui_lock_back;
-                        clicked => { root.creating = false; }
+                        clicked => {
+                            root.creating = false;
+                            root.lock-message = "";
+                        }
                     }
                     PrimaryButton {
                         text: Strings.ui_lock_create;

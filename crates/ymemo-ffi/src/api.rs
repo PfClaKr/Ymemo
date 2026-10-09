@@ -188,7 +188,6 @@ pub struct FfiStrings {
     pub language: String,
     pub language_auto: String,
     pub lock_now: String,
-    pub advanced: String,
     pub advanced_hint: String,
     pub merge_seconds: String,
     pub merge_seconds_hint: String,
@@ -207,7 +206,6 @@ pub struct FfiStrings {
     pub biometric_unlock_hint: String,
     pub lock_on_background: String,
     pub lock_on_background_hint: String,
-    pub lock_section: String,
     pub saved: String,
     pub settings: String,
     pub unlock_days: String,
@@ -226,12 +224,13 @@ pub struct FfiStrings {
     pub update_latest: String,
     pub update_now: String,
     pub update_open: String,
-    pub update_section: String,
     pub version: String,
     pub cancel: String,
     pub delete: String,
     pub delete_group_hint: String,
     pub deleted: String,
+    /// What the undo bar says after a folder, not a memo, was deleted.
+    pub deleted_group: String,
     pub undo: String,
     pub empty_folder: String,
     pub folder_name: String,
@@ -313,6 +312,13 @@ pub struct FfiStrings {
     // Colors, and the master password / recovery code screens. The `msg.*` ones are shared
     // word for word with the desktop, which raises them from Rust.
     pub color: String,
+    /// The five palette keys by name, for screen readers: the swatches are only colour.
+    /// The desktop's own words (`ui.color_*`).
+    pub color_yellow: String,
+    pub color_pink: String,
+    pub color_green: String,
+    pub color_blue: String,
+    pub color_purple: String,
     pub change_password: String,
     pub confirm_password: String,
     pub repeat_password: String,
@@ -356,6 +362,25 @@ pub struct FfiStrings {
     pub pair_waiting: String,
     pub pair_waiting_hint: String,
     pub reject: String,
+
+    /// Settings: the section that holds export and the problem log.
+    pub data_section: String,
+    /// The settings' other sections, named as the desktop's side menu names its pages.
+    pub section_general: String,
+    pub section_notes: String,
+    pub section_lock: String,
+    pub section_sync: String,
+    pub section_about: String,
+    /// The row that opens the security screen, and the one that locks.
+    pub security_title: String,
+    pub security_hint: String,
+    pub lock_now_hint: String,
+    /// About: what Ymemo is, and where it lives.
+    pub tagline: String,
+    pub project_page: String,
+    pub open: String,
+    /// Leaving a panel of the lock screen without doing what it offers.
+    pub back: String,
 }
 
 /// Collects the mobile strings for the current language.
@@ -385,7 +410,6 @@ pub fn mobile_strings() -> FfiStrings {
         language: t!("mobile.language"),
         language_auto: t!("mobile.language_auto"),
         lock_now: t!("mobile.lock_now"),
-        advanced: t!("mobile.advanced"),
         advanced_hint: t!("mobile.advanced_hint"),
         merge_seconds: t!("mobile.merge_seconds"),
         merge_seconds_hint: t!("mobile.merge_seconds_hint"),
@@ -404,7 +428,6 @@ pub fn mobile_strings() -> FfiStrings {
         biometric_unlock_hint: t!("mobile.biometric_unlock_hint"),
         lock_on_background: t!("mobile.lock_on_background"),
         lock_on_background_hint: t!("mobile.lock_on_background_hint"),
-        lock_section: t!("mobile.lock_section"),
         saved: t!("mobile.saved"),
         settings: t!("mobile.settings"),
         unlock_days: t!("mobile.unlock_days"),
@@ -423,12 +446,12 @@ pub fn mobile_strings() -> FfiStrings {
         update_latest: t!("mobile.update_latest"),
         update_now: t!("mobile.update_now"),
         update_open: t!("mobile.update_open"),
-        update_section: t!("mobile.update_section"),
         version: t!("mobile.version"),
         cancel: t!("mobile.cancel"),
         delete: t!("mobile.delete"),
         delete_group_hint: t!("mobile.delete_group_hint"),
         deleted: t!("mobile.deleted"),
+        deleted_group: t!("mobile.deleted_group"),
         undo: t!("mobile.undo"),
         empty_folder: t!("mobile.empty_folder"),
         folder_name: t!("mobile.folder_name"),
@@ -504,6 +527,11 @@ pub fn mobile_strings() -> FfiStrings {
         unpair_warning: t!("mobile.unpair_warning"),
 
         color: t!("mobile.color"),
+        color_yellow: t!("ui.color_yellow"),
+        color_pink: t!("ui.color_pink"),
+        color_green: t!("ui.color_green"),
+        color_blue: t!("ui.color_blue"),
+        color_purple: t!("ui.color_purple"),
         change_password: t!("mobile.change_password"),
         confirm_password: t!("mobile.confirm_password"),
         repeat_password: t!("mobile.repeat_password"),
@@ -546,6 +574,20 @@ pub fn mobile_strings() -> FfiStrings {
         pair_waiting: t!("mobile.pair_waiting"),
         pair_waiting_hint: t!("mobile.pair_waiting_hint"),
         reject: t!("mobile.reject"),
+
+        data_section: t!("mobile.data_section"),
+        section_general: t!("ui.settings_nav_general"),
+        section_notes: t!("ui.settings_nav_notes"),
+        section_lock: t!("ui.settings_nav_lock"),
+        section_sync: t!("ui.settings_nav_sync"),
+        section_about: t!("ui.settings_nav_about"),
+        security_title: t!("ui.settings_security"),
+        security_hint: t!("ui.settings_security_hint"),
+        lock_now_hint: t!("ui.settings_lock_now_hint"),
+        tagline: t!("ui.settings_tagline"),
+        project_page: t!("ui.settings_project"),
+        open: t!("ui.list_menu_open"),
+        back: t!("mobile.back"),
     }
 }
 

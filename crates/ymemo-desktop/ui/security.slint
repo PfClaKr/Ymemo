@@ -89,6 +89,9 @@ export component SecurityWindow inherits Window {
     private property <bool> can-change:
         root.current-pw != "" && root.new-pw.character-count >= root.min-password
             && root.new-pw == root.confirm-pw;
+    // Whether the code on screen has been put on the clipboard; a new code is a new thing to copy.
+    private property <bool> code-copied: false;
+    changed recovery-code => { self.code-copied = false; }
     // Whether the recovery button has been pressed once over an existing code.
     in-out property <bool> confirm-reissue: false;
     // Shortest new password accepted; set from `ymemo_core::crypto::MIN_PASSWORD_CHARS`.
@@ -137,17 +140,20 @@ export component SecurityWindow inherits Window {
                         label: Strings.ui_security_change_password;
                         hint: Strings.ui_security_password_hint;
                         FieldLabel { text: Strings.ui_security_current_password; }
+                        // Return walks down the three fields, as on the lock window.
                         Field {
                             input-type: InputType.password;
                             text <=> root.current-pw;
+                            accepted => { new-field.focus(); }
                         }
                         FieldLabel { text: Strings.ui_security_new_password; }
-                        Field {
+                        new-field := Field {
                             input-type: InputType.password;
                             text <=> root.new-pw;
+                            accepted => { confirm-field.focus(); }
                         }
                         FieldLabel { text: Strings.ui_security_confirm_password; }
-                        Field {
+                        confirm-field := Field {
                             input-type: InputType.password;
                             text <=> root.confirm-pw;
                             accepted => {
@@ -164,75 +170,77 @@ export component SecurityWindow inherits Window {
                             font-size: 10px;
                             color: #e79a9a;
                         }
+                        // At the right end, as the main button is in every other window.
                         HorizontalLayout {
-                            alignment: start;
+                            alignment: end;
                             PrimaryButton {
                                 text: Strings.ui_security_change_button;
                                 enabled: root.can-change;
                                 clicked => { root.change-password(root.current-pw, root.new-pw); }
                             }
-                }
-                if root.status != "" && root.status-on-password: Text {
-                    text: root.status;
-                    font-size: 11px;
-                    color: root.status-is-error ? #e79a9a : #a8d0a8;
-                    wrap: word-wrap;
-                }
-            }
-
-            // ---- Recovery code ----
-            Section {
-                label: Strings.ui_security_recovery;
-                hint: Strings.ui_security_recovery_hint;
-                Text {
-                    text: root.has-recovery
-                        ? Strings.ui_security_recovery_present
-                        : Strings.ui_security_recovery_absent;
-                    font-size: 11px;
-                    color: root.has-recovery ? #a8d0a8 : #e8d98a;
-                    wrap: word-wrap;
-                }
-
-                // Issuing again kills the code already written down, so with one on record the
-                // first click only asks.
-                if root.confirm-reissue: Text {
-                    text: Strings.ui_security_reissue_warning;
-                    font-size: 11px;
-                    color: #e79a9a;
-                    wrap: word-wrap;
-                }
-                HorizontalLayout {
-                    alignment: start;
-                    spacing: 6px;
-                    // No code yet: issuing one is what this card is asking for, so it is the
-                    // gold button. Reissuing is a quiet button until it asks for confirmation,
-                    // and then red — the old code stops working, and that is not undone.
-                    if !root.has-recovery || root.confirm-reissue: PrimaryButton {
-                        text: root.has-recovery
-                            ? Strings.ui_security_reissue_button
-                            : Strings.ui_security_issue_button;
-                        danger: root.confirm-reissue;
-                        clicked => {
-                            root.confirm-reissue = false;
-                            root.issue-recovery();
+                        }
+                        if root.status != "" && root.status-on-password: Text {
+                            text: root.status;
+                            font-size: 11px;
+                            color: root.status-is-error ? #e79a9a : #a8d0a8;
+                            wrap: word-wrap;
                         }
                     }
-                    if root.has-recovery && !root.confirm-reissue: Button {
-                        text: Strings.ui_security_reissue_button;
-                        clicked => { root.confirm-reissue = true; }
+
+                    // ---- Recovery code ----
+                    Section {
+                        label: Strings.ui_security_recovery;
+                        hint: Strings.ui_security_recovery_hint;
+                        Text {
+                            text: root.has-recovery
+                                ? Strings.ui_security_recovery_present
+                                : Strings.ui_security_recovery_absent;
+                            font-size: 11px;
+                            color: root.has-recovery ? #a8d0a8 : #e8d98a;
+                            wrap: word-wrap;
+                        }
+
+                        // Issuing again kills the code already written down, so with one on
+                        // record the first click only asks.
+                        if root.confirm-reissue: Text {
+                            text: Strings.ui_security_reissue_warning;
+                            font-size: 11px;
+                            color: #e79a9a;
+                            wrap: word-wrap;
+                        }
+                        // The way back first and the action at the right end. No code yet:
+                        // issuing one is what this card is asking for, so it is the gold
+                        // button. Reissuing is a quiet button until it asks for confirmation,
+                        // and then red — the old code stops working, and that is not undone.
+                        HorizontalLayout {
+                            alignment: end;
+                            spacing: 6px;
+                            if root.confirm-reissue: Button {
+                                text: Strings.ui_security_reissue_cancel;
+                                clicked => { root.confirm-reissue = false; }
+                            }
+                            if root.has-recovery && !root.confirm-reissue: Button {
+                                text: Strings.ui_security_reissue_button;
+                                clicked => { root.confirm-reissue = true; }
+                            }
+                            if !root.has-recovery || root.confirm-reissue: PrimaryButton {
+                                text: root.has-recovery
+                                    ? Strings.ui_security_reissue_button
+                                    : Strings.ui_security_issue_button;
+                                danger: root.confirm-reissue;
+                                clicked => {
+                                    root.confirm-reissue = false;
+                                    root.issue-recovery();
+                                }
+                            }
+                        }
+                        if root.status != "" && !root.status-on-password: Text {
+                            text: root.status;
+                            font-size: 11px;
+                            color: root.status-is-error ? #e79a9a : #a8d0a8;
+                            wrap: word-wrap;
+                        }
                     }
-                    if root.confirm-reissue: Button {
-                        text: Strings.ui_security_reissue_cancel;
-                        clicked => { root.confirm-reissue = false; }
-                    }
-                }
-                if root.status != "" && !root.status-on-password: Text {
-                    text: root.status;
-                    font-size: 11px;
-                    color: root.status-is-error ? #e79a9a : #a8d0a8;
-                    wrap: word-wrap;
-                }
-            }
 
                     // The code itself, shown once. The window grows to make room for it —
                     // see `show` in security.rs; a window sized for the two sections alone
@@ -247,7 +255,7 @@ export component SecurityWindow inherits Window {
                             border-color: #e8d98a;
                             VerticalLayout {
                                 padding: 12px;
-                                TextInput {
+                                code-field := TextInput {
                                     text: root.recovery-code;
                                     read-only: true;
                                     font-size: 15px;
@@ -264,6 +272,21 @@ export component SecurityWindow inherits Window {
                             font-size: 10px;
                             color: #e8d98a;
                             wrap: word-wrap;
+                        }
+                        // The same button the lock window has under a new vault's code: this is
+                        // a 39-character code shown once, and transcribing it is where it goes
+                        // wrong. Copied through the field's own selection, like there.
+                        HorizontalLayout {
+                            alignment: end;
+                            Button {
+                                text: root.code-copied ? Strings.ui_lock_code_copied : Strings.ui_lock_code_copy;
+                                clicked => {
+                                    code-field.select-all();
+                                    code-field.copy();
+                                    code-field.clear-selection();
+                                    root.code-copied = true;
+                                }
+                            }
                         }
                     }
 

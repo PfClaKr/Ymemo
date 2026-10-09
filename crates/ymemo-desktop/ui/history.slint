@@ -1,6 +1,6 @@
 import { Button, ListView, ScrollView, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
-import { PrimaryButton } from "theme.slint";
+import { Palette, PrimaryButton } from "theme.slint";
 
 // ---------------------------------------------------------------------------
 // History window: every past version of one memo or folder, newest first, with the values
@@ -207,14 +207,10 @@ export component HistoryWindow inherits Window {
                             height: 12px;
                             y: 3px;
                             border-radius: 6px;
-                            background: root.current.color == "pink" ? #ff9fc0
-                                      : root.current.color == "green" ? #8fd678
-                                      : root.current.color == "blue" ? #7db8ec
-                                      : root.current.color == "purple" ? #b98fe0
-                                      : #ffe15c;
+                            background: Palette.swatch(root.current.color);
                         }
                         Text {
-                            text: root.current.heading == "" ? Strings.ui_list_memo_untitled : root.current.heading;
+                            text: root.current.heading;
                             font-size: 13px;
                             font-weight: 700;
                             color: #f0ead6;
@@ -234,15 +230,23 @@ export component HistoryWindow inherits Window {
                         vertical-stretch: 1;
                         background: #262320;
                         border-radius: 6px;
-                        ScrollView {
-                            VerticalLayout {
-                                padding: 8px;
-                                Text {
-                                    text: root.current.body;
-                                    font-size: 12px;
-                                    color: #d8d2c2;
-                                    wrap: word-wrap;
-                                }
+                        // Read-only text rather than a label, so a passage of an old version can
+                        // be selected and copied out without putting the whole version back.
+                        body-scroll := ScrollView {
+                            viewport-width: self.visible-width;
+                            viewport-height: max(self.visible-height, body-text.preferred-height + 16px);
+                            body-text := TextInput {
+                                x: 8px;
+                                y: 8px;
+                                width: body-scroll.visible-width - 16px;
+                                text: root.current.body;
+                                read-only: true;
+                                single-line: false;
+                                wrap: word-wrap;
+                                font-size: 12px;
+                                color: #d8d2c2;
+                                selection-background-color: #e2c22a66;
+                                selection-foreground-color: #ffffff;
                             }
                         }
                     }
@@ -256,17 +260,18 @@ export component HistoryWindow inherits Window {
                 wrap: word-wrap;
             }
 
+            // The way out first and the main action at the right end, as in every other window.
             HorizontalLayout {
                 spacing: 6px;
+                alignment: end;
+                Button {
+                    text: Strings.ui_history_close;
+                    clicked => { root.close-requested(); }
+                }
                 PrimaryButton {
                     text: Strings.ui_history_restore;
                     enabled: root.selected >= 0 && root.current.restorable;
                     clicked => { root.restore(root.current.index); }
-                }
-                Rectangle { horizontal-stretch: 1; }
-                Button {
-                    text: Strings.ui_history_close;
-                    clicked => { root.close-requested(); }
                 }
             }
         }

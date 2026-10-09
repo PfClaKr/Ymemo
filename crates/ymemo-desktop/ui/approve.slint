@@ -146,8 +146,10 @@ export component ApproveWindow inherits Window {
 
             Rectangle {} // pushes the buttons to the bottom
 
+            // Refusing first and allowing at the right end, the main button's place everywhere.
             HorizontalLayout {
                 spacing: 8px;
+                alignment: end;
                 Button {
                     text: Strings.ui_approve_reject;
                     clicked => { root.reject(); }

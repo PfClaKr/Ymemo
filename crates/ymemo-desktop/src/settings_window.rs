@@ -1,9 +1,10 @@
-//! The settings window: filling it from what is stored, saving it back, and the language
-//! every other window is relabelled in when that changes.
+//! The settings window: filling it from what is stored, saving it back as it is changed, and
+//! the language every other window is relabelled in when that changes.
 
-use slint::{ComponentHandle, SharedString};
+use slint::{ComponentHandle, SharedString, TimerMode};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 use ymemo_core::diag;
 use ymemo_core::sync::Syncthing;
 use ymemo_i18n::t;
@@ -70,6 +71,40 @@ pub(crate) fn apply_lang(
     }
 }
 
+/// How long after the last change a setting is stored and applied: long enough that a slider
+/// being dragged or a number being typed is one write, short enough to feel immediate.
+const APPLY_DELAY: Duration = Duration::from_millis(350);
+
+/// Where the About page's project link goes.
+const PROJECT_PAGE: &str = "https://github.com/PfClaKr/Ymemo";
+
+/// A change waiting out [`APPLY_DELAY`], and what applying it does.
+struct PendingApply {
+    timer: slint::Timer,
+    apply: Box<dyn Fn()>,
+}
+
+impl PendingApply {
+    /// (Re)starts the wait: the last of a burst of changes is the one applied.
+    fn schedule(self: &Rc<Self>) {
+        let me = Rc::downgrade(self);
+        self.timer.start(TimerMode::SingleShot, APPLY_DELAY, move || {
+            if let Some(me) = me.upgrade() {
+                (me.apply)();
+            }
+        });
+    }
+
+    /// Applies a change still waiting, at once: the window is closing, or the vault is about
+    /// to be locked under it.
+    fn flush(&self) {
+        if self.timer.running() {
+            self.timer.stop();
+            (self.apply)();
+        }
+    }
+}
+
 /// Wires the settings window.
 pub(crate) fn wire(
     ctx: &Ctx,
@@ -79,10 +114,10 @@ pub(crate) fn wire(
     merge_timer: &Rc<slint::Timer>,
     tray_handle: &Rc<RefCell<Option<tray::TrayHandle>>>,
 ) {
+    let pending = wire_apply(ctx, ui, syncthing, merge_timer, tray_handle);
     wire_open(ctx, ui, unlocked);
-    wire_close(ctx, ui);
-    wire_apply(ctx, ui, syncthing, merge_timer, tray_handle);
-    wire_lock_now(ctx, ui, unlocked);
+    wire_close(ui, &pending);
+    wire_lock_now(ctx, ui, unlocked, &pending);
     wire_updates(ctx, ui);
 }
 
@@ -100,27 +135,21 @@ fn wire_open(ctx: &Ctx, ui: &Ui, unlocked: &Rc<Cell<bool>>) {
         fill_settings_window(&ctx, &w);
         w.set_unlocked(unlocked.get());
         w.set_status(SharedString::new());
-        w.set_close_warned(false);
-        present_dialog(&w, (420.0, 600.0), list_weak.upgrade().as_ref().map(|l| l.window()));
+        // Keep in step with `preferred-*` in settings.slint.
+        present_dialog(&w, (680.0, 500.0), list_weak.upgrade().as_ref().map(|l| l.window()));
     });
 }
 
-/// Closing only hides it, so its position survives — but not over unsaved changes without a
-/// word. The dialog applies on Save, and "Close" used to throw away whatever had been changed
-/// with nothing said; now the first close says so and a second one means it. The window's own
-/// close button takes the same way out.
-fn wire_close(ctx: &Ctx, ui: &Ui) {
+/// Closing only hides it, so its position and page survive. A change still waiting out the
+/// delay is applied first — closing is not "never mind", there being nothing to confirm. The
+/// window's own close button takes the same way out.
+fn wire_close(ui: &Ui, pending: &Rc<PendingApply>) {
     let settings_win = &ui.settings;
-    let ctx = ctx.clone();
     let win = settings_win.as_weak();
+    let pending = pending.clone();
     settings_win.on_close_requested(move || {
         let Some(w) = win.upgrade() else { return };
-        if !w.get_close_warned() && has_unsaved_changes(&ctx, &w) {
-            w.set_close_warned(true);
-            w.set_status(SharedString::from(t!("msg.settings_unsaved")));
-            return;
-        }
-        w.set_close_warned(false);
+        pending.flush();
         let _ = w.hide();
     });
     let win = settings_win.as_weak();
@@ -132,14 +161,16 @@ fn wire_close(ctx: &Ctx, ui: &Ui) {
     });
 }
 
-/// Save: store the dialog's fields and apply whatever of them takes effect straight away.
+/// Every change in the window is stored and applied a moment after it is made, as on the
+/// phone: what the window shows *is* the settings, with no Save to forget. Returns the waiting
+/// change, which closing and locking apply at once.
 fn wire_apply(
     ctx: &Ctx,
     ui: &Ui,
     syncthing: &Rc<RefCell<Option<Syncthing>>>,
     merge_timer: &Rc<slint::Timer>,
     tray_handle: &Rc<RefCell<Option<tray::TrayHandle>>>,
-) {
+) -> Rc<PendingApply> {
     let lock = &ui.lock;
     let list = &ui.list;
     let settings_win = &ui.settings;
@@ -156,50 +187,82 @@ fn wire_apply(
     let history_weak = history_win.as_weak();
     let approve_weak = approve_win.as_weak();
     let syncthing_for_settings = syncthing.clone();
-    settings_win.on_apply(move || {
+    let apply = move || {
         let Some(w) = win.upgrade() else { return };
         let (Some(lock), Some(list)) = (lock_weak.upgrade(), list_weak.upgrade()) else {
             return;
         };
+        let prev = ctx.settings.borrow().clone();
+        let next = read_dialog(&ctx, &w);
+        // Starting with the session is written to the desktop, not to `settings.json`, so it
+        // is compared and applied on its own.
+        let login = w.get_start_at_login();
+        let autostart_moved = crate::autostart::supported() && login != crate::autostart::enabled();
+        if next == prev && !autostart_moved {
+            return; // the window was only being filled in
+        }
         touch(&ctx);
-        let prev_unlock_days = ctx.settings.borrow().unlock_days;
-        let next = store_dialog(&ctx, &w);
-        w.set_close_warned(false);
-
+        if autostart_moved {
+            // A failure is reported and then read back when the window is refilled below,
+            // which leaves the switch showing what is actually true rather than what was asked.
+            if let Err(e) = autostart::set(login) {
+                diag!("could not change the start-at-login setting: {e}");
+            }
+        }
+        if next != prev {
+            next.save(&ctx.dir);
+            *ctx.settings.borrow_mut() = next.clone();
+        }
         // Write the sanitized values back, so out-of-range input never changes silently.
         fill_settings_window(&ctx, &w);
-        apply_lang(
-            &ctx,
-            &lock,
-            &list,
-            &w,
-            &security_weak.unwrap(),
-            &history_weak.unwrap(),
-            &approve_weak.unwrap(),
-        );
-        if let Some(t) = tray_handle.borrow().as_ref() {
-            t.refresh();
-        }
-        start_merge_timer(&merge_timer, &ctx, list.as_weak());
-        crate::sticky::apply_text_size(&ctx);
-        // The watch delay lives in Syncthing's folder config, not ours, so saving has to
-        // push it across; `set_folder_timing` does nothing when the daemon already agrees.
-        apply_folder_settings(&syncthing_for_settings, &next);
 
+        // Only what moved is applied: this runs for every nudge of a slider.
+        if next.lang != prev.lang {
+            apply_lang(
+                &ctx,
+                &lock,
+                &list,
+                &w,
+                &security_weak.unwrap(),
+                &history_weak.unwrap(),
+                &approve_weak.unwrap(),
+            );
+            if let Some(t) = tray_handle.borrow().as_ref() {
+                t.refresh();
+            }
+        }
+        if next.merge_seconds != prev.merge_seconds {
+            start_merge_timer(&merge_timer, &ctx, list.as_weak());
+        }
+        if next.note_text_percent != prev.note_text_percent {
+            crate::sticky::apply_text_size(&ctx);
+        }
+        // The watch delay lives in Syncthing's folder config, not ours, so a change has to be
+        // pushed across; `set_folder_timing` does nothing when the daemon already agrees.
+        if (next.watch_delay_seconds, next.rescan_seconds, next.keep_versions_days)
+            != (prev.watch_delay_seconds, prev.rescan_seconds, prev.keep_versions_days)
+        {
+            apply_folder_settings(&syncthing_for_settings, &next);
+        }
         // Shortening or disabling the stay-unlocked window leaves an existing session in
         // violation of it, so drop the session and ask for the password next time.
-        let status = if next.unlock_days != prev_unlock_days {
+        if next.unlock_days != prev.unlock_days {
             session::clear_session(&ctx.dir);
-            t!("msg.settings_saved_relock")
-        } else {
-            t!("msg.settings_saved")
-        };
-        w.set_status(SharedString::from(status));
+            w.set_status(SharedString::from(t!("msg.settings_relock")));
+        }
+    };
+    let pending = Rc::new(PendingApply { timer: slint::Timer::default(), apply: Box::new(apply) });
+    let scheduled = Rc::downgrade(&pending);
+    settings_win.on_edited(move || {
+        if let Some(p) = scheduled.upgrade() {
+            p.schedule();
+        }
     });
+    pending
 }
 
-/// Lock now, from the settings window.
-fn wire_lock_now(ctx: &Ctx, ui: &Ui, unlocked: &Rc<Cell<bool>>) {
+/// Lock now, from the settings window. A change still waiting is stored first.
+fn wire_lock_now(ctx: &Ctx, ui: &Ui, unlocked: &Rc<Cell<bool>>, pending: &Rc<PendingApply>) {
     let lock = &ui.lock;
     let list = &ui.list;
     let settings_win = &ui.settings;
@@ -208,10 +271,12 @@ fn wire_lock_now(ctx: &Ctx, ui: &Ui, unlocked: &Rc<Cell<bool>>) {
     let lock_weak = lock.as_weak();
     let list_weak = list.as_weak();
     let unlocked = unlocked.clone();
+    let pending = pending.clone();
     settings_win.on_lock_now(move || {
         let (Some(lock), Some(list)) = (lock_weak.upgrade(), list_weak.upgrade()) else {
             return;
         };
+        pending.flush();
         lock_now(&ctx, &lock, &list, &unlocked);
         if let Some(w) = win.upgrade() {
             w.set_unlocked(false);
@@ -241,6 +306,11 @@ fn wire_updates(ctx: &Ctx, ui: &Ui) {
     settings_win.on_open_log(move || {
         if let Err(e) = update::open_url(&dir.to_string_lossy()) {
             diag!("could not open the log folder: {e}");
+        }
+    });
+    settings_win.on_open_project(|| {
+        if let Err(e) = update::open_url(PROJECT_PAGE) {
+            diag!("could not open the project page: {e}");
         }
     });
 }
@@ -291,12 +361,12 @@ fn export_memos(ctx: &Ctx, weak: slint::Weak<SettingsWindow>) {
     });
 }
 
-/// The dialog's fields laid over what is stored, sanitized — what Save would store.
+/// The window's fields laid over what is stored, sanitized — what applying them stores.
 ///
-/// Starts from what is stored and overwrites only the fields this dialog owns. Building the
+/// Starts from what is stored and overwrites only the fields this window owns. Building the
 /// struct from scratch here meant every other field — the pins, where the windows are, which
 /// notes are folded, which are on the desk — had to be copied back across by hand, and one
-/// forgotten line would have quietly reset it the next time anybody pressed Save.
+/// forgotten line would have quietly reset it the next time anything was changed.
 fn read_dialog(ctx: &Ctx, w: &SettingsWindow) -> Settings {
     let mut next = ctx.settings.borrow().clone();
     next.lang = w.get_lang_sel().to_string();
@@ -311,26 +381,5 @@ fn read_dialog(ctx: &Ctx, w: &SettingsWindow) -> Settings {
     next.keep_versions_days = w.get_keep_versions_days();
     next.update_check = w.get_update_check();
     next.sanitize();
-    next
-}
-
-/// Whether closing now would throw away something the user changed in the dialog.
-fn has_unsaved_changes(ctx: &Ctx, w: &SettingsWindow) -> bool {
-    read_dialog(ctx, w) != *ctx.settings.borrow()
-        || (crate::autostart::supported() && w.get_start_at_login() != crate::autostart::enabled())
-}
-
-/// Stores the dialog (see [`read_dialog`]) and makes it current.
-fn store_dialog(ctx: &Ctx, w: &SettingsWindow) -> Settings {
-    let next = read_dialog(ctx, w);
-    // Starting with the session is written to the desktop, not to `settings.json`, so it is
-    // applied here on its own. A failure is reported and then read back when the window is
-    // refilled, which leaves the toggle showing what is actually true rather than what was
-    // asked for.
-    if let Err(e) = autostart::set(w.get_start_at_login()) {
-        diag!("could not change the start-at-login setting: {e}");
-    }
-    next.save(&ctx.dir);
-    *ctx.settings.borrow_mut() = next.clone();
     next
 }

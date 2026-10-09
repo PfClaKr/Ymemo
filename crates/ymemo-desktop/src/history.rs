@@ -110,14 +110,16 @@ fn refresh(ctx: &Ctx, win: &HistoryWindow, entity: Entity, id: &str) {
     let Some(mut guard) = ctx.vault_mut() else { return };
     let v = &mut *guard;
 
+    // Named the way the list names the row, first line and all: a memo with no title of its
+    // own was headed "(untitled)" over a page of its own writing.
     let name = match entity {
-        Entity::Memo => v.store().get(id).ok().flatten().map(|m| m.title),
+        Entity::Memo => v.store().get(id).ok().flatten().map(|m| crate::sticky::display_title(&m)),
         Entity::Group => v.store().get_group(id).ok().flatten().map(|g| g.name),
     };
     win.set_subject(SharedString::from(crate::hangul::for_slint(&match name {
         Some(n) if !n.trim().is_empty() => n,
         // Deleted, or never named: say so rather than showing an empty heading.
-        _ => t!("ui.list_memo_untitled"),
+        _ => untitled(entity),
     })));
 
     let revisions = match v.history(entity, id) {
@@ -161,9 +163,14 @@ fn row(index: usize, rev: &Revision, entity: Entity, this_device: &str, current:
         .map(|f| field_label(f))
         .collect();
     let (heading, body) = match entity {
-        Entity::Memo => (rev.field("title").to_string(), rev.field("body").to_string()),
+        Entity::Memo => {
+            let (title, body) = (rev.field("title"), rev.field("body"));
+            let title = if title.is_empty() { crate::sticky::derive_title(body) } else { title.to_string() };
+            (title, body.to_string())
+        }
         Entity::Group => (rev.field("name").to_string(), String::new()),
     };
+    let heading = if heading.trim().is_empty() { untitled(entity) } else { heading };
     RevisionRow {
         index: index as i32,
         when: SharedString::from(crate::hangul::for_slint(&revision_time(rev.at, chrono::Local::now()))),
@@ -195,6 +202,14 @@ pub(crate) fn revision_time<Tz: chrono::TimeZone>(millis: i64, now: chrono::Date
         1 => t!("msg.when_yesterday", time = time),
         _ if t.year() == now.year() => t!("msg.when_date", month = t.month(), day = t.day(), time = time),
         _ => t!("msg.when_date_year", year = t.year(), month = t.month(), day = t.day(), time = time),
+    }
+}
+
+/// What a memo or folder with no name at all is called, as the list calls it.
+fn untitled(entity: Entity) -> String {
+    match entity {
+        Entity::Memo => t!("ui.list_memo_untitled"),
+        Entity::Group => t!("ui.list_group_untitled"),
     }
 }
 

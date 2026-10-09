@@ -966,7 +966,6 @@ class FfiStrings {
   final String language;
   final String languageAuto;
   final String lockNow;
-  final String advanced;
   final String advancedHint;
   final String mergeSeconds;
   final String mergeSecondsHint;
@@ -985,7 +984,6 @@ class FfiStrings {
   final String biometricUnlockHint;
   final String lockOnBackground;
   final String lockOnBackgroundHint;
-  final String lockSection;
   final String saved;
   final String settings;
   final String unlockDays;
@@ -1004,12 +1002,14 @@ class FfiStrings {
   final String updateLatest;
   final String updateNow;
   final String updateOpen;
-  final String updateSection;
   final String version;
   final String cancel;
   final String delete;
   final String deleteGroupHint;
   final String deleted;
+
+  /// What the undo bar says after a folder, not a memo, was deleted.
+  final String deletedGroup;
   final String undo;
   final String emptyFolder;
   final String folderName;
@@ -1091,6 +1091,14 @@ class FfiStrings {
   final String unpair;
   final String unpairWarning;
   final String color;
+
+  /// The five palette keys by name, for screen readers: the swatches are only colour.
+  /// The desktop's own words (`ui.color_*`).
+  final String colorYellow;
+  final String colorPink;
+  final String colorGreen;
+  final String colorBlue;
+  final String colorPurple;
   final String changePassword;
   final String confirmPassword;
   final String repeatPassword;
@@ -1133,6 +1141,29 @@ class FfiStrings {
   final String pairWaitingHint;
   final String reject;
 
+  /// Settings: the section that holds export and the problem log.
+  final String dataSection;
+
+  /// The settings' other sections, named as the desktop's side menu names its pages.
+  final String sectionGeneral;
+  final String sectionNotes;
+  final String sectionLock;
+  final String sectionSync;
+  final String sectionAbout;
+
+  /// The row that opens the security screen, and the one that locks.
+  final String securityTitle;
+  final String securityHint;
+  final String lockNowHint;
+
+  /// About: what Ymemo is, and where it lives.
+  final String tagline;
+  final String projectPage;
+  final String open;
+
+  /// Leaving a panel of the lock screen without doing what it offers.
+  final String back;
+
   const FfiStrings({
     required this.addPhoto,
     required this.bodyHint,
@@ -1158,7 +1189,6 @@ class FfiStrings {
     required this.language,
     required this.languageAuto,
     required this.lockNow,
-    required this.advanced,
     required this.advancedHint,
     required this.mergeSeconds,
     required this.mergeSecondsHint,
@@ -1177,7 +1207,6 @@ class FfiStrings {
     required this.biometricUnlockHint,
     required this.lockOnBackground,
     required this.lockOnBackgroundHint,
-    required this.lockSection,
     required this.saved,
     required this.settings,
     required this.unlockDays,
@@ -1196,12 +1225,12 @@ class FfiStrings {
     required this.updateLatest,
     required this.updateNow,
     required this.updateOpen,
-    required this.updateSection,
     required this.version,
     required this.cancel,
     required this.delete,
     required this.deleteGroupHint,
     required this.deleted,
+    required this.deletedGroup,
     required this.undo,
     required this.emptyFolder,
     required this.folderName,
@@ -1276,6 +1305,11 @@ class FfiStrings {
     required this.unpair,
     required this.unpairWarning,
     required this.color,
+    required this.colorYellow,
+    required this.colorPink,
+    required this.colorGreen,
+    required this.colorBlue,
+    required this.colorPurple,
     required this.changePassword,
     required this.confirmPassword,
     required this.repeatPassword,
@@ -1317,6 +1351,19 @@ class FfiStrings {
     required this.pairWaiting,
     required this.pairWaitingHint,
     required this.reject,
+    required this.dataSection,
+    required this.sectionGeneral,
+    required this.sectionNotes,
+    required this.sectionLock,
+    required this.sectionSync,
+    required this.sectionAbout,
+    required this.securityTitle,
+    required this.securityHint,
+    required this.lockNowHint,
+    required this.tagline,
+    required this.projectPage,
+    required this.open,
+    required this.back,
   });
 
   @override
@@ -1345,7 +1392,6 @@ class FfiStrings {
       language.hashCode ^
       languageAuto.hashCode ^
       lockNow.hashCode ^
-      advanced.hashCode ^
       advancedHint.hashCode ^
       mergeSeconds.hashCode ^
       mergeSecondsHint.hashCode ^
@@ -1364,7 +1410,6 @@ class FfiStrings {
       biometricUnlockHint.hashCode ^
       lockOnBackground.hashCode ^
       lockOnBackgroundHint.hashCode ^
-      lockSection.hashCode ^
       saved.hashCode ^
       settings.hashCode ^
       unlockDays.hashCode ^
@@ -1383,12 +1428,12 @@ class FfiStrings {
       updateLatest.hashCode ^
       updateNow.hashCode ^
       updateOpen.hashCode ^
-      updateSection.hashCode ^
       version.hashCode ^
       cancel.hashCode ^
       delete.hashCode ^
       deleteGroupHint.hashCode ^
       deleted.hashCode ^
+      deletedGroup.hashCode ^
       undo.hashCode ^
       emptyFolder.hashCode ^
       folderName.hashCode ^
@@ -1463,6 +1508,11 @@ class FfiStrings {
       unpair.hashCode ^
       unpairWarning.hashCode ^
       color.hashCode ^
+      colorYellow.hashCode ^
+      colorPink.hashCode ^
+      colorGreen.hashCode ^
+      colorBlue.hashCode ^
+      colorPurple.hashCode ^
       changePassword.hashCode ^
       confirmPassword.hashCode ^
       repeatPassword.hashCode ^
@@ -1503,7 +1553,20 @@ class FfiStrings {
       pairVerify.hashCode ^
       pairWaiting.hashCode ^
       pairWaitingHint.hashCode ^
-      reject.hashCode;
+      reject.hashCode ^
+      dataSection.hashCode ^
+      sectionGeneral.hashCode ^
+      sectionNotes.hashCode ^
+      sectionLock.hashCode ^
+      sectionSync.hashCode ^
+      sectionAbout.hashCode ^
+      securityTitle.hashCode ^
+      securityHint.hashCode ^
+      lockNowHint.hashCode ^
+      tagline.hashCode ^
+      projectPage.hashCode ^
+      open.hashCode ^
+      back.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1534,7 +1597,6 @@ class FfiStrings {
           language == other.language &&
           languageAuto == other.languageAuto &&
           lockNow == other.lockNow &&
-          advanced == other.advanced &&
           advancedHint == other.advancedHint &&
           mergeSeconds == other.mergeSeconds &&
           mergeSecondsHint == other.mergeSecondsHint &&
@@ -1553,7 +1615,6 @@ class FfiStrings {
           biometricUnlockHint == other.biometricUnlockHint &&
           lockOnBackground == other.lockOnBackground &&
           lockOnBackgroundHint == other.lockOnBackgroundHint &&
-          lockSection == other.lockSection &&
           saved == other.saved &&
           settings == other.settings &&
           unlockDays == other.unlockDays &&
@@ -1572,12 +1633,12 @@ class FfiStrings {
           updateLatest == other.updateLatest &&
           updateNow == other.updateNow &&
           updateOpen == other.updateOpen &&
-          updateSection == other.updateSection &&
           version == other.version &&
           cancel == other.cancel &&
           delete == other.delete &&
           deleteGroupHint == other.deleteGroupHint &&
           deleted == other.deleted &&
+          deletedGroup == other.deletedGroup &&
           undo == other.undo &&
           emptyFolder == other.emptyFolder &&
           folderName == other.folderName &&
@@ -1652,6 +1713,11 @@ class FfiStrings {
           unpair == other.unpair &&
           unpairWarning == other.unpairWarning &&
           color == other.color &&
+          colorYellow == other.colorYellow &&
+          colorPink == other.colorPink &&
+          colorGreen == other.colorGreen &&
+          colorBlue == other.colorBlue &&
+          colorPurple == other.colorPurple &&
           changePassword == other.changePassword &&
           confirmPassword == other.confirmPassword &&
           repeatPassword == other.repeatPassword &&
@@ -1692,5 +1758,18 @@ class FfiStrings {
           pairVerify == other.pairVerify &&
           pairWaiting == other.pairWaiting &&
           pairWaitingHint == other.pairWaitingHint &&
-          reject == other.reject;
+          reject == other.reject &&
+          dataSection == other.dataSection &&
+          sectionGeneral == other.sectionGeneral &&
+          sectionNotes == other.sectionNotes &&
+          sectionLock == other.sectionLock &&
+          sectionSync == other.sectionSync &&
+          sectionAbout == other.sectionAbout &&
+          securityTitle == other.securityTitle &&
+          securityHint == other.securityHint &&
+          lockNowHint == other.lockNowHint &&
+          tagline == other.tagline &&
+          projectPage == other.projectPage &&
+          open == other.open &&
+          back == other.back;
 }

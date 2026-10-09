@@ -81,7 +81,7 @@ pub(crate) fn start_merge_timer(timer: &slint::Timer, ctx: &Ctx, list_weak: slin
                             if entry.window.get_memo_text() != text.as_str() {
                                 crate::sticky::set_body_text(&entry.window, &text);
                             }
-                            crate::sticky::set_title(&entry.window, &m.title);
+                            crate::sticky::set_title(&entry.window, &crate::sticky::display_title(&m));
                             entry.window.set_sticky_color(m.color.into());
                             entry.window.set_sticky_opacity(m.opacity as f32);
                             entry.window.set_created_at(

@@ -52,8 +52,26 @@ void main() {
   });
 
   test('the preview drops the whole line the name came from', () {
-    // Including the hashes, which the name itself does not carry.
-    expect(rowPreview(_memo('```\n# 회의록\n본문\n```')), '```\n\n본문\n```');
+    // Including the hashes, which the name itself does not carry — and the fences, which
+    // are markup: the row draws one line, and it used to be a lone ```.
+    expect(rowPreview(_memo('```\n# 회의록\n본문\n```')), '본문');
+  });
+
+  test('the preview is what follows the title, on one line, as the desktop has it', () {
+    expect(rowPreview(_memo('장보기\n- 우유\n\n```\n- 계란\n```')), '우유 계란');
+    const titled = FfiMemo(
+      id: 'id',
+      title: '회의',
+      body: '결정 사항\n배포는 금요일',
+      color: 'yellow',
+      opacity: 100,
+      groupId: '',
+      createdAt: 0,
+      updatedAt: 0,
+      hasPhoto: false,
+    );
+    expect(rowPreview(titled), '결정 사항 배포는 금요일');
+    expect(rowPreview(_memo('코드\n```rust\nfn main() {}\n```')), 'fn main() {}');
   });
 
   test('a long line is capped where the desktop caps it', () {
