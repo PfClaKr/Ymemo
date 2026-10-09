@@ -146,7 +146,11 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
             children: [
               Text(widget.strings.color, style: Theme.of(context).textTheme.labelLarge),
               const SizedBox(height: 4),
-              ColorSwatches(selected: _color, onPick: (key) => Navigator.of(context).pop(key)),
+              ColorSwatches(
+                strings: widget.strings,
+                selected: _color,
+                onPick: (key) => Navigator.of(context).pop(key),
+              ),
             ],
           ),
         ),
@@ -346,18 +350,35 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   /// the **original pixel size is measured here**, because the core has no image decoder and
   /// that size sets the display aspect ratio.
   Future<void> _addPhoto(ImageSource source) async {
-    final picked = await ImagePicker().pickImage(source: source);
+    final messenger = ScaffoldMessenger.of(context);
+    final XFile? picked;
+    try {
+      picked = await ImagePicker().pickImage(source: source);
+    } catch (e) {
+      // A camera the app may not use, or none at all. Without this the button did nothing
+      // and said nothing; the scanner says the same in the same words.
+      debugPrint('could not pick a photo: $e');
+      messenger.showSnackBar(SnackBar(
+          content: Text(source == ImageSource.camera ? widget.strings.cameraError : '$e')));
+      return;
+    }
     if (picked == null) return;
-    final bytes = await picked.readAsBytes();
-    final size = await decodeImageSize(bytes);
-    await attachmentAdd(
-      memoId: widget.id,
-      data: bytes,
-      name: picked.name,
-      mime: picked.mimeType ?? '',
-      widthPx: size?.width.toInt() ?? 0,
-      heightPx: size?.height.toInt() ?? 0,
-    );
+    try {
+      final bytes = await picked.readAsBytes();
+      final size = await decodeImageSize(bytes);
+      await attachmentAdd(
+        memoId: widget.id,
+        data: bytes,
+        name: picked.name,
+        mime: picked.mimeType ?? '',
+        widthPx: size?.width.toInt() ?? 0,
+        heightPx: size?.height.toInt() ?? 0,
+      );
+    } catch (e) {
+      // Storage the vault cannot be written to: the core's message says which.
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
     final added = await attachmentList(memoId: widget.id);
     if (!mounted) return;
     // Select the new one: it has just landed somewhere on the note and moving it is the

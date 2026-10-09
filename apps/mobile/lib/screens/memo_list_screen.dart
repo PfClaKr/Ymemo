@@ -468,7 +468,9 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
       // except anything moved elsewhere in the meantime, which stays where it was put.
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(SnackBar(
-        content: Text(widget.strings.deleted),
+        // A folder's own words: "memo deleted" after deleting a folder read as if the memos
+        // inside had gone with it.
+        content: Text(widget.strings.deletedGroup),
         duration: const Duration(seconds: 6),
         action: SnackBarAction(
           label: widget.strings.undo,
@@ -558,11 +560,24 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
             key: ValueKey('dismiss:${memo.id}'),
             direction: DismissDirection.endToStart,
             onDismissed: (_) => _deleteWithUndo(memo),
-            background: Container(
-              color: Colors.red,
-              alignment: Alignment.centerRight,
-              padding: const EdgeInsets.only(right: 16),
-              child: const Icon(Icons.delete, color: Colors.white),
+            // The card's own shape and margins, in the theme's red: a square full-width band
+            // showed behind a rounded card with gaps either side of it.
+            background: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.error,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 20),
+                    child: Icon(Icons.delete_outline,
+                        color: Theme.of(context).colorScheme.onError),
+                  ),
+                ),
+              ),
             ),
             child: _tinted(
               context,
@@ -755,6 +770,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
             Text(s.color, style: Theme.of(sheetContext).textTheme.labelLarge),
             const SizedBox(height: 4),
             ColorSwatches(
+              strings: s,
               selected: selected,
               onPick: (key) => Navigator.of(sheetContext).pop('$_colorAction$key'),
             ),
@@ -762,36 +778,88 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
         ),
       );
 
-  /// Moves a memo into another folder, chosen from a flat list of every folder there is.
+  /// Moves a memo into another folder, chosen from every folder there is — in tree order and
+  /// indented, as the desktop's menu offers them, with the one it is already in ticked.
+  ///
+  /// It was a flat list of names under a greyed-out heading: two "회의록" in two folders could
+  /// not be told apart, and nothing said where the memo was now.
   Future<void> _moveMemo(FfiMemo memo) async {
     final s = widget.strings;
-    final folders = await groupList();
+    final folders = _inTreeOrder(await groupList());
     if (!mounted) return;
     final target = await showModalBottomSheet<String>(
       context: context,
+      isScrollControlled: true,
       builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            ListTile(title: Text(s.moveTo), enabled: false),
-            ListTile(
-              leading: const Icon(Icons.home_outlined),
-              title: Text(s.rootFolder),
-              onTap: () => Navigator.of(context).pop(''),
-            ),
-            for (final folder in folders)
-              ListTile(
-                leading: const Icon(Icons.folder_outlined),
-                title: Text(folder.name),
-                onTap: () => Navigator.of(context).pop(folder.id),
-              ),
-          ],
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.7),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              _sheetTitle(context, s.moveTo),
+              const SizedBox(height: 4),
+              _folderChoice(context, Icons.home_outlined, s.rootFolder, 0, memo.groupId.isEmpty,
+                  () => Navigator.of(context).pop('')),
+              for (final (folder, depth) in folders)
+                _folderChoice(
+                  context,
+                  Icons.folder_outlined,
+                  folder.name,
+                  depth,
+                  folder.id == memo.groupId,
+                  () => Navigator.of(context).pop(folder.id),
+                ),
+            ],
+          ),
         ),
       ),
     );
-    if (!mounted || target == null) return;
+    if (!mounted || target == null || target == memo.groupId) return;
     await memoSetGroup(id: memo.id, groupId: target);
     await _reload();
+  }
+
+  /// One destination in the move sheet, indented by how deep it is and ticked when it is
+  /// where the memo already lives.
+  Widget _folderChoice(BuildContext sheetContext, IconData icon, String name, int depth,
+          bool current, VoidCallback onTap) =>
+      ListTile(
+        contentPadding: EdgeInsetsDirectional.only(start: 16.0 + 20.0 * depth, end: 16),
+        leading: Icon(icon),
+        title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+        trailing: current
+            ? Icon(Icons.check, color: Theme.of(sheetContext).colorScheme.primary)
+            : null,
+        selected: current,
+        onTap: onTap,
+      );
+
+  /// Every folder with its depth, parents before their children — the order the desktop's
+  /// tree draws them in. A folder whose parent is gone counts as top level; a cycle, which
+  /// the core breaks anyway, is not followed twice.
+  static List<(FfiGroup, int)> _inTreeOrder(List<FfiGroup> all) {
+    final ids = {for (final g in all) g.id};
+    final children = <String, List<FfiGroup>>{};
+    for (final g in all) {
+      final parent = ids.contains(g.parentId) ? g.parentId : '';
+      children.putIfAbsent(parent, () => []).add(g);
+    }
+    final out = <(FfiGroup, int)>[];
+    final seen = <String>{};
+    void walk(String parent, int depth) {
+      for (final g in children[parent] ?? const <FfiGroup>[]) {
+        if (!seen.add(g.id)) continue;
+        out.add((g, depth));
+        walk(g.id, depth + 1);
+      }
+    }
+
+    walk('', 0);
+    // Anything only reachable through a cycle still gets a row.
+    for (final g in all) {
+      if (seen.add(g.id)) out.add((g, 0));
+    }
+    return out;
   }
 
   /// Folds in whatever the other devices have delivered, then redraws.
@@ -949,6 +1017,14 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
             .headlineSmall
             ?.copyWith(fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface),
         actions: [
+          // While the list is being rearranged, the way out of it is on the bar rather than
+          // back inside the menu that started it, where nothing on screen pointed.
+          if (_reordering)
+            IconButton(
+              icon: const Icon(Icons.check),
+              tooltip: widget.strings.reorderDone,
+              onPressed: () => setState(() => _reordering = false),
+            ),
           // Pairing, settings and the update banner belong to the screen you always start
           // from. The pairing button stays out here because it carries the sync state;
           // everything else is in the menu, so the bar is two things rather than four.
@@ -1125,6 +1201,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
         padding: EdgeInsets.only(bottom: bottomInset(context)),
         child: FloatingActionButton(
           onPressed: _add,
+          tooltip: widget.strings.newMemo,
           child: const Icon(Icons.add),
         ),
       ),

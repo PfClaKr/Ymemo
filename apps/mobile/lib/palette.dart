@@ -10,6 +10,8 @@
 
 import 'package:flutter/material.dart';
 
+import 'src/rust/api.dart';
+
 /// Palette keys in the order both UIs offer them; the first is the default.
 const stickyColors = ['yellow', 'pink', 'green', 'blue', 'purple'];
 
@@ -79,10 +81,26 @@ Color paletteRow(String key, Color surface) =>
 /// Both places that change a color use this, so the folder sheet and the editor cannot drift
 /// apart in which colors they offer or how a choice looks.
 class ColorSwatches extends StatelessWidget {
-  const ColorSwatches({super.key, required this.selected, required this.onPick});
+  const ColorSwatches({
+    super.key,
+    required this.strings,
+    required this.selected,
+    required this.onPick,
+  });
 
+  /// For the colours' names: a swatch is only a colour, and a screen reader had nothing to
+  /// say about five identical buttons.
+  final FfiStrings strings;
   final String selected;
   final void Function(String) onPick;
+
+  String _name(String key) => switch (key) {
+        'pink' => strings.colorPink,
+        'green' => strings.colorGreen,
+        'blue' => strings.colorBlue,
+        'purple' => strings.colorPurple,
+        _ => strings.colorYellow,
+      };
 
   @override
   Widget build(BuildContext context) {
@@ -91,24 +109,30 @@ class ColorSwatches extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
         for (final key in stickyColors)
-          InkWell(
-            onTap: () => onPick(key),
-            customBorder: const CircleBorder(),
-            child: Padding(
-              padding: const EdgeInsets.all(6),
-              child: Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: paletteSwatch(key),
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    // The ink ring vanishes on a dark sheet; white is what "chosen" looks like
-                    // there. The light theme keeps the colour's own ink.
-                    color: key == selected
-                        ? (dark ? Colors.white : paletteInk(key))
-                        : (dark ? Colors.white24 : Colors.black26),
-                    width: key == selected ? 3 : 1,
+          Semantics(
+            label: _name(key),
+            button: true,
+            selected: key == selected,
+            excludeSemantics: true,
+            child: InkWell(
+              onTap: () => onPick(key),
+              customBorder: const CircleBorder(),
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: paletteSwatch(key),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      // The ink ring vanishes on a dark sheet; white is what "chosen" looks
+                      // like there. The light theme keeps the colour's own ink.
+                      color: key == selected
+                          ? (dark ? Colors.white : paletteInk(key))
+                          : (dark ? Colors.white24 : Colors.black26),
+                      width: key == selected ? 3 : 1,
+                    ),
                   ),
                 ),
               ),

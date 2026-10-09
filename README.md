@@ -74,7 +74,7 @@ connect shows the same one.
 - **Your phone too.** The same memos, folders, photos and history, plus three home-screen
   widgets and two shortcuts. They go blank the moment the app locks. Share text or a picture
   from any app to make a memo of it, and share a memo out the same way.
-- **Taking it with you.** Settings > Export writes every memo as a Markdown file, in its
+- **Taking it with you.** Settings > Data > Export writes every memo as a Markdown file, in its
   folders, with its photos, all in one zip — readable without this app.
 - **Locking.** A master password, an instant lock, an idle auto-lock, and optionally staying
   unlocked for a set number of days. Android can also reopen with your fingerprint.
@@ -82,7 +82,7 @@ connect shows the same one.
   same eight characters to compare. From the third device on, each one introduces the others,
   so they all reach each other directly. Removing a device is recorded in the vault, so every
   device drops it — and it stays removed until you connect it again. A change reaches the
-  other device in about twenty seconds; Settings > Advanced trades battery for speed.
+  other device in about twenty seconds; Settings > Sync trades battery for speed.
 - **Korean and English.** Follows the system language, and can be changed in settings.
 
 <img src="docs/screenshots/mobile.png" alt="Ymemo on Android" width="620">

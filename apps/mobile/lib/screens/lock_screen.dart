@@ -79,6 +79,11 @@ class _LockScreenState extends State<LockScreen> {
   bool _vaultExists = false;
   bool _hasRecovery = false;
 
+  /// Whether `vault.json` has been asked about at all. Until it has, [_vaultExists] is only
+  /// a default, and drawing from it put the first-run choice up for a moment on every start —
+  /// "how do you want to start?" flashing past on the way to a password prompt.
+  bool _probed = false;
+
   /// Whether the forgotten-password panel is open, and whether the wipe inside it has been
   /// confirmed once — deleting every memo on the device is not a single tap.
   bool _recovering = false;
@@ -187,8 +192,9 @@ class _LockScreenState extends State<LockScreen> {
     final hasRecovery = await vaultHasRecoveryCode(vaultDir: dir);
     // Only on a real change: a rebuild every three seconds would be pure waste, and it would
     // land in the middle of typing.
-    if (!mounted || (exists == _vaultExists && hasRecovery == _hasRecovery)) return;
+    if (!mounted || (_probed && exists == _vaultExists && hasRecovery == _hasRecovery)) return;
     setState(() {
+      _probed = true;
       _vaultExists = exists;
       _hasRecovery = hasRecovery;
     });
@@ -338,32 +344,67 @@ class _LockScreenState extends State<LockScreen> {
     }
   }
 
+  /// Whether the screen is on a panel that has somewhere to go back to: the recovery form,
+  /// or setting a password after choosing to start fresh.
+  bool get _inSubPanel => _recovering || (!_vaultExists && !_choosing);
+
+  /// Back to the screen this panel was opened from, by the button or the system's back.
+  void _backOut() {
+    if (_recovering) {
+      _leaveRecovery();
+    } else if (!_vaultExists && !_choosing) {
+      _password.clear();
+      _confirm.clear();
+      setState(() {
+        _choosing = true;
+        _error = null;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = widget.strings;
-    return Scaffold(
-      appBar: AppBar(
-        // No title: the lock screen says what it is. The action is here so a fresh install
-        // can pair before it has a vault to unlock.
-        backgroundColor: Colors.transparent,
-        actions: [SyncButton(strings: s, sync: widget.sync)],
-      ),
-      body: Center(
-        // Scrollable, because the recovery panel plus a keyboard is taller than a phone.
-        child: SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + bottomInset(context)),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: _recovering
-                ? _recoveryPanel(s)
-                : (!_vaultExists && _choosing)
-                    ? _setupPanel(s)
-                    : _passwordPanel(s),
+    // The system's back steps out of a panel rather than out of the app: this is the root
+    // route, and back on it closed Ymemo from the middle of setting a password.
+    return PopScope(
+      canPop: !_inSubPanel,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && !_busy) _backOut();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          // No title: the lock screen says what it is. The action is here so a fresh install
+          // can pair before it has a vault to unlock.
+          backgroundColor: Colors.transparent,
+          actions: [SyncButton(strings: s, sync: widget.sync)],
+        ),
+        body: Center(
+          // Scrollable, because the recovery panel plus a keyboard is taller than a phone.
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + bottomInset(context)),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: !_probed
+                  // Only the mark until it is known which screen this is.
+                  ? const [_Wordmark(locked: false)]
+                  : _recovering
+                      ? _recoveryPanel(s)
+                      : (!_vaultExists && _choosing)
+                          ? _setupPanel(s)
+                          : _passwordPanel(s),
+            ),
           ),
         ),
       ),
     );
   }
+
+  /// A message in the theme's error colour, under the field it is about.
+  Widget _errorText(String text) => Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(text, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+      );
 
   /// The first screen on a device with no vault: the two ways to start, each saying what
   /// pressing it will do.
@@ -407,12 +448,23 @@ class _LockScreenState extends State<LockScreen> {
         TextField(
           controller: _password,
           obscureText: !_reveal,
+          // The one thing to do here is type, so the keyboard comes up with the screen — unless
+          // the fingerprint prompt is about to, which a keyboard would sit under.
+          autofocus: _vaultExists && !widget.settings.value.biometricUnlock,
+          // Shown in the clear, a password is otherwise text the keyboard learns from and
+          // offers back as a suggestion — measured: Gboard put it on its strip.
+          autocorrect: false,
+          enableSuggestions: false,
           decoration: InputDecoration(
             labelText: _vaultExists ? s.masterPassword : s.newPassword,
-            suffixIcon: IconButton(
-              icon: Icon(_reveal ? Icons.visibility_off : Icons.visibility),
-              tooltip: _reveal ? s.hidePassword : s.showPassword,
-              onPressed: () => setState(() => _reveal = !_reveal),
+            // Out of the focus order, so the keyboard's "next" goes on to the confirmation
+            // field rather than stopping on this button and putting the keyboard away.
+            suffixIcon: ExcludeFocus(
+              child: IconButton(
+                icon: Icon(_reveal ? Icons.visibility_off : Icons.visibility),
+                tooltip: _reveal ? s.hidePassword : s.showPassword,
+                onPressed: () => setState(() => _reveal = !_reveal),
+              ),
             ),
           ),
           textInputAction: _vaultExists ? TextInputAction.go : TextInputAction.next,
@@ -426,26 +478,18 @@ class _LockScreenState extends State<LockScreen> {
           TextField(
             controller: _confirm,
             obscureText: !_reveal,
+            autocorrect: false,
+            enableSuggestions: false,
             decoration: InputDecoration(labelText: s.repeatPassword),
             onSubmitted: (_) => _unlock(),
             onChanged: (_) => setState(() {}),
           ),
           if (_password.text.isNotEmpty && _tooShort(_password.text))
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(s.passwordTooShort, style: const TextStyle(color: Colors.red)),
-            )
+            _errorText(s.passwordTooShort)
           else if (_confirm.text.isNotEmpty && _confirm.text != _password.text)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(s.repeatMismatch, style: const TextStyle(color: Colors.red)),
-            ),
+            _errorText(s.repeatMismatch),
         ],
-        if (_error != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(_error!, style: const TextStyle(color: Colors.red)),
-          ),
+        if (_error != null) _errorText(_error!),
         if (_notice != null)
           Padding(
             padding: const EdgeInsets.only(top: 8),
@@ -474,6 +518,13 @@ class _LockScreenState extends State<LockScreen> {
             icon: const Icon(Icons.fingerprint),
             label: Text(s.biometricUnlock),
           ),
+        // The way back to the two choices, which the desktop has as its "back" button. Without
+        // it the only way out of a mistaken "start fresh" was to leave the app.
+        if (!_vaultExists)
+          TextButton(
+            onPressed: _busy ? null : _backOut,
+            child: Text(s.back),
+          ),
         // Nothing to recover before a vault exists, and offering it would only confuse.
         if (_vaultExists)
           TextButton(
@@ -498,6 +549,7 @@ class _LockScreenState extends State<LockScreen> {
           TextField(
             controller: _recoveryCode,
             autocorrect: false,
+            enableSuggestions: false,
             decoration: InputDecoration(labelText: s.recoveryCode),
             textInputAction: TextInputAction.next,
           ),
@@ -523,16 +575,10 @@ class _LockScreenState extends State<LockScreen> {
             onChanged: (_) => setState(() {}),
           ),
           if (_recoveryPassword.text.isNotEmpty && _tooShort(_recoveryPassword.text))
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(s.passwordTooShort, style: const TextStyle(color: Colors.red)),
-            )
+            _errorText(s.passwordTooShort)
           else if (_recoveryConfirm.text.isNotEmpty &&
               _recoveryConfirm.text != _recoveryPassword.text)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(s.repeatMismatch, style: const TextStyle(color: Colors.red)),
-            ),
+            _errorText(s.repeatMismatch),
           const SizedBox(height: 12),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -544,25 +590,29 @@ class _LockScreenState extends State<LockScreen> {
           ),
         ] else
           Text(s.noRecovery, style: Theme.of(context).textTheme.bodyMedium),
-        if (_error != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(_error!, style: const TextStyle(color: Colors.red)),
-          ),
+        if (_error != null) _errorText(_error!),
         const Divider(height: 40),
         Text(s.resetVaultHint, style: Theme.of(context).textTheme.bodySmall),
         const SizedBox(height: 12),
         // Two taps, and the second one says what it does. The first press only arms the
-        // button; nothing is deleted until the confirmation is pressed.
-        OutlinedButton(
-          onPressed: _busy
-              ? null
-              : _confirmingReset
-                  ? _reset
-                  : () => setState(() => _confirmingReset = true),
-          style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
-          child: Text(_confirmingReset ? s.resetVaultConfirm : s.resetVault),
-        ),
+        // button; nothing is deleted until the confirmation is pressed — which is filled red,
+        // as the desktop's is, so the armed state does not look like the one before it.
+        if (!_confirmingReset)
+          OutlinedButton(
+            onPressed: _busy ? null : () => setState(() => _confirmingReset = true),
+            style: OutlinedButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.error),
+            child: Text(s.resetVault),
+          )
+        else
+          FilledButton(
+            onPressed: _busy ? null : _reset,
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            child: Text(s.resetVaultConfirm),
+          ),
         TextButton(
           onPressed: _busy ? null : _leaveRecovery,
           child: Text(s.cancel),

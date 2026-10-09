@@ -236,10 +236,11 @@ Two of the plugins reach into the platform side, so a change there can break the
 - **Sync devices** — the 6-digit LAN code and a field for the other device's, this device's
   long pairing code (copyable), QR scanning, and the paired devices with their connection
   state.
-- **Settings** — language, locking (including the fingerprint switch, which is where the key
-  it releases is stored), updates, the running version, and an **Advanced** section holding
-  the three timings that decide how fast a change appears elsewhere. Everything applies as it
-  is changed; Rust sanitizes on write and the screen shows what was actually kept.
+- **Settings** — the desktop's settings pages as sections: general (language), notes,
+  lock and security (including the fingerprint switch, which is where the key it releases is
+  stored), a **Sync** section holding the three timings that decide how fast a change appears
+  elsewhere, data, and about (updates, the running version). Everything applies as it is
+  changed; Rust sanitizes on write and the screen shows what was actually kept.
 
   The three timings belong together because they add up: the sending device's watch delay
   (Syncthing waiting before it hands the file over) plus the receiving one's pull interval.

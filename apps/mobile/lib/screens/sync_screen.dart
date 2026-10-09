@@ -419,7 +419,11 @@ class _SyncScreenState extends State<SyncScreen> {
                 device.connected ? Icons.link : Icons.link_off,
                 color: device.connected ? Colors.green : null,
               ),
-              title: Text(device.name.isEmpty ? device.id : device.name),
+              // A device that never named itself goes by the start of its id, as the desktop
+              // shows it: the whole 63 characters ran over three lines of a phone row.
+              title: Text(device.name.isEmpty
+                  ? '${String.fromCharCodes(device.id.runes.take(7))}…'
+                  : device.name),
               subtitle: Text(device.connected
                   ? widget.strings.connected
                   : widget.strings.disconnected),
@@ -650,7 +654,7 @@ class _SyncScreenState extends State<SyncScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(sync.error ?? widget.strings.syncUnavailable,
-              style: const TextStyle(color: Colors.red)),
+              style: TextStyle(color: Theme.of(context).colorScheme.error)),
           const SizedBox(height: 8),
           OutlinedButton(
               onPressed: sync.start, child: Text(widget.strings.syncNow)),
@@ -710,16 +714,25 @@ class _SyncScreenState extends State<SyncScreen> {
                 controller: _peerInput,
                 autocorrect: false,
                 enableSuggestions: false,
-                decoration: InputDecoration(labelText: widget.strings.peerCode),
+                decoration: InputDecoration(
+                  labelText: widget.strings.peerCode,
+                  // On the card it sits on, as the six-digit field above does; with the card's
+                  // own colour the field had no edge at all.
+                  fillColor: Theme.of(context).colorScheme.surface,
+                ),
                 onSubmitted: (_) => _addTypedPeer(),
               ),
             ),
             const SizedBox(width: 12),
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: FilledButton(
-                onPressed: _adding ? null : _addTypedPeer,
-                child: Text(widget.strings.addDevice),
+              // Nothing to register until something is typed, like the six-digit button.
+              child: ListenableBuilder(
+                listenable: _peerInput,
+                builder: (context, _) => FilledButton(
+                  onPressed: _adding || _peerInput.text.trim().isEmpty ? null : _addTypedPeer,
+                  child: Text(widget.strings.addDevice),
+                ),
               ),
             ),
           ],

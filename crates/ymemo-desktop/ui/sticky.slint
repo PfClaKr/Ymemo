@@ -1,6 +1,6 @@
 import { LineEdit, Button, ScrollView, ListView, Slider, SpinBox } from "std-widgets.slint";
 import { Strings } from "@i18n";
-import { Palette, Glyph } from "theme.slint";
+import { Palette, Glyph, ColorChip, InkSlider } from "theme.slint";
 
 // ---------------------------------------------------------------------------
 // Sticky window: one frameless window per memo.
@@ -518,57 +518,6 @@ component NotePad {
     }
 }
 
-// A slider drawn in the note's own ink. The standard one is the platform's accent — a
-// Windows blue — and on a scrap of yellow paper it was the loudest thing in the window.
-component InkSlider inherits Rectangle {
-    in property <float> minimum: 0;
-    in property <float> maximum: 100;
-    in property <float> value;
-    in property <color> ink;
-    callback changed(float);
-    callback released(float);
-    min-height: 18px;
-    private property <float> fraction: (root.value - root.minimum) / (root.maximum - root.minimum);
-    private property <length> knob: 12px;
-
-    // The track, and the part of it to the left of the knob.
-    Rectangle {
-        y: (parent.height - self.height) / 2;
-        height: 3px;
-        border-radius: 1.5px;
-        background: root.ink.with-alpha(0.22);
-    }
-    Rectangle {
-        y: (parent.height - self.height) / 2;
-        width: root.fraction * (parent.width - root.knob) + root.knob / 2;
-        height: 3px;
-        border-radius: 1.5px;
-        background: root.ink.with-alpha(0.7);
-    }
-    Rectangle {
-        x: root.fraction * (parent.width - root.knob);
-        y: (parent.height - self.height) / 2;
-        width: root.knob;
-        height: root.knob;
-        border-radius: root.knob / 2;
-        background: root.ink;
-        border-width: 2px;
-        border-color: #ffffffcc;
-    }
-    ta := TouchArea {
-        mouse-cursor: pointer;
-        function at(x: length) -> float {
-            root.minimum + Math.clamp((x - root.knob / 2) / (root.width - root.knob), 0, 1)
-                * (root.maximum - root.minimum)
-        }
-        pointer-event(ev) => {
-            if (ev.kind == PointerEventKind.down) { root.changed(self.at(self.mouse-x)); }
-            if (ev.kind == PointerEventKind.up) { root.released(self.at(self.mouse-x)); }
-        }
-        moved => { if (self.pressed) { root.changed(self.at(self.mouse-x)); } }
-    }
-}
-
 export component StickyWindow inherits Window {
     default-font-family: "Pretendard";
     // Where the focus goes when nothing else has asked for it — which is not only at
@@ -971,22 +920,18 @@ export component StickyWindow inherits Window {
                         // this is the one a stray click must not reach. The list comes up
                         // with its undo bar, so the way back is on screen.
                         Rectangle { width: 19px; }
-                        for key in ["yellow", "pink", "green", "blue", "purple"]: Rectangle {
-                            width: 19px;
-                            height: 19px;
-                            border-radius: 10px;
-                            background: Palette.swatch(key);
-                            border-width: root.sticky-color == key ? 3px : 1px;
-                            border-color: root.sticky-color == key ? #ffffff : #00000040;
-                            chip := TouchArea {
-                                clicked => { root.set-color(key); }
-                            }
+                        for key in ["yellow", "pink", "green", "blue", "purple"]: ColorChip {
+                            key: key;
+                            selected: root.sticky-color == key;
+                            picked => { root.set-color(key); }
                         }
                         Rectangle {
                             width: 19px;
                             height: 19px;
                             del-ta := TouchArea {
                                 mouse-cursor: pointer;
+                                accessible-role: button;
+                                accessible-label: Strings.ui_sticky_delete;
                                 clicked => { root.delete-memo(); }
                                 changed has-hover => {
                                     if (self.has-hover) { root.tip = Strings.ui_sticky_delete; }
@@ -1018,6 +963,7 @@ export component StickyWindow inherits Window {
                             minimum: 20; // matches the core's MIN_OPACITY
                             maximum: 100;
                             value: root.sticky-opacity;
+                            label: Strings.ui_sticky_opacity;
                             ink: Palette.ink(root.sticky-color);
                             // Preview while dragging, store once on release.
                             changed(v) => { root.sticky-opacity = v; }
@@ -1321,10 +1267,12 @@ export component StickyWindow inherits Window {
                     text: Strings.ui_list_undo;
                     font-size: 10px;
                     font-weight: 700;
-                    color: #ffe15c;
+                    color: photo-undo-ta.has-hover ? #fff3b0 : #ffe15c;
                     vertical-alignment: center;
-                    TouchArea {
+                    photo-undo-ta := TouchArea {
                         mouse-cursor: pointer;
+                        accessible-role: button;
+                        accessible-label: Strings.ui_list_undo;
                         clicked => { root.undo-photo(); }
                     }
                 }

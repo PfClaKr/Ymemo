@@ -68,6 +68,7 @@ export component PairingPanel inherits VerticalLayout {
 
         // ---- Method tabs ----
         HorizontalLayout {
+            spacing: 4px;
             TabButton {
                 label: Strings.ui_pair_tab_lan;
                 active: !root.remote;
@@ -151,11 +152,14 @@ export component PairingPanel inherits VerticalLayout {
                 opacity: 0.8;
                 wrap: word-wrap;
             }
-            Image {
-                source: root.qr;
-                width: 120px;
-                height: 120px;
-                image-rendering: pixelated;
+            HorizontalLayout {
+                alignment: center;
+                Image {
+                    source: root.qr;
+                    width: 120px;
+                    height: 120px;
+                    image-rendering: pixelated;
+                }
             }
             // A read-only field rather than a Text, so the code can be selected — and the
             // button copies it whole, since it is only useful pasted somewhere else.
@@ -192,10 +196,13 @@ export component PairingPanel inherits VerticalLayout {
                 spacing: 6px;
                 peer := Field {
                     placeholder-text: Strings.ui_pair_remote_placeholder;
-                    accepted => { root.add-peer(self.text); }
+                    accepted => {
+                        if (self.text != "") { root.add-peer(self.text); }
+                    }
                 }
                 Button {
                     text: Strings.ui_pair_remote_register;
+                    enabled: peer.text != "";
                     clicked => { root.add-peer(peer.text); }
                 }
             }

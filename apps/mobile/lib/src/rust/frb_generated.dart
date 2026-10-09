@@ -2184,9 +2184,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FfiStrings dco_decode_ffi_strings(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 183)
+    if (arr.length != 199)
       throw Exception(
-          'unexpected arr length: expect 183 but see ${arr.length}');
+          'unexpected arr length: expect 199 but see ${arr.length}');
     return FfiStrings(
       addPhoto: dco_decode_String(arr[0]),
       bodyHint: dco_decode_String(arr[1]),
@@ -2212,165 +2212,181 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       language: dco_decode_String(arr[21]),
       languageAuto: dco_decode_String(arr[22]),
       lockNow: dco_decode_String(arr[23]),
-      advanced: dco_decode_String(arr[24]),
-      advancedHint: dco_decode_String(arr[25]),
-      mergeSeconds: dco_decode_String(arr[26]),
-      mergeSecondsHint: dco_decode_String(arr[27]),
-      watchDelay: dco_decode_String(arr[28]),
-      watchDelayHint: dco_decode_String(arr[29]),
-      rescan: dco_decode_String(arr[30]),
-      rescanHint: dco_decode_String(arr[31]),
-      secondsUnit: dco_decode_String(arr[32]),
-      wifiOnly: dco_decode_String(arr[33]),
-      wifiOnlyHint: dco_decode_String(arr[34]),
-      pausedMetered: dco_decode_String(arr[35]),
-      biometricFailed: dco_decode_String(arr[36]),
-      biometricPrompt: dco_decode_String(arr[37]),
-      biometricUnavailable: dco_decode_String(arr[38]),
-      biometricUnlock: dco_decode_String(arr[39]),
-      biometricUnlockHint: dco_decode_String(arr[40]),
-      lockOnBackground: dco_decode_String(arr[41]),
-      lockOnBackgroundHint: dco_decode_String(arr[42]),
-      lockSection: dco_decode_String(arr[43]),
-      saved: dco_decode_String(arr[44]),
-      settings: dco_decode_String(arr[45]),
-      unlockDays: dco_decode_String(arr[46]),
-      unlockDaysHint: dco_decode_String(arr[47]),
-      setupQuestion: dco_decode_String(arr[48]),
-      setupNewTitle: dco_decode_String(arr[49]),
-      setupNewDetail: dco_decode_String(arr[50]),
-      setupLinkTitle: dco_decode_String(arr[51]),
-      setupLinkDetail: dco_decode_String(arr[52]),
-      renameVault: dco_decode_String(arr[53]),
-      vaultName: dco_decode_String(arr[54]),
-      updateAvailable: dco_decode_String(arr[55]),
-      updateCheck: dco_decode_String(arr[56]),
-      updateCheckHint: dco_decode_String(arr[57]),
-      updateChecking: dco_decode_String(arr[58]),
-      updateLatest: dco_decode_String(arr[59]),
-      updateNow: dco_decode_String(arr[60]),
-      updateOpen: dco_decode_String(arr[61]),
-      updateSection: dco_decode_String(arr[62]),
-      version: dco_decode_String(arr[63]),
-      cancel: dco_decode_String(arr[64]),
-      delete: dco_decode_String(arr[65]),
-      deleteGroupHint: dco_decode_String(arr[66]),
-      deleted: dco_decode_String(arr[67]),
-      undo: dco_decode_String(arr[68]),
-      emptyFolder: dco_decode_String(arr[69]),
-      folderName: dco_decode_String(arr[70]),
-      moveTo: dco_decode_String(arr[71]),
-      history: dco_decode_String(arr[72]),
-      historyEmpty: dco_decode_String(arr[73]),
-      photoRemoved: dco_decode_String(arr[74]),
-      timeNow: dco_decode_String(arr[75]),
-      timeMinutes: dco_decode_String(arr[76]),
-      timeHours: dco_decode_String(arr[77]),
-      timeYesterday: dco_decode_String(arr[78]),
-      timeDate: dco_decode_String(arr[79]),
-      timeDateYear: dco_decode_String(arr[80]),
-      whenToday: dco_decode_String(arr[81]),
-      whenYesterday: dco_decode_String(arr[82]),
-      whenDate: dco_decode_String(arr[83]),
-      whenDateYear: dco_decode_String(arr[84]),
-      otherNetwork: dco_decode_String(arr[85]),
-      reorder: dco_decode_String(arr[86]),
-      reorderDone: dco_decode_String(arr[87]),
-      firstMemo: dco_decode_String(arr[88]),
-      showPassword: dco_decode_String(arr[89]),
-      hidePassword: dco_decode_String(arr[90]),
-      clearSearch: dco_decode_String(arr[91]),
-      exportTitle: dco_decode_String(arr[92]),
-      exportHint: dco_decode_String(arr[93]),
-      exportButton: dco_decode_String(arr[94]),
-      exported: dco_decode_String(arr[95]),
-      exportFailed: dco_decode_String(arr[96]),
-      share: dco_decode_String(arr[97]),
-      defaultColor: dco_decode_String(arr[98]),
-      historyCurrent: dco_decode_String(arr[99]),
-      historyRestore: dco_decode_String(arr[100]),
-      historyRestored: dco_decode_String(arr[101]),
-      newGroup: dco_decode_String(arr[102]),
-      ok: dco_decode_String(arr[103]),
-      create: dco_decode_String(arr[104]),
-      rename: dco_decode_String(arr[105]),
-      rootFolder: dco_decode_String(arr[106]),
-      listTitle: dco_decode_String(arr[107]),
-      search: dco_decode_String(arr[108]),
-      searchNone: dco_decode_String(arr[109]),
-      emptyHint: dco_decode_String(arr[110]),
-      masterPassword: dco_decode_String(arr[111]),
-      myCode: dco_decode_String(arr[112]),
-      peerCode: dco_decode_String(arr[113]),
-      peerCodeHint: dco_decode_String(arr[114]),
-      addDevice: dco_decode_String(arr[115]),
-      newMemo: dco_decode_String(arr[116]),
-      noDevices: dco_decode_String(arr[117]),
-      opening: dco_decode_String(arr[118]),
-      photoCamera: dco_decode_String(arr[119]),
-      photoGallery: dco_decode_String(arr[120]),
-      photoMissing: dco_decode_String(arr[121]),
-      photoRemove: dco_decode_String(arr[122]),
-      photoSize: dco_decode_String(arr[123]),
-      photoUnderText: dco_decode_String(arr[124]),
-      photoOverText: dco_decode_String(arr[125]),
-      photoSave: dco_decode_String(arr[126]),
-      photoSaved: dco_decode_String(arr[127]),
-      photoSaveFailed: dco_decode_String(arr[128]),
-      save: dco_decode_String(arr[129]),
-      scanHint: dco_decode_String(arr[130]),
-      scanQr: dco_decode_String(arr[131]),
-      syncDevices: dco_decode_String(arr[132]),
-      connectedDevices: dco_decode_String(arr[133]),
-      syncNow: dco_decode_String(arr[134]),
-      syncStarting: dco_decode_String(arr[135]),
-      syncUnavailable: dco_decode_String(arr[136]),
-      titleHint: dco_decode_String(arr[137]),
-      unlock: dco_decode_String(arr[138]),
-      unpair: dco_decode_String(arr[139]),
-      unpairWarning: dco_decode_String(arr[140]),
-      color: dco_decode_String(arr[141]),
-      changePassword: dco_decode_String(arr[142]),
-      confirmPassword: dco_decode_String(arr[143]),
-      repeatPassword: dco_decode_String(arr[144]),
-      repeatMismatch: dco_decode_String(arr[145]),
-      createVault: dco_decode_String(arr[146]),
-      currentPassword: dco_decode_String(arr[147]),
-      forgotPassword: dco_decode_String(arr[148]),
-      issueRecovery: dco_decode_String(arr[149]),
-      newPassword: dco_decode_String(arr[150]),
-      newVaultHint: dco_decode_String(arr[151]),
-      noRecovery: dco_decode_String(arr[152]),
-      passwordChanged: dco_decode_String(arr[153]),
-      passwordHint: dco_decode_String(arr[154]),
-      passwordMismatch: dco_decode_String(arr[155]),
-      passwordTooShort: dco_decode_String(arr[156]),
-      recoveryAbsent: dco_decode_String(arr[157]),
-      recoveryAck: dco_decode_String(arr[158]),
-      recoveryCode: dco_decode_String(arr[159]),
-      recoveryHint: dco_decode_String(arr[160]),
-      recoveryPresent: dco_decode_String(arr[161]),
-      recoveryPrompt: dco_decode_String(arr[162]),
-      recoveryWarning: dco_decode_String(arr[163]),
-      reissueRecovery: dco_decode_String(arr[164]),
-      reissueWarning: dco_decode_String(arr[165]),
-      resetDone: dco_decode_String(arr[166]),
-      resetPassword: dco_decode_String(arr[167]),
-      resetVault: dco_decode_String(arr[168]),
-      resetVaultConfirm: dco_decode_String(arr[169]),
-      resetVaultHint: dco_decode_String(arr[170]),
-      securitySection: dco_decode_String(arr[171]),
-      allow: dco_decode_String(arr[172]),
-      deviceId: dco_decode_String(arr[173]),
-      pairCancelWait: dco_decode_String(arr[174]),
-      pairConnected: dco_decode_String(arr[175]),
-      pairRequest: dco_decode_String(arr[176]),
-      pairRequestHint: dco_decode_String(arr[177]),
-      pairVerification: dco_decode_String(arr[178]),
-      pairVerify: dco_decode_String(arr[179]),
-      pairWaiting: dco_decode_String(arr[180]),
-      pairWaitingHint: dco_decode_String(arr[181]),
-      reject: dco_decode_String(arr[182]),
+      advancedHint: dco_decode_String(arr[24]),
+      mergeSeconds: dco_decode_String(arr[25]),
+      mergeSecondsHint: dco_decode_String(arr[26]),
+      watchDelay: dco_decode_String(arr[27]),
+      watchDelayHint: dco_decode_String(arr[28]),
+      rescan: dco_decode_String(arr[29]),
+      rescanHint: dco_decode_String(arr[30]),
+      secondsUnit: dco_decode_String(arr[31]),
+      wifiOnly: dco_decode_String(arr[32]),
+      wifiOnlyHint: dco_decode_String(arr[33]),
+      pausedMetered: dco_decode_String(arr[34]),
+      biometricFailed: dco_decode_String(arr[35]),
+      biometricPrompt: dco_decode_String(arr[36]),
+      biometricUnavailable: dco_decode_String(arr[37]),
+      biometricUnlock: dco_decode_String(arr[38]),
+      biometricUnlockHint: dco_decode_String(arr[39]),
+      lockOnBackground: dco_decode_String(arr[40]),
+      lockOnBackgroundHint: dco_decode_String(arr[41]),
+      saved: dco_decode_String(arr[42]),
+      settings: dco_decode_String(arr[43]),
+      unlockDays: dco_decode_String(arr[44]),
+      unlockDaysHint: dco_decode_String(arr[45]),
+      setupQuestion: dco_decode_String(arr[46]),
+      setupNewTitle: dco_decode_String(arr[47]),
+      setupNewDetail: dco_decode_String(arr[48]),
+      setupLinkTitle: dco_decode_String(arr[49]),
+      setupLinkDetail: dco_decode_String(arr[50]),
+      renameVault: dco_decode_String(arr[51]),
+      vaultName: dco_decode_String(arr[52]),
+      updateAvailable: dco_decode_String(arr[53]),
+      updateCheck: dco_decode_String(arr[54]),
+      updateCheckHint: dco_decode_String(arr[55]),
+      updateChecking: dco_decode_String(arr[56]),
+      updateLatest: dco_decode_String(arr[57]),
+      updateNow: dco_decode_String(arr[58]),
+      updateOpen: dco_decode_String(arr[59]),
+      version: dco_decode_String(arr[60]),
+      cancel: dco_decode_String(arr[61]),
+      delete: dco_decode_String(arr[62]),
+      deleteGroupHint: dco_decode_String(arr[63]),
+      deleted: dco_decode_String(arr[64]),
+      deletedGroup: dco_decode_String(arr[65]),
+      undo: dco_decode_String(arr[66]),
+      emptyFolder: dco_decode_String(arr[67]),
+      folderName: dco_decode_String(arr[68]),
+      moveTo: dco_decode_String(arr[69]),
+      history: dco_decode_String(arr[70]),
+      historyEmpty: dco_decode_String(arr[71]),
+      photoRemoved: dco_decode_String(arr[72]),
+      timeNow: dco_decode_String(arr[73]),
+      timeMinutes: dco_decode_String(arr[74]),
+      timeHours: dco_decode_String(arr[75]),
+      timeYesterday: dco_decode_String(arr[76]),
+      timeDate: dco_decode_String(arr[77]),
+      timeDateYear: dco_decode_String(arr[78]),
+      whenToday: dco_decode_String(arr[79]),
+      whenYesterday: dco_decode_String(arr[80]),
+      whenDate: dco_decode_String(arr[81]),
+      whenDateYear: dco_decode_String(arr[82]),
+      otherNetwork: dco_decode_String(arr[83]),
+      reorder: dco_decode_String(arr[84]),
+      reorderDone: dco_decode_String(arr[85]),
+      firstMemo: dco_decode_String(arr[86]),
+      showPassword: dco_decode_String(arr[87]),
+      hidePassword: dco_decode_String(arr[88]),
+      clearSearch: dco_decode_String(arr[89]),
+      exportTitle: dco_decode_String(arr[90]),
+      exportHint: dco_decode_String(arr[91]),
+      exportButton: dco_decode_String(arr[92]),
+      exported: dco_decode_String(arr[93]),
+      exportFailed: dco_decode_String(arr[94]),
+      share: dco_decode_String(arr[95]),
+      defaultColor: dco_decode_String(arr[96]),
+      historyCurrent: dco_decode_String(arr[97]),
+      historyRestore: dco_decode_String(arr[98]),
+      historyRestored: dco_decode_String(arr[99]),
+      newGroup: dco_decode_String(arr[100]),
+      ok: dco_decode_String(arr[101]),
+      create: dco_decode_String(arr[102]),
+      rename: dco_decode_String(arr[103]),
+      rootFolder: dco_decode_String(arr[104]),
+      listTitle: dco_decode_String(arr[105]),
+      search: dco_decode_String(arr[106]),
+      searchNone: dco_decode_String(arr[107]),
+      emptyHint: dco_decode_String(arr[108]),
+      masterPassword: dco_decode_String(arr[109]),
+      myCode: dco_decode_String(arr[110]),
+      peerCode: dco_decode_String(arr[111]),
+      peerCodeHint: dco_decode_String(arr[112]),
+      addDevice: dco_decode_String(arr[113]),
+      newMemo: dco_decode_String(arr[114]),
+      noDevices: dco_decode_String(arr[115]),
+      opening: dco_decode_String(arr[116]),
+      photoCamera: dco_decode_String(arr[117]),
+      photoGallery: dco_decode_String(arr[118]),
+      photoMissing: dco_decode_String(arr[119]),
+      photoRemove: dco_decode_String(arr[120]),
+      photoSize: dco_decode_String(arr[121]),
+      photoUnderText: dco_decode_String(arr[122]),
+      photoOverText: dco_decode_String(arr[123]),
+      photoSave: dco_decode_String(arr[124]),
+      photoSaved: dco_decode_String(arr[125]),
+      photoSaveFailed: dco_decode_String(arr[126]),
+      save: dco_decode_String(arr[127]),
+      scanHint: dco_decode_String(arr[128]),
+      scanQr: dco_decode_String(arr[129]),
+      syncDevices: dco_decode_String(arr[130]),
+      connectedDevices: dco_decode_String(arr[131]),
+      syncNow: dco_decode_String(arr[132]),
+      syncStarting: dco_decode_String(arr[133]),
+      syncUnavailable: dco_decode_String(arr[134]),
+      titleHint: dco_decode_String(arr[135]),
+      unlock: dco_decode_String(arr[136]),
+      unpair: dco_decode_String(arr[137]),
+      unpairWarning: dco_decode_String(arr[138]),
+      color: dco_decode_String(arr[139]),
+      colorYellow: dco_decode_String(arr[140]),
+      colorPink: dco_decode_String(arr[141]),
+      colorGreen: dco_decode_String(arr[142]),
+      colorBlue: dco_decode_String(arr[143]),
+      colorPurple: dco_decode_String(arr[144]),
+      changePassword: dco_decode_String(arr[145]),
+      confirmPassword: dco_decode_String(arr[146]),
+      repeatPassword: dco_decode_String(arr[147]),
+      repeatMismatch: dco_decode_String(arr[148]),
+      createVault: dco_decode_String(arr[149]),
+      currentPassword: dco_decode_String(arr[150]),
+      forgotPassword: dco_decode_String(arr[151]),
+      issueRecovery: dco_decode_String(arr[152]),
+      newPassword: dco_decode_String(arr[153]),
+      newVaultHint: dco_decode_String(arr[154]),
+      noRecovery: dco_decode_String(arr[155]),
+      passwordChanged: dco_decode_String(arr[156]),
+      passwordHint: dco_decode_String(arr[157]),
+      passwordMismatch: dco_decode_String(arr[158]),
+      passwordTooShort: dco_decode_String(arr[159]),
+      recoveryAbsent: dco_decode_String(arr[160]),
+      recoveryAck: dco_decode_String(arr[161]),
+      recoveryCode: dco_decode_String(arr[162]),
+      recoveryHint: dco_decode_String(arr[163]),
+      recoveryPresent: dco_decode_String(arr[164]),
+      recoveryPrompt: dco_decode_String(arr[165]),
+      recoveryWarning: dco_decode_String(arr[166]),
+      reissueRecovery: dco_decode_String(arr[167]),
+      reissueWarning: dco_decode_String(arr[168]),
+      resetDone: dco_decode_String(arr[169]),
+      resetPassword: dco_decode_String(arr[170]),
+      resetVault: dco_decode_String(arr[171]),
+      resetVaultConfirm: dco_decode_String(arr[172]),
+      resetVaultHint: dco_decode_String(arr[173]),
+      securitySection: dco_decode_String(arr[174]),
+      allow: dco_decode_String(arr[175]),
+      deviceId: dco_decode_String(arr[176]),
+      pairCancelWait: dco_decode_String(arr[177]),
+      pairConnected: dco_decode_String(arr[178]),
+      pairRequest: dco_decode_String(arr[179]),
+      pairRequestHint: dco_decode_String(arr[180]),
+      pairVerification: dco_decode_String(arr[181]),
+      pairVerify: dco_decode_String(arr[182]),
+      pairWaiting: dco_decode_String(arr[183]),
+      pairWaitingHint: dco_decode_String(arr[184]),
+      reject: dco_decode_String(arr[185]),
+      dataSection: dco_decode_String(arr[186]),
+      sectionGeneral: dco_decode_String(arr[187]),
+      sectionNotes: dco_decode_String(arr[188]),
+      sectionLock: dco_decode_String(arr[189]),
+      sectionSync: dco_decode_String(arr[190]),
+      sectionAbout: dco_decode_String(arr[191]),
+      securityTitle: dco_decode_String(arr[192]),
+      securityHint: dco_decode_String(arr[193]),
+      lockNowHint: dco_decode_String(arr[194]),
+      tagline: dco_decode_String(arr[195]),
+      projectPage: dco_decode_String(arr[196]),
+      open: dco_decode_String(arr[197]),
+      back: dco_decode_String(arr[198]),
     );
   }
 
@@ -2700,7 +2716,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_language = sse_decode_String(deserializer);
     var var_languageAuto = sse_decode_String(deserializer);
     var var_lockNow = sse_decode_String(deserializer);
-    var var_advanced = sse_decode_String(deserializer);
     var var_advancedHint = sse_decode_String(deserializer);
     var var_mergeSeconds = sse_decode_String(deserializer);
     var var_mergeSecondsHint = sse_decode_String(deserializer);
@@ -2719,7 +2734,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_biometricUnlockHint = sse_decode_String(deserializer);
     var var_lockOnBackground = sse_decode_String(deserializer);
     var var_lockOnBackgroundHint = sse_decode_String(deserializer);
-    var var_lockSection = sse_decode_String(deserializer);
     var var_saved = sse_decode_String(deserializer);
     var var_settings = sse_decode_String(deserializer);
     var var_unlockDays = sse_decode_String(deserializer);
@@ -2738,12 +2752,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_updateLatest = sse_decode_String(deserializer);
     var var_updateNow = sse_decode_String(deserializer);
     var var_updateOpen = sse_decode_String(deserializer);
-    var var_updateSection = sse_decode_String(deserializer);
     var var_version = sse_decode_String(deserializer);
     var var_cancel = sse_decode_String(deserializer);
     var var_delete = sse_decode_String(deserializer);
     var var_deleteGroupHint = sse_decode_String(deserializer);
     var var_deleted = sse_decode_String(deserializer);
+    var var_deletedGroup = sse_decode_String(deserializer);
     var var_undo = sse_decode_String(deserializer);
     var var_emptyFolder = sse_decode_String(deserializer);
     var var_folderName = sse_decode_String(deserializer);
@@ -2818,6 +2832,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_unpair = sse_decode_String(deserializer);
     var var_unpairWarning = sse_decode_String(deserializer);
     var var_color = sse_decode_String(deserializer);
+    var var_colorYellow = sse_decode_String(deserializer);
+    var var_colorPink = sse_decode_String(deserializer);
+    var var_colorGreen = sse_decode_String(deserializer);
+    var var_colorBlue = sse_decode_String(deserializer);
+    var var_colorPurple = sse_decode_String(deserializer);
     var var_changePassword = sse_decode_String(deserializer);
     var var_confirmPassword = sse_decode_String(deserializer);
     var var_repeatPassword = sse_decode_String(deserializer);
@@ -2859,6 +2878,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_pairWaiting = sse_decode_String(deserializer);
     var var_pairWaitingHint = sse_decode_String(deserializer);
     var var_reject = sse_decode_String(deserializer);
+    var var_dataSection = sse_decode_String(deserializer);
+    var var_sectionGeneral = sse_decode_String(deserializer);
+    var var_sectionNotes = sse_decode_String(deserializer);
+    var var_sectionLock = sse_decode_String(deserializer);
+    var var_sectionSync = sse_decode_String(deserializer);
+    var var_sectionAbout = sse_decode_String(deserializer);
+    var var_securityTitle = sse_decode_String(deserializer);
+    var var_securityHint = sse_decode_String(deserializer);
+    var var_lockNowHint = sse_decode_String(deserializer);
+    var var_tagline = sse_decode_String(deserializer);
+    var var_projectPage = sse_decode_String(deserializer);
+    var var_open = sse_decode_String(deserializer);
+    var var_back = sse_decode_String(deserializer);
     return FfiStrings(
         addPhoto: var_addPhoto,
         bodyHint: var_bodyHint,
@@ -2884,7 +2916,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         language: var_language,
         languageAuto: var_languageAuto,
         lockNow: var_lockNow,
-        advanced: var_advanced,
         advancedHint: var_advancedHint,
         mergeSeconds: var_mergeSeconds,
         mergeSecondsHint: var_mergeSecondsHint,
@@ -2903,7 +2934,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         biometricUnlockHint: var_biometricUnlockHint,
         lockOnBackground: var_lockOnBackground,
         lockOnBackgroundHint: var_lockOnBackgroundHint,
-        lockSection: var_lockSection,
         saved: var_saved,
         settings: var_settings,
         unlockDays: var_unlockDays,
@@ -2922,12 +2952,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         updateLatest: var_updateLatest,
         updateNow: var_updateNow,
         updateOpen: var_updateOpen,
-        updateSection: var_updateSection,
         version: var_version,
         cancel: var_cancel,
         delete: var_delete,
         deleteGroupHint: var_deleteGroupHint,
         deleted: var_deleted,
+        deletedGroup: var_deletedGroup,
         undo: var_undo,
         emptyFolder: var_emptyFolder,
         folderName: var_folderName,
@@ -3002,6 +3032,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         unpair: var_unpair,
         unpairWarning: var_unpairWarning,
         color: var_color,
+        colorYellow: var_colorYellow,
+        colorPink: var_colorPink,
+        colorGreen: var_colorGreen,
+        colorBlue: var_colorBlue,
+        colorPurple: var_colorPurple,
         changePassword: var_changePassword,
         confirmPassword: var_confirmPassword,
         repeatPassword: var_repeatPassword,
@@ -3042,7 +3077,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         pairVerify: var_pairVerify,
         pairWaiting: var_pairWaiting,
         pairWaitingHint: var_pairWaitingHint,
-        reject: var_reject);
+        reject: var_reject,
+        dataSection: var_dataSection,
+        sectionGeneral: var_sectionGeneral,
+        sectionNotes: var_sectionNotes,
+        sectionLock: var_sectionLock,
+        sectionSync: var_sectionSync,
+        sectionAbout: var_sectionAbout,
+        securityTitle: var_securityTitle,
+        securityHint: var_securityHint,
+        lockNowHint: var_lockNowHint,
+        tagline: var_tagline,
+        projectPage: var_projectPage,
+        open: var_open,
+        back: var_back);
   }
 
   @protected
@@ -3370,7 +3418,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.language, serializer);
     sse_encode_String(self.languageAuto, serializer);
     sse_encode_String(self.lockNow, serializer);
-    sse_encode_String(self.advanced, serializer);
     sse_encode_String(self.advancedHint, serializer);
     sse_encode_String(self.mergeSeconds, serializer);
     sse_encode_String(self.mergeSecondsHint, serializer);
@@ -3389,7 +3436,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.biometricUnlockHint, serializer);
     sse_encode_String(self.lockOnBackground, serializer);
     sse_encode_String(self.lockOnBackgroundHint, serializer);
-    sse_encode_String(self.lockSection, serializer);
     sse_encode_String(self.saved, serializer);
     sse_encode_String(self.settings, serializer);
     sse_encode_String(self.unlockDays, serializer);
@@ -3408,12 +3454,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.updateLatest, serializer);
     sse_encode_String(self.updateNow, serializer);
     sse_encode_String(self.updateOpen, serializer);
-    sse_encode_String(self.updateSection, serializer);
     sse_encode_String(self.version, serializer);
     sse_encode_String(self.cancel, serializer);
     sse_encode_String(self.delete, serializer);
     sse_encode_String(self.deleteGroupHint, serializer);
     sse_encode_String(self.deleted, serializer);
+    sse_encode_String(self.deletedGroup, serializer);
     sse_encode_String(self.undo, serializer);
     sse_encode_String(self.emptyFolder, serializer);
     sse_encode_String(self.folderName, serializer);
@@ -3488,6 +3534,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.unpair, serializer);
     sse_encode_String(self.unpairWarning, serializer);
     sse_encode_String(self.color, serializer);
+    sse_encode_String(self.colorYellow, serializer);
+    sse_encode_String(self.colorPink, serializer);
+    sse_encode_String(self.colorGreen, serializer);
+    sse_encode_String(self.colorBlue, serializer);
+    sse_encode_String(self.colorPurple, serializer);
     sse_encode_String(self.changePassword, serializer);
     sse_encode_String(self.confirmPassword, serializer);
     sse_encode_String(self.repeatPassword, serializer);
@@ -3529,6 +3580,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.pairWaiting, serializer);
     sse_encode_String(self.pairWaitingHint, serializer);
     sse_encode_String(self.reject, serializer);
+    sse_encode_String(self.dataSection, serializer);
+    sse_encode_String(self.sectionGeneral, serializer);
+    sse_encode_String(self.sectionNotes, serializer);
+    sse_encode_String(self.sectionLock, serializer);
+    sse_encode_String(self.sectionSync, serializer);
+    sse_encode_String(self.sectionAbout, serializer);
+    sse_encode_String(self.securityTitle, serializer);
+    sse_encode_String(self.securityHint, serializer);
+    sse_encode_String(self.lockNowHint, serializer);
+    sse_encode_String(self.tagline, serializer);
+    sse_encode_String(self.projectPage, serializer);
+    sse_encode_String(self.open, serializer);
+    sse_encode_String(self.back, serializer);
   }
 
   @protected

@@ -43,7 +43,17 @@ class _SecurityScreenState extends State<SecurityScreen> {
   void initState() {
     super.initState();
     _refreshRecovery();
+    // The button follows the fields, as on the desktop: pressing it over empty ones only
+    // produced an error about a password nobody had typed yet.
+    for (final c in [_current, _next, _confirm]) {
+      c.addListener(_fieldsChanged);
+    }
   }
+
+  void _fieldsChanged() => setState(() {});
+
+  bool get _canChange =>
+      _current.text.isNotEmpty && _next.text.isNotEmpty && _confirm.text.isNotEmpty;
 
   @override
   void dispose() {
@@ -146,16 +156,17 @@ class _SecurityScreenState extends State<SecurityScreen> {
             controller: _confirm,
             obscureText: true,
             decoration: InputDecoration(labelText: s.confirmPassword),
-            onSubmitted: (_) => _busy ? null : _changePassword(),
+            onSubmitted: (_) => _busy || !_canChange ? null : _changePassword(),
           ),
           if (_error != null)
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: Text(_error!, style: const TextStyle(color: Colors.red)),
+              child: Text(_error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error)),
             ),
           const SizedBox(height: 12),
           FilledButton(
-            onPressed: _busy ? null : _changePassword,
+            onPressed: _busy || !_canChange ? null : _changePassword,
             child: Text(s.changePassword),
           ),
 
@@ -190,6 +201,15 @@ class _SecurityScreenState extends State<SecurityScreen> {
       );
 }
 
+/// A recovery code four groups to a line; `recovery_lines` on the desktop.
+String recoveryLines(String code) {
+  final groups = code.split('-');
+  return [
+    for (var i = 0; i < groups.length; i += 4)
+      groups.sublist(i, i + 4 > groups.length ? groups.length : i + 4).join('-'),
+  ].join('\n');
+}
+
 /// Shows a freshly issued recovery code and does not leave until it is acknowledged.
 ///
 /// A full page rather than a snackbar or a dismissible dialog, because this is the **only**
@@ -212,7 +232,10 @@ Future<void> showRecoveryCode(BuildContext context, FfiStrings strings, String c
                   style: Theme.of(context).textTheme.bodyMedium),
               const SizedBox(height: 20),
               SelectableText(
-                code,
+                // Four groups to a line, as the desktop shows it, so the code breaks between
+                // groups rather than wherever the screen ran out. Whitespace is ignored when
+                // a code is read back, so a copy of this works as well as the bare code.
+                recoveryLines(code),
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   // Monospace and wide-spaced: the alphabet already drops the characters

@@ -28,7 +28,6 @@ include!(concat!(env!("OUT_DIR"), "/i18n_apply.rs"));
 mod autostart;
 mod hangul;
 mod highlight;
-mod hint;
 mod history;
 mod icon;
 mod instance;

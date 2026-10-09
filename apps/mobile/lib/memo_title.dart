@@ -68,28 +68,42 @@ String headingFor(String title, String body, String fallback) {
   return line.isEmpty ? fallback : line;
 }
 
-/// The line under the title: the body, minus the part of it the title is already showing.
+/// The line under the title: the writing after it, on one line — the same stretch the
+/// desktop's list shows beside a title (`preview_of` in its list module).
+///
+/// Fence lines are left out, being markup rather than writing, and so is the line the title
+/// was taken from. It used to be the body as stored, minus the title line: a memo that opened
+/// with a fence showed a row of nothing but ``` under its name, because the row draws one line.
 String rowPreview(FfiMemo memo) {
-  if (memo.title.isNotEmpty) return memo.body;
-  // The line as it stands in the body, not as the title reads it: a heading's own hashes are
-  // dropped from the name, and taking the name back out would leave them behind.
-  final line = _rawTitleLine(memo.body);
-  if (line.isEmpty) return memo.body;
-  return memo.body.replaceFirst(line, '').trim();
+  final out = StringBuffer();
+  var first = true;
+  for (final raw in memo.body.split('\n')) {
+    final line = raw.trim();
+    if (line.isEmpty || line.startsWith('```')) continue;
+    if (first) {
+      first = false;
+      final named = line.replaceFirst(RegExp(r'^#+'), '').trim();
+      if (memo.title.isEmpty || named.startsWith(memo.title.trim())) continue;
+    }
+    if (out.isNotEmpty) out.write(' ');
+    out.write(_plainLine(line));
+    if (out.length >= 80) break;
+  }
+  return String.fromCharCodes(out.toString().runes.take(80));
 }
 
-/// The whole line the title came from, hashes and all.
-String _rawTitleLine(String text) {
-  bool? fence;
-  for (final raw in text.split('\n')) {
-    final left = raw.trimLeft();
-    if (left.startsWith('```')) {
-      fence = fence != null ? null : left.substring(3).trim().isEmpty;
-      continue;
+/// One line as a preview reads it: a heading's hashes, a list's bullet and the emphasis marks
+/// are markup, and in a line of grey text under a title they are noise. `plain_line` on the
+/// desktop.
+String _plainLine(String line) {
+  var plain = line.replaceFirst(RegExp(r'^#+'), '').trimLeft();
+  for (final mark in const ['- ', '* ', '+ ', '> ']) {
+    if (plain.startsWith(mark)) {
+      plain = plain.substring(mark.length);
+      break;
     }
-    if ((fence == true ? _stripHeading(left) : left).trim().isNotEmpty) return raw.trim();
   }
-  return '';
+  return plain.replaceAll('**', '').replaceAll('__', '').replaceAll('`', '');
 }
 
 /// When a memo was last written, the way a person would say it: "방금", "5분 전", "3시간 전",

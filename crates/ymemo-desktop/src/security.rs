@@ -61,12 +61,16 @@ pub(crate) fn wire(ctx: &Ctx, settings_win: &SettingsWindow, win: &SecurityWindo
             let Some(v) = ctx.vault_ref() else {
                 return set_status(&w, t!("msg.vault_locked"), true, false);
             };
+            // "The old code no longer works" only when there was one: on a first issue it
+            // warned about a code nobody had.
+            let had_code = v.has_recovery_code();
             match v.issue_recovery_code() {
                 Ok(code) => {
                     w.set_recovery_code(SharedString::from(crate::lock::recovery_lines(&code)));
                     w.set_has_recovery(true);
                     make_room_for_code(&w);
-                    set_status(&w, t!("msg.recovery_issued"), false, false);
+                    let status = if had_code { t!("msg.recovery_issued") } else { t!("msg.recovery_issued_first") };
+                    set_status(&w, status, false, false);
                 }
                 Err(e) => set_status(&w, format!("{e}"), true, false),
             }
@@ -91,7 +95,7 @@ fn reset_window(ctx: &Ctx, win: &SecurityWindow) {
 /// The window is sized for the two sections; the code and the line telling the user to write
 /// it down are another panel below them, and a window that does not grow puts the one thing
 /// that can never be shown again under the fold of a scroll view nobody knew to scroll.
-const CODE_PANEL_HEIGHT: f32 = 650.0;
+const CODE_PANEL_HEIGHT: f32 = 690.0;
 
 /// Grows the window so a freshly issued code is visible without scrolling. Only ever grows:
 /// a window the user has made larger is left alone.

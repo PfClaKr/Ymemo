@@ -384,7 +384,7 @@ pub(crate) fn refresh_after_restore(ctx: &Ctx, entity: ymemo_core::history::Enti
             // A restored version is a different note; show it from its first line rather
             // than at whatever offset the previous one had been left at.
             entry.window.invoke_body_to_top();
-            crate::sticky::set_title(&entry.window, &memo.title);
+            crate::sticky::set_title(&entry.window, &crate::sticky::display_title(&memo));
             entry.window.set_sticky_color(memo.color.into());
             entry.window.set_sticky_opacity(memo.opacity as f32);
             // The restore is the current text now, so nothing is waiting to be saved.
@@ -425,11 +425,7 @@ pub(crate) fn group_row(
 /// same first line here is what stops a phoneful of memos from arriving as a column of
 /// "(untitled)". The stored title is left alone — this is only how the row reads.
 pub(crate) fn memo_row(memo: &Memo, depth: i32, has_photo: bool) -> ListRow {
-    let title = if memo.title.is_empty() {
-        crate::sticky::derive_title(&memo.body)
-    } else {
-        memo.title.clone()
-    };
+    let title = crate::sticky::display_title(memo);
     ListRow {
         id: SharedString::from(memo.id.clone()),
         title: SharedString::from(crate::hangul::for_slint(&title)),

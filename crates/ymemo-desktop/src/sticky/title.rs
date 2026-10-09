@@ -55,6 +55,17 @@ pub(super) fn strip_heading(line: &str) -> &str {
     line[hashes + 1..].trim_start()
 }
 
+/// What a memo is called on screen: its title, or the first line of its writing when it has
+/// none — a memo written on the phone with the title field left blank. The stored title is
+/// left alone; the list, a note's title bar and its history all read the memo this way.
+pub(crate) fn display_title(memo: &Memo) -> String {
+    if memo.title.is_empty() {
+        derive_title(&memo.body)
+    } else {
+        memo.title.clone()
+    }
+}
+
 /// The title a memo should carry once its body becomes `text`.
 ///
 /// A sticky has no title field — the title *is* the first line of what is written on it — but

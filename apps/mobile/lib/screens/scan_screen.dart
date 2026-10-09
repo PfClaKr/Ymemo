@@ -88,7 +88,9 @@ class _ScanScreenState extends State<ScanScreen> {
             child: Container(
               width: double.infinity,
               color: Colors.black54,
-              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+              // Clear of the gesture bar, which the app draws under edge to edge.
+              padding: EdgeInsets.fromLTRB(
+                  24, 16, 24, 16 + MediaQuery.paddingOf(context).bottom),
               child: Text(
                 widget.strings.scanHint,
                 textAlign: TextAlign.center,

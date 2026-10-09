@@ -1,6 +1,6 @@
 import { LineEdit, Button, TextEdit, ListView, ScrollView, Slider, SpinBox, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
-import { Palette, IconButton, Glyph, PrimaryButton, Field } from "theme.slint";
+import { Palette, IconButton, Glyph, PrimaryButton, Field, ColorChip, Scroll } from "theme.slint";
 import { PairingPanel, SharedDeviceRow } from "pairing.slint";
 
 
@@ -465,7 +465,8 @@ export component ListWindow inherits Window {
                 // to someone who opens it.
                 badge: !root.sync-available ? 3
                     : root.linked-devices == 0 ? 0 : root.online-devices > 0 ? 1 : 2;
-                clicked => { root.show-sync = !root.show-sync; }
+                active: root.show-sync;
+                clicked => { root.commit-edit(); root.show-sync = !root.show-sync; }
             }
             b-folder := IconButton {
                 width: root.naming ? 0px : 30px;
@@ -510,6 +511,8 @@ export component ListWindow inherits Window {
             }
             TouchArea {
                 mouse-cursor: pointer;
+                accessible-role: button;
+                accessible-label: Strings.ui_update_available + " " + root.update-version;
                 clicked => { root.open-update(); }
             }
         }
@@ -517,10 +520,20 @@ export component ListWindow inherits Window {
         // Scrolls: the panel is taller than the window as soon as a request is waiting and a
         // device or two is listed, and without this the rows at the bottom — the remove
         // button and what it warns about — were cut off with no way to reach them.
-        if root.show-sync: ScrollView {
+        //
+        // The content is given the view's width less the scrollbar's, as in the settings
+        // window, so nothing in it runs under the bar.
+        if root.show-sync: sync-scroll := ScrollView {
             vertical-stretch: 1;
-            VerticalLayout {
+            viewport-width: self.visible-width;
+            viewport-height: sync-content.preferred-height;
+            sync-content := VerticalLayout {
+                width: sync-scroll.visible-width - Scroll.gutter;
                 alignment: start;
+                // Slack under the last row: the panel's wrapped paragraphs measure themselves
+                // shorter than they draw (169px measured against about 195px drawn, for the
+                // no-sync state), and the bottom of the panel would sit out of reach.
+                padding-bottom: 32px;
                 PairingPanel {
                     available: root.sync-available;
                     my-code: root.my-pairing-code;
@@ -608,7 +621,7 @@ export component ListWindow inherits Window {
                     width: 20px;
                     height: 20px;
                     icon: "close";
-                    label: Strings.ui_list_search;
+                    label: Strings.ui_list_search_clear;
                     clicked => { find.text = ""; root.search(""); root.commit-edit(); }
                 }
             }
@@ -699,7 +712,7 @@ export component ListWindow inherits Window {
             }
         }
 
-        if !root.show-sync && root.rows.length > 0: ListView {
+        if !root.show-sync && root.rows.length > 0: rows-view := ListView {
             vertical-stretch: 1;
             // Never wider than the window: nothing in a row is meant to be scrolled to, and
             // left to itself the view measured the rows' natural widths — a long title's,
@@ -725,12 +738,22 @@ export component ListWindow inherits Window {
             }
             for row[idx] in root.rows: row-box := Rectangle {
                 height: root.row-h;
+                // Clear of the scrollbar once there is something to scroll. A row is as wide as
+                // the view unless it says otherwise, and the bar is drawn over that width — on
+                // top of every row's time and count.
+                width: rows-view.visible-width
+                    - (root.rows.length * root.row-h > rows-view.visible-height ? Scroll.gutter : 0px);
                 // Whether the memo's preview gets the rest of the line. Not when the title
                 // alone is most of it: squeezed, the preview is a lone "…", and the layout
                 // shrinks the title to its ellipsis first to make room for it. Measured here,
                 // at the row, because both the title and the preview sit in `if`s of their
                 // own and neither can see into the other.
-                property <bool> preview-fits: title-measure.preferred-width <= self.width * 0.62;
+                //
+                // Asked of the room actually left: the indent, the marks and the time at the
+                // end take a fixed share of the row, and a title that passed a simple ratio
+                // still left the preview a lone "두 …" between itself and the time.
+                property <bool> preview-fits: title-measure.preferred-width + row.depth * 14px
+                    + 108px + 64px <= self.width;
                 title-measure := Text {
                     visible: false;
                     // Measured, never laid out: at its natural width a long title made the row
@@ -903,6 +926,8 @@ export component ListWindow inherits Window {
                         }
                         swatch-ta := TouchArea {
                             mouse-cursor: pointer;
+                            accessible-role: button;
+                            accessible-label: Strings.ui_sticky_color;
                             clicked => {
                                 root.commit-edit();
                                 root.coloring-id = root.coloring-id == row.id ? "" : row.id;
@@ -915,24 +940,18 @@ export component ListWindow inherits Window {
                         horizontal-stretch: 1;
                         spacing: 6px;
                         alignment: start;
-                        for key in ["yellow", "pink", "green", "blue", "purple"]: Rectangle {
-                            width: 18px;
-                            height: 18px;
+                        for key in ["yellow", "pink", "green", "blue", "purple"]: ColorChip {
+                            size: 18px;
                             y: (parent.height - self.height) / 2;
-                            border-radius: 9px;
-                            background: Palette.swatch(key);
-                            border-width: row.color == key ? 3px : 1px;
-                            border-color: row.color == key ? #ffffff : #00000040;
-                            TouchArea {
-                                mouse-cursor: pointer;
-                                // Closed *before* the write, not after: `set-row-color`
-                                // rebuilds the row model, which destroys this very element,
-                                // and anything after that call never runs — which is why the
-                                // palette used to stay open over the colour it had just set.
-                                clicked => {
-                                    root.coloring-id = "";
-                                    root.set-row-color(row.id, row.is-group, key);
-                                }
+                            key: key;
+                            selected: row.color == key;
+                            // Closed *before* the write, not after: `set-row-color` rebuilds
+                            // the row model, which destroys this very element, and anything
+                            // after that call never runs — which is why the palette used to
+                            // stay open over the colour it had just set.
+                            picked => {
+                                root.coloring-id = "";
+                                root.set-row-color(row.id, row.is-group, key);
                             }
                         }
                     }
