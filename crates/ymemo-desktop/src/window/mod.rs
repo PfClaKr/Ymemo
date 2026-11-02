@@ -76,9 +76,10 @@ pub(crate) fn present_dialog<T: ComponentHandle + 'static>(
     component.window().set_size(LogicalSize::new(size.0, size.1));
     let anchor = anchor.filter(|a| a.is_visible()).map(outer_rect);
     present(component);
-    let scale = component.window().scale_factor();
-    let own = ((size.0 * scale).round() as i32, (size.1 * scale).round() as i32);
     with_window(component, move |window| {
+        // Asked of winit: until it has made the window, Slint's scale factor is 1.0.
+        let scale = window.scale_factor();
+        let own = ((f64::from(size.0) * scale).round() as i32, (f64::from(size.1) * scale).round() as i32);
         let (screens, primary) = crate::screens::current(window);
         if let Some((x, y)) = crate::screens::centered_on(anchor, own, &screens, primary) {
             window.set_outer_position(i_slint_backend_winit::winit::dpi::PhysicalPosition::new(x, y));
@@ -127,10 +128,11 @@ pub(crate) fn place_new_note<T: ComponentHandle + 'static>(component: &T, from: 
         return;
     }
     let from = outer_rect(anchor);
-    let step = (28.0 * component.window().scale_factor()).round() as i32;
     with_window(component, move |window| {
         // Asked of winit, which has the window by now; Slint's own size is not settled until
-        // the first layout.
+        // the first layout, and its scale factor is 1.0 until then — which made the step 28
+        // physical px at any scale, short of the 36px title bar of a note at 150%.
+        let step = (28.0 * window.scale_factor()).round() as i32;
         let size = window.outer_size();
         let own = (size.width as i32, size.height as i32);
         let (screens, _) = crate::screens::current(window);
@@ -213,6 +215,9 @@ fn with_window<T: ComponentHandle + 'static>(
 /// **Where it goes is decided against the screens attached now** (`screens::place`), with
 /// `screen` — the one it was on when the geometry was taken — to say which of them it
 /// belongs to. The same numbers are a different place after a laptop moves desks.
+///
+/// The size is **logical** (see `settings::sane_geometry`), and given as such: a window not
+/// made yet has no scale factor, and a physical size given to it then is read at 1.0.
 pub(crate) fn restore_geometry<T: ComponentHandle + 'static>(
     component: &T,
     geometry: [i32; 4],
@@ -222,11 +227,15 @@ pub(crate) fn restore_geometry<T: ComponentHandle + 'static>(
 
     component
         .window()
-        .set_size(slint::PhysicalSize::new(geometry[2].max(1) as u32, geometry[3].max(1) as u32));
+        .set_size(LogicalSize::new(geometry[2].max(1) as f32, geometry[3].max(1) as f32));
     if geometry[0] == crate::settings::POS_UNKNOWN {
         return;
     }
     with_window(component, move |window| {
+        // The screens are physical px, so the size measured against them is too.
+        let scale = window.scale_factor();
+        let physical = |logical: i32| (f64::from(logical) * scale).round() as i32;
+        let geometry = [geometry[0], geometry[1], physical(geometry[2]), physical(geometry[3])];
         let (screens, primary) = crate::screens::current(window);
         let (x, y) = crate::screens::place(geometry, screen.as_ref(), &screens, primary);
         if (x, y) != (geometry[0], geometry[1]) {

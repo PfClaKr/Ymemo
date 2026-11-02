@@ -28,7 +28,17 @@ pub(super) fn window_geometry(window: &slint::Window) -> [i32; 4] {
     }
 }
 
-/// The geometry worth remembering for one sticky.
+/// `physical` as `settings.json` keeps it: the position as it is, the size in logical px —
+/// see `settings::sane_geometry` for why the two differ.
+fn kept_geometry(physical: [i32; 4], scale: f32) -> [i32; 4] {
+    if scale <= 0.0 {
+        return physical;
+    }
+    let logical = |px: i32| (px as f32 / scale).round() as i32;
+    [physical[0], physical[1], logical(physical[2]), logical(physical[3])]
+}
+
+/// The geometry worth remembering for one sticky, in the units `settings.json` keeps.
 ///
 /// A folded note is one title bar tall, and that is a *state*, not a size: remembering it put
 /// the note back as a 24px strip that nothing had marked folded, so the whole button row was
@@ -38,17 +48,20 @@ pub(super) fn window_geometry(window: &slint::Window) -> [i32; 4] {
 /// The colour panel is the same kind of thing: opening it grows the window by the panel's
 /// height, and a note closed or locked with it open came back that much taller — 62px more
 /// every time, with the panel shut. So its height is taken off while it is open.
+///
+/// `physical` is [`window_geometry`] of `window`, read once by the caller, which also needs it
+/// to find the window's screen.
 pub(super) fn geometry_to_remember(
     ctx: &Ctx,
     id: &str,
     window: &slint::Window,
+    physical: [i32; 4],
     collapsed: bool,
     palette_open: bool,
 ) -> [i32; 4] {
-    let mut geometry = window_geometry(window);
+    let mut geometry = kept_geometry(physical, window.scale_factor());
     if palette_open && !collapsed {
-        let extra = (super::PALETTE_HEIGHT * window.scale_factor()).round() as i32;
-        geometry[3] = (geometry[3] - extra).max(1);
+        geometry[3] = (geometry[3] - super::PALETTE_HEIGHT.round() as i32).max(1);
     }
     if collapsed {
         geometry[3] = ctx
@@ -70,10 +83,11 @@ pub(crate) fn remember_one(ctx: &Ctx, id: &str, window: &slint::Window) {
         .borrow()
         .get(id)
         .map_or((false, false), |e| (e.window.get_collapsed(), e.window.get_show_palette()));
-    let geometry = geometry_to_remember(ctx, id, window, collapsed, palette_open);
+    let physical = window_geometry(window);
+    let geometry = geometry_to_remember(ctx, id, window, physical, collapsed, palette_open);
     if ctx.settings.borrow_mut().set_memo_window(id, geometry) {
         if let Some((screens, _)) = window.with_winit_window(crate::screens::current) {
-            if let Some(s) = crate::screens::screen_of(geometry, &screens) {
+            if let Some(s) = crate::screens::screen_of(physical, &screens) {
                 ctx.settings.borrow_mut().set_memo_screen(id, s.clone());
             }
         }
@@ -159,7 +173,7 @@ pub(crate) fn remember_geometry(ctx: &Ctx, list: &crate::ListWindow) {
     // Read outside the `settings` borrow: `geometry_to_remember` reads the settings itself.
     // Only the notes winit said moved or resized (`Motion`), and any with no screen on record
     // yet — asking every note where it is, every two seconds, cost a round trip each.
-    let seen: Vec<(String, [i32; 4])> = {
+    let seen: Vec<(String, [i32; 4], [i32; 4])> = {
         let map = ctx.stickies.borrow();
         let settings = ctx.settings.borrow();
         let wanted: Vec<(&String, &crate::state::StickyEntry)> = map
@@ -174,14 +188,16 @@ pub(crate) fn remember_geometry(ctx: &Ctx, list: &crate::ListWindow) {
             .into_iter()
             .map(|(id, e)| {
                 e.motion.geometry_dirty.set(false);
+                let physical = window_geometry(e.window.window());
                 let g = geometry_to_remember(
                     ctx,
                     id,
                     e.window.window(),
+                    physical,
                     e.window.get_collapsed(),
                     e.window.get_show_palette(),
                 );
-                (id.clone(), g)
+                (id.clone(), g, physical)
             })
             .collect()
     };
@@ -198,20 +214,20 @@ pub(crate) fn remember_geometry(ctx: &Ctx, list: &crate::ListWindow) {
         // A window with no screen on record yet gets one even when it has not moved: a
         // desk arranged before screens were remembered would otherwise wait for its first
         // drag, and a new primary monitor before then would still scatter it.
-        for (id, geometry) in &seen {
+        for (id, geometry, physical) in &seen {
             let moved = settings.set_memo_window(id, *geometry);
             if moved || settings.memo_screen(id).is_none() {
-                if let Some(s) = crate::screens::screen_of(*geometry, &screens_now()) {
+                if let Some(s) = crate::screens::screen_of(*physical, &screens_now()) {
                     changed |= settings.set_memo_screen(id, s.clone());
                 }
             }
             changed |= moved;
         }
         if list.window().is_visible() {
-            let geometry = window_geometry(list.window());
-            let moved = settings.set_list_window(geometry);
+            let physical = window_geometry(list.window());
+            let moved = settings.set_list_window(kept_geometry(physical, list.window().scale_factor()));
             if moved || settings.list_screen.is_none() {
-                if let Some(s) = crate::screens::screen_of(geometry, &screens_now()) {
+                if let Some(s) = crate::screens::screen_of(physical, &screens_now()) {
                     changed |= settings.set_list_screen(s.clone());
                 }
             }
@@ -220,5 +236,31 @@ pub(crate) fn remember_geometry(ctx: &Ctx, list: &crate::ListWindow) {
     }
     if changed {
         ctx.settings.borrow().save(&ctx.dir);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A note 300x220 on a screen at 150% is 450x330 physical px, and has to be kept as
+    /// 300x220: that is what it is given back as, before its window knows the scale.
+    #[test]
+    fn the_size_is_kept_logical_and_the_position_physical() {
+        assert_eq!(kept_geometry([2600, -400, 450, 330], 1.5), [2600, -400, 300, 220]);
+        assert_eq!(kept_geometry([60, 80, 300, 220], 1.0), [60, 80, 300, 220]);
+        let unknown = [POS_UNKNOWN, POS_UNKNOWN, 500, 300];
+        assert_eq!(kept_geometry(unknown, 2.0), [POS_UNKNOWN, POS_UNKNOWN, 250, 150]);
+    }
+
+    /// Kept, put back at the same scale and read again, a size does not creep.
+    #[test]
+    fn a_kept_size_survives_a_round_trip() {
+        for scale in [1.0f32, 1.25, 1.5, 1.75, 2.0] {
+            for w in [140, 199, 200, 201, 333, 1000] {
+                let physical = (w as f32 * scale).round() as i32;
+                assert_eq!(kept_geometry([0, 0, physical, physical], scale)[2], w, "{w} at {scale}");
+            }
+        }
     }
 }
