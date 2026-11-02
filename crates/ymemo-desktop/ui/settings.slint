@@ -362,6 +362,10 @@ export component SettingsWindow inherits Window {
     callback close-requested();
     // Opens the security window: the master password and the recovery code live there.
     callback open-security();
+    // Whether the sync program is here; without it the sync page says so first.
+    in property <bool> sync-available: false;
+    callback open-devices();
+    callback get-sync();
     callback check-update();
     callback open-update();
     callback open-log();
@@ -708,6 +712,31 @@ export component SettingsWindow inherits Window {
                             PageTitle {
                                 title: Strings.ui_settings_nav_sync;
                                 intro: Strings.ui_settings_sync_intro;
+                            }
+                            // Which devices there are comes before how fast they hear from each
+                            // other — and with no sync program, that none of this is running. The
+                            // timings below were the whole page, adjustable and in effect for
+                            // nothing, with the reason only behind the list's link button.
+                            if root.sync-available: Group {
+                                Row {
+                                    label: Strings.ui_settings_devices;
+                                    description: Strings.ui_settings_devices_hint;
+                                    Button {
+                                        text: Strings.ui_settings_devices_open;
+                                        enabled: root.unlocked;
+                                        clicked => { root.open-devices(); }
+                                    }
+                                }
+                            }
+                            if !root.sync-available: Group {
+                                Row {
+                                    label: Strings.ui_pair_unavailable_title;
+                                    description: Strings.ui_settings_sync_missing_hint;
+                                    Button {
+                                        text: Strings.ui_pair_unavailable_download;
+                                        clicked => { root.get-sync(); }
+                                    }
+                                }
                             }
                             Group {
                                 Row {

@@ -144,6 +144,8 @@ export component ListWindow inherits Window {
     callback open-update();
 
     private property <bool> show-sync: false;
+    // The device panel, opened from elsewhere (the settings window's sync page).
+    public function open-sync() { root.show-sync = true; }
     // Ctrl+F asking the find box for the focus; the box clears it once it has taken it.
     private property <bool> want-find: false;
     changed show-sync => { root.sync-toggled(self.show-sync); }
