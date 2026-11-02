@@ -213,6 +213,9 @@ fn with_window<T: ComponentHandle + 'static>(
 /// **Where it goes is decided against the screens attached now** (`screens::place`), with
 /// `screen` — the one it was on when the geometry was taken — to say which of them it
 /// belongs to. The same numbers are a different place after a laptop moves desks.
+///
+/// The size is **logical** (see `settings::sane_geometry`), and given as such: a window not
+/// made yet has no scale factor, and a physical size given to it then is read at 1.0.
 pub(crate) fn restore_geometry<T: ComponentHandle + 'static>(
     component: &T,
     geometry: [i32; 4],
@@ -222,11 +225,15 @@ pub(crate) fn restore_geometry<T: ComponentHandle + 'static>(
 
     component
         .window()
-        .set_size(slint::PhysicalSize::new(geometry[2].max(1) as u32, geometry[3].max(1) as u32));
+        .set_size(LogicalSize::new(geometry[2].max(1) as f32, geometry[3].max(1) as f32));
     if geometry[0] == crate::settings::POS_UNKNOWN {
         return;
     }
     with_window(component, move |window| {
+        // The screens are physical px, so the size measured against them is too.
+        let scale = window.scale_factor();
+        let physical = |logical: i32| (f64::from(logical) * scale).round() as i32;
+        let geometry = [geometry[0], geometry[1], physical(geometry[2]), physical(geometry[3])];
         let (screens, primary) = crate::screens::current(window);
         let (x, y) = crate::screens::place(geometry, screen.as_ref(), &screens, primary);
         if (x, y) != (geometry[0], geometry[1]) {

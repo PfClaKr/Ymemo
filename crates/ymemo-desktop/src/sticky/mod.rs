@@ -308,8 +308,8 @@ fn put_back(ctx: &Ctx, window: &StickyWindow, id: &str, expanded_height: &Rc<Cel
     if let Some(geometry) = saved_geometry {
         restore_geometry(window, geometry, saved_screen);
         // What it should go back to when it is unfolded; the geometry above is always the
-        // note's expanded size, folded or not.
-        expanded_height.set(geometry[3] as f32 / window.window().scale_factor());
+        // note's expanded size, folded or not, and already logical.
+        expanded_height.set(geometry[3] as f32);
     } else {
         // Asked for, not left to the window: under a window manager a new note opened at
         // the layout's minimum, a 140x24 strip with no room to write (measured under openbox).

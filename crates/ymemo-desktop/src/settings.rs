@@ -61,9 +61,15 @@ pub const POS_UNKNOWN: i32 = i32::MIN;
 
 /// Whether a remembered `[x, y, width, height]` could still put a usable window on screen.
 ///
-/// Everything here is **physical** pixels: a position can only be read and set in those, and
-/// splitting the units across one array of four numbers reads worse than the DPI change it
-/// would guard against, which costs a note its size once.
+/// The position is **physical** pixels, the only unit a window can be placed in and the one
+/// the screens are described in. The size is **logical**: a note is opened by giving a window
+/// that does not exist yet its size, and until winit has made it Slint knows no scale factor
+/// and reads any size at 1.0. A physical size kept here was therefore put back as a logical
+/// one, and on a screen at 150% every reopen — a restart, an unlock, closing and opening a
+/// note — made it half as big again: 300x220 came back 450x330, then 675x495 (measured under
+/// X11 at `Xft.dpi: 144`). Logical is also what keeps a note the same size to read when the
+/// scale changes under it. A file written before holds physical sizes, which the old reading
+/// already took as logical, so nothing moves on the first start of this one.
 fn sane_geometry(g: &[i32; 4], min_w: i32, min_h: i32) -> bool {
     let position_ok = (g[0] == POS_UNKNOWN && g[1] == POS_UNKNOWN)
         || (g[0].abs() <= GEOMETRY_LIMIT && g[1].abs() <= GEOMETRY_LIMIT);
@@ -135,8 +141,8 @@ pub struct Settings {
     /// goes to the trouble of remembering had nothing left to arrange. Only ids: what a note
     /// says lives in the vault, and this file is not encrypted.
     pub open_memos: Vec<String>,
-    /// Where each memo's sticky sat and how big it was, by memo id: `[x, y, width, height]`
-    /// in logical pixels.
+    /// Where each memo's sticky sat and how big it was, by memo id: `[x, y, width, height]`,
+    /// the position in physical pixels and the size in logical ones (see `sane_geometry`).
     ///
     /// Device-local for the same reason the pins are: a note's place on a desk is a fact
     /// about that desk, and two screens of different sizes cannot share one. Without this a
