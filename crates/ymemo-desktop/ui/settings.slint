@@ -807,6 +807,8 @@ export component SettingsWindow inherits Window {
                             Rectangle { height: 6px; }
                             GroupTitle { text: Strings.ui_shortcuts_list; }
                             Group {
+                                Shortcut { keys: "Ctrl+F"; action: Strings.ui_shortcut_find; }
+                                Divider { }
                                 Shortcut { arrows: true; keys: "Home  End"; action: Strings.ui_shortcut_move; }
                                 Divider { }
                                 Shortcut { keys: "Enter"; action: Strings.ui_shortcut_open; }

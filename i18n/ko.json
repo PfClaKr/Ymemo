@@ -452,6 +452,7 @@
   "ui.shortcut_delete": "지우기",
   "ui.shortcut_deselect": "선택 풀기, 검색어 지우기",
   "ui.shortcut_done": "쓰기를 마치고 읽기 화면으로",
+  "ui.shortcut_find": "메모 찾기",
   "ui.shortcut_fold": "접기 / 펴기",
   "ui.shortcut_fold_key": "제목줄 두 번 클릭",
   "ui.shortcut_move": "위아래로 이동, 처음과 끝으로",
