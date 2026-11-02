@@ -4,7 +4,7 @@
 //! Nothing here caches them: a history is read when the window opens and again after a
 //! restore, because a restore is itself a new revision.
 
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
 use ymemo_core::history::{Entity, Revision, RevisionKind};
@@ -19,6 +19,14 @@ pub(crate) type Subject = Rc<RefCell<Option<(Entity, String)>>>;
 
 /// Connects the window's callbacks. `subject` is shared with the callers that open it.
 pub(crate) fn wire(ctx: &Ctx, win: &HistoryWindow, subject: &Subject) {
+    {
+        let weak = win.as_weak();
+        win.on_selection_changed(move || {
+            if let Some(w) = weak.upgrade() {
+                show_preview(&w);
+            }
+        });
+    }
     {
         let weak = win.as_weak();
         win.on_close_requested(move || {
@@ -139,6 +147,21 @@ fn refresh(ctx: &Ctx, win: &HistoryWindow, entity: Entity, id: &str) {
         .map(|(i, r)| row(i, r, entity, &device_id, i == newest))
         .collect();
     win.set_revisions(ModelRc::new(VecModel::from(rows)));
+    // The rows changed under the selection even when its index did not, which is the case
+    // after every restore: same index, a new version in it.
+    show_preview(win);
+}
+
+/// Draws the chosen version the way its note's read view would.
+fn show_preview(win: &HistoryWindow) {
+    let body = usize::try_from(win.get_selected())
+        .ok()
+        .and_then(|at| win.get_revisions().row_data(at))
+        .map(|row| row.body.to_string())
+        .unwrap_or_default();
+    // The row's body is already `hangul::for_slint`'d, which `blocks` does again; decomposing
+    // is idempotent, so that costs nothing but the scan.
+    win.set_preview_blocks(ModelRc::new(VecModel::from(crate::markdown::blocks(&body))));
 }
 
 /// One core revision as a display row. `current` is the newest one, which is what the memo
