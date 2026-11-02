@@ -227,14 +227,15 @@ fn wire_add_peer(
     let handler = pairing_handler(syncthing.clone(), waiting.clone(), set_state);
     lock.on_add_peer(handler.clone());
     list.on_add_peer(handler);
-    // No sync program here: the release page is where the installer that carries it is.
-    let get_sync = || {
-        if let Err(e) = crate::update::open_url(RELEASES_PAGE) {
-            diag!("could not open the browser: {e}");
-        }
-    };
-    lock.on_get_sync(get_sync);
-    list.on_get_sync(get_sync);
+    lock.on_get_sync(open_releases_page);
+    list.on_get_sync(open_releases_page);
+}
+
+/// No sync program here: the release page is where the installer that carries it is.
+pub(crate) fn open_releases_page() {
+    if let Err(e) = crate::update::open_url(RELEASES_PAGE) {
+        diag!("could not open the browser: {e}");
+    }
 }
 
 /// Watch for vault.json: once pairing has synced it to a device that chose "link to an

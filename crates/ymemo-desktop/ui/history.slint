@@ -1,6 +1,7 @@
 import { Button, ListView, ScrollView, Palette as StdPalette } from "std-widgets.slint";
 import { Strings } from "@i18n";
 import { Palette, PrimaryButton } from "theme.slint";
+import { NoteBlock, ReadBlock } from "read_view.slint";
 
 // ---------------------------------------------------------------------------
 // History window: every past version of one memo or folder, newest first, with the values
@@ -49,6 +50,11 @@ export component HistoryWindow inherits Window {
     // Selected row, as an index into `revisions`; -1 while nothing is chosen.
     in-out property <int> selected: -1;
 
+    // The chosen version as the note's read view draws it; Rust fills it whenever the choice
+    // or the list changes (`history::show_preview`).
+    in property <[NoteBlock]> preview-blocks: [];
+    callback selection-changed();
+    changed selected => { root.selection-changed(); }
     callback restore(int); // the core-side index carried by the row
     callback close-requested();
 
@@ -228,13 +234,39 @@ export component HistoryWindow inherits Window {
 
                     if root.selected >= 0: Rectangle {
                         vertical-stretch: 1;
-                        background: #262320;
-                        border-radius: 6px;
-                        // Read-only text rather than a label, so a passage of an old version can
-                        // be selected and copied out without putting the whole version back.
+                        // On the note's own paper, the way the phone shows it: a version is
+                        // recognised by what it looked like, and the raw markup on a dark
+                        // panel — every fence and asterisk — looked like no note at all.
+                        background: Palette.bg(root.current.color);
+                        border-width: 1px;
+                        border-color: Palette.edge(root.current.color);
+                        border-radius: 4px;
+                        clip: true;
                         body-scroll := ScrollView {
                             viewport-width: self.visible-width;
-                            viewport-height: max(self.visible-height, body-text.preferred-height + 16px);
+                            viewport-height: max(self.visible-height,
+                                max(body-text.preferred-height, read.preferred-height) + 16px);
+                            // The read view **under** a read-only field, as on a sticky and for
+                            // the same reason: `StyledText` cannot be selected, and a passage of
+                            // an old version has to be copyable without putting the whole
+                            // version back. A click hands over to the field, which shows the
+                            // text as it was typed; picking a version takes the focus back.
+                            read := VerticalLayout {
+                                x: 8px;
+                                y: 8px;
+                                width: body-scroll.visible-width - 16px;
+                                // Its own height, not the viewport's: stretched to fill a short
+                                // version's box it spread the blocks, and a code block's lines,
+                                // apart.
+                                height: self.preferred-height;
+                                visible: !body-text.has-focus;
+                                spacing: 4px;
+                                alignment: start;
+                                for block in root.preview-blocks: ReadBlock {
+                                    block: block;
+                                    color-key: root.current.color;
+                                }
+                            }
                             body-text := TextInput {
                                 x: 8px;
                                 y: 8px;
@@ -243,16 +275,17 @@ export component HistoryWindow inherits Window {
                                 read-only: true;
                                 single-line: false;
                                 wrap: word-wrap;
-                                font-size: 12px;
-                                color: #d8d2c2;
-                                selection-background-color: #e2c22a66;
-                                selection-foreground-color: #ffffff;
+                                // The sticky's body size, so the two views line up.
+                                font-size: 13px;
+                                color: self.has-focus || root.preview-blocks.length == 0
+                                    ? #2b2b22 : transparent;
+                                selection-background-color: Palette.ink(root.current.color).with-alpha(0.25);
+                                selection-foreground-color: #2b2b22;
                             }
                         }
                     }
                 }
             }
-
             if root.status != "": Text {
                 text: root.status;
                 font-size: 11px;
