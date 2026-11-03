@@ -430,13 +430,20 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   /// storage the app cannot reach — and leaving the screen on a false would throw away what
   /// is typed in it with nothing said, so the caller stays put and shows why. The core's
   /// message says what went wrong; it is shown as it is.
+  ///
+  /// What is written is taken **before** the await, and that is what is recorded as saved.
+  /// Reading the fields again afterwards marked anything typed while the write was in flight
+  /// as saved without it ever being written — every later save then found nothing changed,
+  /// and those letters were lost the moment the app went away.
   Future<bool> _save() async {
-    if (_title.text == _savedTitle && _body.text == _savedBody) return true;
+    final title = _title.text;
+    final body = _body.text;
+    if (title == _savedTitle && body == _savedBody) return true;
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await memoUpsert(id: widget.id, title: _title.text, body: _body.text);
-      _savedTitle = _title.text;
-      _savedBody = _body.text;
+      await memoUpsert(id: widget.id, title: title, body: body);
+      _savedTitle = title;
+      _savedBody = body;
       return true;
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('$e')));
