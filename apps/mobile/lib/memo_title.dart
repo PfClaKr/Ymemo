@@ -103,7 +103,44 @@ String _plainLine(String line) {
       break;
     }
   }
-  return plain.replaceAll('**', '').replaceAll('__', '').replaceAll('`', '');
+  plain = plain.replaceAll('**', '').replaceAll('__', '').replaceAll('`', '');
+  return _unwrapEmphasis(_unwrapEmphasis(plain, '*'), '_');
+}
+
+/// Letters and digits in any script: what a mark next to it is part of rather than wrapping.
+final RegExp _wordChar = RegExp(r'[\p{L}\p{N}]', unicode: true);
+final RegExp _space = RegExp(r'\s');
+
+/// `*word*` as `word`, for one marker: the single-character emphasis the double-character
+/// pass leaves behind, so a preview read "*italic*" beside "bold". Only a pair that wraps
+/// something — not after a letter, not before a space, nothing of its kind in between — so
+/// `3*4*5` and `snake_case_name` keep their characters. **Same rule as `unwrap_emphasis` in
+/// the desktop's list module.**
+String _unwrapEmphasis(String line, String mark) {
+  final chars = line.runes.map(String.fromCharCode).toList();
+  bool word(int i) =>
+      i >= 0 && i < chars.length && (chars[i] == mark || _wordChar.hasMatch(chars[i]));
+  bool space(int i) => _space.hasMatch(chars[i]);
+  final out = StringBuffer();
+  var i = 0;
+  while (i < chars.length) {
+    final opens = chars[i] == mark &&
+        !word(i - 1) &&
+        i + 1 < chars.length &&
+        !space(i + 1) &&
+        chars[i + 1] != mark;
+    if (opens) {
+      final close = chars.indexOf(mark, i + 1);
+      if (close > 0 && !space(close - 1) && !word(close + 1)) {
+        out.writeAll(chars.sublist(i + 1, close));
+        i = close + 1;
+        continue;
+      }
+    }
+    out.write(chars[i]);
+    i++;
+  }
+  return out.toString();
 }
 
 /// When a memo was last written, the way a person would say it: "방금", "5분 전", "3시간 전",

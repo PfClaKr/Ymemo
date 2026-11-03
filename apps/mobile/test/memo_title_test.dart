@@ -74,6 +74,17 @@ void main() {
     expect(rowPreview(_memo('코드\n```rust\nfn main() {}\n```')), 'fn main() {}');
   });
 
+  test('single emphasis marks leave the preview but arithmetic stays', () {
+    // Same cases as the desktop's `single_emphasis_marks_leave_the_preview_but_arithmetic_stays`.
+    String preview(String line) => rowPreview(_memo('제목\n$line'));
+    expect(preview('**bold** and *italic*'), 'bold and italic');
+    expect(preview('_기울임_ 그리고 *강조*'), '기울임 그리고 강조');
+    expect(preview('3*4*5 = 60'), '3*4*5 = 60');
+    expect(preview('snake_case_name'), 'snake_case_name');
+    expect(preview('a * b * c'), 'a * b * c');
+    expect(preview('*unclosed'), '*unclosed');
+  });
+
   test('a long line is capped where the desktop caps it', () {
     expect(firstLine('a' * 60).length, 40);
   });

@@ -551,7 +551,38 @@ fn plain_line(line: &str) -> String {
         .iter()
         .find_map(|m| line.strip_prefix(m))
         .unwrap_or(line);
-    line.replace("**", "").replace("__", "").replace('`', "")
+    let line = line.replace("**", "").replace("__", "").replace('`', "");
+    unwrap_emphasis(&unwrap_emphasis(&line, '*'), '_')
+}
+
+/// `*word*` as `word`, for one marker: the single-character emphasis the double-character
+/// pass above leaves behind, so a preview read "*italic*" beside "bold". Only a pair that
+/// wraps something — not after a letter, not before a space, nothing of its kind in between —
+/// so `3*4*5` and `snake_case_name` keep their characters. **Same rule as `_unwrapEmphasis`
+/// in the phone's `memo_title.dart`.**
+fn unwrap_emphasis(line: &str, mark: char) -> String {
+    let chars: Vec<char> = line.chars().collect();
+    let word = |c: Option<&char>| c.is_some_and(|c| c.is_alphanumeric() || *c == mark);
+    let mut out = String::with_capacity(line.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let opens = chars[i] == mark
+            && !word(i.checked_sub(1).and_then(|p| chars.get(p)))
+            && chars.get(i + 1).is_some_and(|c| !c.is_whitespace() && *c != mark);
+        if opens {
+            if let Some(len) = chars[i + 1..].iter().position(|c| *c == mark) {
+                let close = i + 1 + len;
+                if !chars[close - 1].is_whitespace() && !word(chars.get(close + 1)) {
+                    out.extend(&chars[i + 1..close]);
+                    i = close + 1;
+                    continue;
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
 }
 
 /// When a memo was last written, the way a person would say it: "방금", "5분 전", "3시간 전",
@@ -649,6 +680,18 @@ mod tests {
         assert_eq!(preview_of(&memo, "장보기"), "우유 계란");
         let titled = Memo::new("회의", "결정 사항\n배포는 금요일");
         assert_eq!(preview_of(&titled, "회의"), "결정 사항 배포는 금요일");
+    }
+
+    /// A single-mark pair that wraps a word goes, as `**` already did; one that is part of the
+    /// writing stays. Same cases as the phone's `memo_title_test.dart`.
+    #[test]
+    fn single_emphasis_marks_leave_the_preview_but_arithmetic_stays() {
+        assert_eq!(plain_line("**bold** and *italic*"), "bold and italic");
+        assert_eq!(plain_line("_기울임_ 그리고 *강조*"), "기울임 그리고 강조");
+        assert_eq!(plain_line("3*4*5 = 60"), "3*4*5 = 60");
+        assert_eq!(plain_line("snake_case_name"), "snake_case_name");
+        assert_eq!(plain_line("a * b * c"), "a * b * c");
+        assert_eq!(plain_line("*unclosed"), "*unclosed");
     }
 
     use std::cell::{Cell, RefCell};
