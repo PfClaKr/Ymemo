@@ -7,6 +7,7 @@ import 'dart:io' show Directory, File, FileSystemEvent;
 import 'package:flutter/foundation.dart' show Uint8List, listEquals, mapEquals;
 import 'package:flutter/material.dart';
 
+import '../errors.dart';
 import '../home_widgets.dart' as widgets;
 import '../memo_title.dart';
 import '../palette.dart';
@@ -398,7 +399,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
     try {
       await groupCreate(name: name, parentId: widget.groupId);
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(errorMessage(e))));
       return;
     }
     await _reload();
@@ -948,7 +949,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
     } catch (e) {
       // Without this the button simply did nothing, which reads as a broken app rather
       // than as storage the vault cannot be written to.
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(errorMessage(e))));
       return;
     }
     if (!mounted) return;

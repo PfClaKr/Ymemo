@@ -7,9 +7,10 @@ import 'dart:math' show max;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../errors.dart';
 import '../host.dart' as host;
-import '../memo_title.dart';
 import '../markdown_style.dart';
+import '../memo_title.dart';
 import '../palette.dart';
 import '../pending_edits.dart';
 import '../src/rust/api.dart';
@@ -253,7 +254,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       await memoUpsert(id: widget.id, title: _title.text, body: _body.text);
       _showBody(await attachmentRemove(id: photo.id));
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(errorMessage(e))));
       return;
     }
     if (_selectedPhoto == photo.id) _selectedPhoto = null;
@@ -272,7 +273,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       if (body != null) _showBody(body);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorMessage(e))));
       }
       return;
     }
@@ -308,7 +309,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       if (mounted) _body.text = body;
       _savedBody = body;
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(errorMessage(e))));
       return;
     }
     await _reloadPhotos();
@@ -359,7 +360,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       // and said nothing; the scanner says the same in the same words.
       debugPrint('could not pick a photo: $e');
       messenger.showSnackBar(SnackBar(
-          content: Text(source == ImageSource.camera ? widget.strings.cameraError : '$e')));
+          content: Text(source == ImageSource.camera ? widget.strings.cameraError : errorMessage(e))));
       return;
     }
     if (picked == null) return;
@@ -376,7 +377,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       );
     } catch (e) {
       // Storage the vault cannot be written to: the core's message says which.
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(errorMessage(e))));
       return;
     }
     final added = await attachmentList(memoId: widget.id);
@@ -446,7 +447,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       _savedBody = body;
       return true;
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(errorMessage(e))));
       return false;
     }
   }

@@ -5,6 +5,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../errors.dart';
 import '../palette.dart';
 import '../src/rust/api.dart';
 import '../memo_title.dart';
@@ -66,7 +67,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
-      _say('$e');
+      _say(errorMessage(e));
     }
   }
 
@@ -84,7 +85,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       await _load();
       if (mounted) _say(widget.strings.historyRestored);
     } catch (e) {
-      _say('$e');
+      _say(errorMessage(e));
     }
   }
 

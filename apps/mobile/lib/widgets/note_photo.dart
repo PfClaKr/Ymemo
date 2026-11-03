@@ -7,6 +7,7 @@ import 'dart:math' show max, min;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../errors.dart';
 import '../host.dart' as host;
 import '../src/rust/api.dart';
 
@@ -356,7 +357,7 @@ class _NotePhotoState extends State<NotePhoto> {
       ));
     } catch (e) {
       // A photo that has not synced to this device yet has no bytes to save.
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(errorMessage(e))));
     }
   }
 

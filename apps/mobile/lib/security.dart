@@ -13,6 +13,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'errors.dart';
 import 'src/rust/api.dart';
 import 'ui_util.dart';
 
@@ -93,7 +94,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s.passwordChanged)));
     } catch (e) {
       // Core errors already arrive in the current language.
-      if (mounted) setState(() => _error = '$e');
+      if (mounted) setState(() => _error = errorMessage(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -121,7 +122,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
       await showRecoveryCode(context, widget.strings, code);
       await _refreshRecovery();
     } catch (e) {
-      if (mounted) setState(() => _error = '$e');
+      if (mounted) setState(() => _error = errorMessage(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
