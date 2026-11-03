@@ -182,4 +182,32 @@ void main() {
     });
   });
 
+  group('a code block is painted whole, not line by line', () {
+    test('only a fence that names a language makes a block, fences included', () {
+      const text = 'a\n```rust\nfn x() {}\n```\n```\n**md**\n```\nb';
+      final ranges = codeBlockRanges(text);
+      expect(ranges, hasLength(1));
+      expect(ranges.single.textInside(text), '```rust\nfn x() {}\n```');
+    });
+
+    test('an unclosed block runs to the end', () {
+      const text = 'a\n```py\nx = 1';
+      expect(codeBlockRanges(text).single.textInside(text), '```py\nx = 1');
+    });
+
+    test('without the block background the lines carry none, and inline code keeps its own', () {
+      const text = '```rust\nfn x() {}\n```\n```\n`tick`\n```';
+      final runs = markdownSpans(
+        text,
+        base: _base,
+        marker: const Color(0xFF888888),
+        codeBackground: const Color(0x11000000),
+        blockBackground: false,
+      );
+      expect(runs.map((s) => s.text!).join(), text);
+      expect(runs.firstWhere((s) => s.text == 'fn').style!.backgroundColor, isNull);
+      expect(runs.firstWhere((s) => s.text == 'tick').style!.backgroundColor,
+          const Color(0x11000000));
+    });
+  });
 }

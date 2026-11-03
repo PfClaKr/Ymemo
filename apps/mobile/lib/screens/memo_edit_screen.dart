@@ -65,6 +65,8 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
     text: widget.body,
     marker: paletteInk(_color).withValues(alpha: 0.45),
     codeBackground: paletteInk(_color).withValues(alpha: 0.10),
+    // The blocks are painted whole behind the field (`CodeBlockPainter` in the body's stack).
+    blockBackground: false,
   );
   late String _color = widget.color;
   List<FfiAttachment> _photos = [];
@@ -628,6 +630,24 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                               final canvas = Size(area.maxWidth, area.maxHeight);
                               return Stack(
                                 children: [
+                                  // Each code block's background, the width of the field,
+                                  // under it and scrolled with it. On the text itself it
+                                  // stopped at the end of every line's letters.
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                      painter: CodeBlockPainter(
+                                        source: _body.text,
+                                        text: _body.buildTextSpan(
+                                          context: context,
+                                          style: _bodyStyle,
+                                          withComposing: false,
+                                        ),
+                                        textScaler: MediaQuery.textScalerOf(context),
+                                        color: _body.codeBackground,
+                                        scroll: _bodyScrollCtl,
+                                      ),
+                                    ),
+                                  ),
                                   Positioned.fill(
                                     child: TextField(
                                       controller: _body,
