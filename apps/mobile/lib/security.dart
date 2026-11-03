@@ -217,6 +217,9 @@ String recoveryLines(String code) {
 /// time the code exists in readable form: `barrierDismissible: false` and no back button, so
 /// it cannot be swiped away by accident with nothing written down.
 Future<void> showRecoveryCode(BuildContext context, FfiStrings strings, String code) {
+  // Both ways here come straight from a password field, and its keyboard stayed up over a
+  // page with nothing to type into — covering half of it, on the one page that has to be read.
+  FocusManager.instance.primaryFocus?.unfocus();
   return Navigator.of(context).push<void>(MaterialPageRoute(
     fullscreenDialog: true,
     builder: (context) => PopScope(
