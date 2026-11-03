@@ -144,6 +144,10 @@ export component ListWindow inherits Window {
     callback open-update();
 
     private property <bool> show-sync: false;
+    // The device panel, opened from elsewhere (the settings window's sync page).
+    public function open-sync() { root.show-sync = true; }
+    // Ctrl+F asking the find box for the focus; the box clears it once it has taken it.
+    private property <bool> want-find: false;
     changed show-sync => { root.sync-toggled(self.show-sync); }
     // Drag state: the grabbed row and where the pointer is, in row units — 3.5 is the middle
     // of row 3. Rows are uniform, so this is the whole geometry the drop needs. -1 = no drag.
@@ -286,12 +290,17 @@ export component ListWindow inherits Window {
         key-pressed(ev) => {
             // Starting a note without reaching for the mouse. The same key works on a
             // sticky, so it means the same thing wherever the app has the focus.
-            //
-            // (No Ctrl+F for the find box: it lives inside an `if`, and a Slint id declared
-            // in a conditional cannot be reached from out here. It is one click away and
-            // already on screen, which is why this is a note and not a workaround.)
             if (ev.modifiers.control && ev.text == "n") {
                 root.new-memo();
+                return accept;
+            }
+            // To the find box, with what it holds selected so typing replaces it. The box is
+            // inside an `if`, and an id declared there cannot be reached from out here — so
+            // this raises a flag the box itself watches (see `want-find`), and closes the
+            // device panel first, since the box is not on screen while that is open.
+            if (ev.modifiers.control && ev.text == "f") {
+                root.show-sync = false;
+                root.want-find = true;
                 return accept;
             }
             // Walking the list without the mouse. The find box gets these first while it has
@@ -560,6 +569,19 @@ export component ListWindow inherits Window {
             height: 24px;
             border-radius: 6px;
             background: #ffffff10;
+            // Ctrl+F: taken here, inside the `if`, where `find` can be reached. Both ways in,
+            // because the flag can be raised while this box exists (`changed`) or just before
+            // it does, when Ctrl+F also closed the device panel that was hiding it (`init`).
+            property <bool> wanted: root.want-find;
+            changed wanted => { self.take-focus(); }
+            init => { self.take-focus(); }
+            function take-focus() {
+                if (root.want-find) {
+                    root.want-find = false;
+                    find.focus();
+                    find.select-all();
+                }
+            }
             HorizontalLayout {
                 padding-left: 6px;
                 padding-right: 4px;

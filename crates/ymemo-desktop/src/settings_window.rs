@@ -119,6 +119,25 @@ pub(crate) fn wire(
     wire_close(ui, &pending);
     wire_lock_now(ctx, ui, unlocked, &pending);
     wire_updates(ctx, ui);
+    wire_devices(ctx, ui);
+}
+
+/// The sync page's way to the device panel, which lives in the list window, and its way to
+/// the installer when there is no sync program to pair with.
+fn wire_devices(ctx: &Ctx, ui: &Ui) {
+    let settings_win = &ui.settings;
+    settings_win.on_get_sync(crate::pairing::open_releases_page);
+    let ctx = ctx.clone();
+    let list_weak = ui.list.as_weak();
+    settings_win.on_open_devices(move || {
+        touch(&ctx);
+        let Some(list) = list_weak.upgrade() else { return };
+        list.invoke_open_sync();
+        if !list.window().is_visible() {
+            crate::window::present(&list);
+        }
+        crate::window::raise(&list);
+    });
 }
 
 /// The list's gear button: fill the settings window from what is stored and show it.
@@ -134,6 +153,7 @@ fn wire_open(ctx: &Ctx, ui: &Ui, unlocked: &Rc<Cell<bool>>) {
         let Some(w) = win.upgrade() else { return };
         fill_settings_window(&ctx, &w);
         w.set_unlocked(unlocked.get());
+        w.set_sync_available(list_weak.upgrade().is_some_and(|l| l.get_sync_available()));
         w.set_status(SharedString::new());
         // Keep in step with `preferred-*` in settings.slint.
         present_dialog(&w, (680.0, 500.0), list_weak.upgrade().as_ref().map(|l| l.window()));

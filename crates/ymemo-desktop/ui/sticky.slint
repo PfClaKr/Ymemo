@@ -1,6 +1,8 @@
 import { LineEdit, Button, ScrollView, ListView, Slider, SpinBox } from "std-widgets.slint";
 import { Strings } from "@i18n";
 import { Palette, Glyph, ColorChip, InkSlider } from "theme.slint";
+import { CodeToken, CodeLine, NoteBlock, ReadBlock } from "read_view.slint";
+export { CodeToken, CodeLine, NoteBlock }
 
 // ---------------------------------------------------------------------------
 // Sticky window: one frameless window per memo.
@@ -14,30 +16,6 @@ import { Palette, Glyph, ColorChip, InkSlider } from "theme.slint";
 /// window's body font. The position arrives as a **fraction of the note** instead, and is
 /// turned into pixels here, so resizing the window keeps a photo on the same part of the
 /// note without a round trip through Rust.
-// One piece of a memo as the read view draws it: either markdown for Slint's own styled text,
-// or the inside of a fenced code block. See `markdown.rs`.
-// A fenced code block, coloured. One line of it, and one run of one line — see
-// `highlight.rs`. Empty `lines` means the fence named no language this build knows, and the
-// block is drawn from `NoteBlock.text` exactly as it was typed.
-export struct CodeToken {
-    text: string,
-    color: color,
-}
-export struct CodeLine {
-    tokens: [CodeToken],
-}
-
-export struct NoteBlock {
-    // The prose, already parsed: `@markdown()` reads its *literal* at compile time, so text
-    // that only exists at runtime has to arrive styled. `markdown.rs` does the parsing.
-    styled: styled-text,
-    // The inside of a fenced code block, drawn as it was typed.
-    text: string,
-    code: bool,
-    lines: [CodeLine],
-    font-size: length,
-}
-
 export struct PhotoRow {
     id: string,
     image: image,
@@ -1050,42 +1028,10 @@ export component StickyWindow inherits Window {
                                 padding-bottom: root.created-at == "" ? 2px : 14px;
                                 spacing: 4px;
                                 alignment: start;
-                                for block in root.blocks: VerticalLayout {
-                                    if block.code: Rectangle {
-                                        background: Palette.ink(root.sticky-color)
-                                            .with-alpha(0.07);
-                                        border-radius: 4px;
-                                        VerticalLayout {
-                                            padding: 5px;
-                                            // Coloured when the fence named a language, and
-                                            // one plain block when it did not. Code is not
-                                            // wrapped either way: a line broken in the middle
-                                            // is harder to read than one that runs off.
-                                            if block.lines.length > 0: VerticalLayout {
-                                                for codeline in block.lines: HorizontalLayout {
-                                                    alignment: start;
-                                                    for run in codeline.tokens: Text {
-                                                        text: run.text;
-                                                        font-family: "monospace";
-                                                        font-size: block.font-size * root.text-scale;
-                                                        color: run.color;
-                                                    }
-                                                }
-                                            }
-                                            if block.lines.length == 0: Text {
-                                                text: block.text;
-                                                font-family: "monospace";
-                                                font-size: block.font-size * root.text-scale;
-                                                color: #2b2b22;
-                                                wrap: word-wrap;
-                                            }
-                                        }
-                                    }
-                                    if !block.code: StyledText {
-                                        text: block.styled;
-                                        default-font-size: block.font-size * root.text-scale;
-                                        default-color: #2b2b22;
-                                    }
+                                for block in root.blocks: ReadBlock {
+                                    block: block;
+                                    color-key: root.sticky-color;
+                                    text-scale: root.text-scale;
                                 }
                             }
                         }
@@ -1107,6 +1053,35 @@ export component StickyWindow inherits Window {
                             pad-bottom: root.created-at == "" ? 4px : 14px;
                             text <=> root.memo-text;
                             edited => { root.edited(self.text); }
+                        }
+
+                        // ---- A fade along the bottom of the writing while more of it is
+                        // below. The field clips wherever its box ends, which is mid-line, and
+                        // the tops of the next line's letters sat under the last one as a row
+                        // of stray dots. Faded into the paper they read as what they are: the
+                        // note goes on. Gone once it is scrolled to its end, and it takes no
+                        // pointer events, so it is never in the way of the field. ----
+                        if body.scroll-y > 1px - body.scroll-range: Rectangle {
+                            x: body.text-x;
+                            y: body.text-y + body.view-height - self.height;
+                            width: body.text-width;
+                            height: body.line-height;
+                            // Named once: the same call twice in one gradient generates Rust
+                            // that moves the colour key and uses it again (Slint 1.17.1).
+                            property <color> paper: Palette.bg(root.sticky-color);
+                            background: @linear-gradient(180deg,
+                                self.paper.with-alpha(0) 0%, self.paper 85%);
+                        }
+                        // The same along the top once it is scrolled, where the bottoms of the
+                        // line above showed. Shorter: it sits over the first line read.
+                        if body.scroll-y < -1px: Rectangle {
+                            x: body.text-x;
+                            y: body.text-y;
+                            width: body.text-width;
+                            height: body.line-height * 0.6;
+                            property <color> paper: Palette.bg(root.sticky-color);
+                            background: @linear-gradient(180deg,
+                                self.paper 15%, self.paper.with-alpha(0) 100%);
                         }
 
                         // ---- Created-at, along the bottom of the *writing*. Declared after
