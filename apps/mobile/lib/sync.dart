@@ -20,6 +20,7 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/widgets.dart';
 
+import 'errors.dart';
 import 'host.dart' as host;
 import 'src/rust/api.dart' as ffi;
 
@@ -165,7 +166,7 @@ class SyncController extends ChangeNotifier with WidgetsBindingObserver {
       _startPendingPoll();
     } catch (e) {
       _code = null;
-      _error = '$e';
+      _error = errorMessage(e);
     } finally {
       _starting = false;
       notifyListeners();

@@ -5,6 +5,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../errors.dart';
+import '../markdown_style.dart';
 import '../palette.dart';
 import '../src/rust/api.dart';
 import '../memo_title.dart';
@@ -66,7 +68,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
-      _say('$e');
+      _say(errorMessage(e));
     }
   }
 
@@ -84,7 +86,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       await _load();
       if (mounted) _say(widget.strings.historyRestored);
     } catch (e) {
-      _say('$e');
+      _say(errorMessage(e));
     }
   }
 
@@ -161,9 +163,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                               Divider(height: 1, color: ink.withValues(alpha: 0.12)),
                               Padding(
                                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                                child: SelectableText(
-                                  revision.body.isEmpty ? revision.title : revision.body,
-                                  style: TextStyle(color: ink),
+                                child: _VersionText(
+                                  text: revision.body.isEmpty ? revision.title : revision.body,
+                                  ink: ink,
                                 ),
                               ),
                               // A deletion is a revision with nothing in it; the version
@@ -189,6 +191,54 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     },
                   ),
       ),
+    );
+  }
+}
+
+/// One version's writing, drawn the way the editor draws it — the markdown regions styled and
+/// the code coloured on a block of its own — and still selectable, so a passage can be copied
+/// out without putting the whole version back. It used to be the raw string: every fence and
+/// asterisk, which looked like no note anybody had written.
+class _VersionText extends StatelessWidget {
+  const _VersionText({required this.text, required this.ink});
+
+  final String text;
+  final Color ink;
+
+  @override
+  Widget build(BuildContext context) {
+    // The editor's body style in the ink this screen is written in.
+    final base = (Theme.of(context).textTheme.bodyLarge ?? const TextStyle(fontSize: 16))
+        .copyWith(color: ink);
+    final codeBackground = ink.withValues(alpha: 0.10);
+    final span = TextSpan(
+      style: base,
+      children: markdownSpans(
+        text,
+        base: base,
+        marker: ink.withValues(alpha: 0.45),
+        codeBackground: codeBackground,
+        blockBackground: false,
+      ),
+    );
+    return Stack(
+      // The block reaches a little past the words into the card's padding, so code does not
+      // sit flush against its own background's edge.
+      clipBehavior: Clip.none,
+      children: [
+        Positioned.fill(
+          child: CustomPaint(
+            painter: CodeBlockPainter(
+              source: text,
+              text: span,
+              textScaler: MediaQuery.textScalerOf(context),
+              color: codeBackground,
+              inset: 6,
+            ),
+          ),
+        ),
+        SelectableText.rich(span),
+      ],
     );
   }
 }

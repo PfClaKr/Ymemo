@@ -8,6 +8,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../errors.dart';
 import '../src/rust/api.dart';
 import '../sync.dart';
 import '../ui_util.dart';
@@ -139,7 +140,7 @@ class _SyncScreenState extends State<SyncScreen> {
         _lanPoll = Timer.periodic(_lanPollInterval, (_) => _pollLan());
       }
     } catch (e) {
-      if (mounted) setState(() => _lanMessage = '$e');
+      if (mounted) setState(() => _lanMessage = errorMessage(e));
     }
   }
 
@@ -186,7 +187,7 @@ class _SyncScreenState extends State<SyncScreen> {
       if (peer != null) await _reloadDevices();
     } catch (e) {
       // A malformed code is rejected by the core, in the user's language.
-      if (mounted) setState(() => _lanMessage = '$e');
+      if (mounted) setState(() => _lanMessage = errorMessage(e));
     } finally {
       if (mounted) setState(() => _joining = false);
     }
@@ -238,7 +239,7 @@ class _SyncScreenState extends State<SyncScreen> {
       await _reloadDevices();
     } catch (e) {
       // The core's message says what is wrong with the code; show it as it is.
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(errorMessage(e))));
     } finally {
       if (mounted) setState(() => _adding = false);
     }
@@ -299,7 +300,7 @@ class _SyncScreenState extends State<SyncScreen> {
       await widget.sync.approveDevice(device.id);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorMessage(e))));
     }
     await _reloadDevices();
   }
@@ -325,7 +326,7 @@ class _SyncScreenState extends State<SyncScreen> {
       await widget.sync.unpair(device.id);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorMessage(e))));
     }
     await _reloadDevices();
   }

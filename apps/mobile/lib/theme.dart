@@ -29,9 +29,14 @@ ThemeData ymemoTheme(Brightness brightness) {
       fontFamily: 'Pretendard',
       // Rounded, filled fields with no outline — the search box and the dialogs' inputs —
       // rather than Material's default boxed underline.
+      //
+      // An *underline* border with no line and round corners, not an outline one: a filled
+      // field with an outline floats its label onto the outline, and with the outline gone the
+      // label sat across the top edge of the box, half out of it and against the text above.
+      // The underline shape keeps a floating label inside the fill.
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        border: OutlineInputBorder(
+        border: UnderlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide.none,
         ),

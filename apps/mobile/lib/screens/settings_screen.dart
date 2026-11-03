@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../errors.dart';
 import '../host.dart' as host;
 import '../palette.dart';
 import '../security.dart';
@@ -183,7 +184,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await store.enable(await vaultKey());
     } catch (e) {
       debugPrint('could not store the biometric key: $e');
-      if (mounted) _say('$e');
+      if (mounted) _say(errorMessage(e));
       return;
     }
     await _save(biometricUnlock: true);
@@ -265,7 +266,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
       if (ok) _say(s.exported);
     } catch (e) {
-      _say('${s.exportFailed}: $e');
+      _say('${s.exportFailed}: ${errorMessage(e)}');
     }
   }
 
@@ -290,7 +291,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       // The core's message, already in the language it was raised in.
       if (mounted) {
         setState(() {
-          _updateError = '$e';
+          _updateError = errorMessage(e);
           _updateState = _UpdateState.failed;
         });
       }

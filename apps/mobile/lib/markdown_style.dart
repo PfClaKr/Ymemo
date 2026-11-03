@@ -23,6 +23,8 @@
 /// the sticky's read view.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import 'code_highlight.dart';
@@ -40,14 +42,21 @@ const List<double> _headingScale = [1.45, 1.30, 1.18, 1.10, 1.05, 1.0];
 
 /// Splits `text` into styled runs. Every character of `text` appears exactly once, in order,
 /// so the result can back an editable field.
+///
+/// With [blockBackground] off, a fenced block's lines are drawn without a background of their
+/// own and the caller paints one behind the whole block ([CodeBlockPainter]): a background on
+/// the text stops where each line's letters stop, so a block came out as a ragged stack of
+/// bars one line long each. Inline `code` keeps its own either way.
 List<TextSpan> markdownSpans(
   String text, {
   required TextStyle base,
   required Color marker,
   required Color codeBackground,
+  bool blockBackground = true,
 }) {
   final runs = <_Run>[];
-  final mono = base.copyWith(fontFamily: 'monospace', backgroundColor: codeBackground);
+  final inline = base.copyWith(fontFamily: 'monospace', backgroundColor: codeBackground);
+  final mono = blockBackground ? inline : base.copyWith(fontFamily: 'monospace');
   final markerStyle = base.copyWith(color: marker);
 
   var offset = 0;
@@ -122,13 +131,13 @@ List<TextSpan> markdownSpans(
           fontSize: (base.fontSize ?? 14) * _headingScale[heading - 1],
         ),
         markerStyle,
-        mono,
+        inline,
       ));
       endLine(base);
       continue;
     }
 
-    runs.addAll(_inline(line, offset, base, markerStyle, mono));
+    runs.addAll(_inline(line, offset, base, markerStyle, inline));
     endLine(base);
   }
 
@@ -145,6 +154,104 @@ List<TextSpan> markdownSpans(
     return [TextSpan(text: text, style: base)];
   }
   return spans;
+}
+
+/// The fenced code blocks in [text] — from a fence that names a language to the fence that
+/// closes it, both included, or to the end of an unclosed one — as character ranges. A bare
+/// fence is a markdown region, not code, and has no block drawn behind it.
+List<TextRange> codeBlockRanges(String text) {
+  final ranges = <TextRange>[];
+  var offset = 0;
+  var inFence = false;
+  int? start;
+  for (final line in _lines(text)) {
+    final end = offset + line.length;
+    final trimmed = line.trimLeft();
+    if (trimmed.startsWith('```')) {
+      if (inFence) {
+        if (start != null) ranges.add(TextRange(start: start, end: end));
+        inFence = false;
+        start = null;
+      } else {
+        inFence = true;
+        if (trimmed.substring(3).trim().isNotEmpty) start = offset;
+      }
+    }
+    offset = end + 1;
+  }
+  if (start != null) ranges.add(TextRange(start: start, end: text.length));
+  return ranges;
+}
+
+/// One rounded background behind each code block of [text], the whole width of the field —
+/// what [markdownSpans] leaves out with `blockBackground: false`.
+///
+/// It lays the text out again to find where each block's lines landed, which is the only way
+/// to know with lines that wrapped, so [text] must be the very span the field draws (its
+/// `style` the field's base style) and the painter as wide as the field. Nothing is laid out for a memo without a code block. With
+/// [scroll] it follows the field's scroll offset and repaints as it moves.
+class CodeBlockPainter extends CustomPainter {
+  CodeBlockPainter({
+    required this.source,
+    required this.text,
+    required this.textScaler,
+    required this.color,
+    this.scroll,
+    this.inset = 0,
+  })  : ranges = codeBlockRanges(source),
+        super(repaint: scroll);
+
+  /// The plain memo, which decides where the blocks are; [text] is how it is drawn.
+  final String source;
+  final InlineSpan text;
+  final TextScaler textScaler;
+  final Color color;
+  final ScrollController? scroll;
+
+  /// How far the background reaches past the text on either side, where there is room.
+  final double inset;
+  final List<TextRange> ranges;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (ranges.isEmpty) return;
+    final base = text.style;
+    final painter = TextPainter(
+      text: text,
+      textDirection: TextDirection.ltr,
+      textScaler: textScaler,
+      // What `EditableText` lays its text out with, so a `TextField` and a `SelectableText`
+      // alike: every line forced to the body's height, a heading's included. Left out, a
+      // heading line came out taller here than on screen and every block under it was
+      // painted half a line low.
+      strutStyle: base == null ? null : StrutStyle.fromTextStyle(base, forceStrutHeight: true),
+    )..layout(maxWidth: size.width);
+    final controller = scroll;
+    final dy = controller != null && controller.hasClients ? controller.offset : 0.0;
+    final paint = Paint()..color = color;
+    for (final range in ranges) {
+      final boxes = painter.getBoxesForSelection(
+        TextSelection(baseOffset: range.start, extentOffset: range.end),
+      );
+      if (boxes.isEmpty) continue;
+      final top = boxes.map((b) => b.top).reduce(math.min);
+      final bottom = boxes.map((b) => b.bottom).reduce(math.max);
+      canvas.drawRRect(
+        RRect.fromLTRBR(-inset, top - dy - 2, size.width + inset, bottom - dy + 2,
+            const Radius.circular(6)),
+        paint,
+      );
+    }
+    painter.dispose();
+  }
+
+  @override
+  bool shouldRepaint(CodeBlockPainter old) =>
+      old.source != source ||
+      old.text != text ||
+      old.color != color ||
+      old.textScaler != textScaler ||
+      old.scroll != scroll;
 }
 
 /// The lines of `text`, without their newlines. Unlike `split('\n')` this keeps a trailing
@@ -213,7 +320,15 @@ List<_Run> _inline(
 /// Only the drawing changes: [text] is the plain string with every marker in it, which is
 /// what gets saved and what the other device opens.
 class MarkdownEditingController extends TextEditingController {
-  MarkdownEditingController({super.text, required this.marker, required this.codeBackground});
+  MarkdownEditingController({
+    super.text,
+    required this.marker,
+    required this.codeBackground,
+    this.blockBackground = true,
+  });
+
+  /// Off where the field paints whole blocks behind itself; see [markdownSpans].
+  final bool blockBackground;
 
   /// Colour for the markers themselves — faded against the writing they wrap. Not final:
   /// the note's paper colour can be changed while it is open, and the ink goes with it.
@@ -243,6 +358,7 @@ class MarkdownEditingController extends TextEditingController {
         base: base,
         marker: marker,
         codeBackground: codeBackground,
+        blockBackground: blockBackground,
       ),
     );
   }

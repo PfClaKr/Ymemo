@@ -7,6 +7,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../errors.dart';
 import '../security.dart';
 import '../settings.dart';
 import '../src/rust/api.dart';
@@ -161,7 +162,7 @@ class _LockScreenState extends State<LockScreen> {
       if (mounted) {
         setState(() {
           _biometricReady = false;
-          _error = '$e';
+          _error = errorMessage(e);
         });
       }
     } finally {
@@ -242,7 +243,7 @@ class _LockScreenState extends State<LockScreen> {
     } catch (e) {
       // Core errors already arrive in the current language. The password is selected, so a
       // retry is typed straight over it rather than deleted first.
-      setState(() => _error = '$e');
+      setState(() => _error = errorMessage(e));
       _password.selection = TextSelection(baseOffset: 0, extentOffset: _password.text.length);
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -295,7 +296,7 @@ class _LockScreenState extends State<LockScreen> {
       _leaveRecovery();
       await widget.onUnlocked();
     } catch (e) {
-      setState(() => _error = '$e');
+      setState(() => _error = errorMessage(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -325,7 +326,7 @@ class _LockScreenState extends State<LockScreen> {
       await _probeVault();
       if (mounted) setState(() => _notice = widget.strings.resetDone);
     } catch (e) {
-      if (mounted) setState(() => _error = '$e');
+      if (mounted) setState(() => _error = errorMessage(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

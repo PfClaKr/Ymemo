@@ -7,9 +7,10 @@ import 'dart:math' show max;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../errors.dart';
 import '../host.dart' as host;
-import '../memo_title.dart';
 import '../markdown_style.dart';
+import '../memo_title.dart';
 import '../palette.dart';
 import '../pending_edits.dart';
 import '../src/rust/api.dart';
@@ -64,6 +65,8 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
     text: widget.body,
     marker: paletteInk(_color).withValues(alpha: 0.45),
     codeBackground: paletteInk(_color).withValues(alpha: 0.10),
+    // The blocks are painted whole behind the field (`CodeBlockPainter` in the body's stack).
+    blockBackground: false,
   );
   late String _color = widget.color;
   List<FfiAttachment> _photos = [];
@@ -253,7 +256,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       await memoUpsert(id: widget.id, title: _title.text, body: _body.text);
       _showBody(await attachmentRemove(id: photo.id));
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(errorMessage(e))));
       return;
     }
     if (_selectedPhoto == photo.id) _selectedPhoto = null;
@@ -272,7 +275,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       if (body != null) _showBody(body);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorMessage(e))));
       }
       return;
     }
@@ -308,7 +311,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       if (mounted) _body.text = body;
       _savedBody = body;
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(errorMessage(e))));
       return;
     }
     await _reloadPhotos();
@@ -359,7 +362,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       // and said nothing; the scanner says the same in the same words.
       debugPrint('could not pick a photo: $e');
       messenger.showSnackBar(SnackBar(
-          content: Text(source == ImageSource.camera ? widget.strings.cameraError : '$e')));
+          content: Text(source == ImageSource.camera ? widget.strings.cameraError : errorMessage(e))));
       return;
     }
     if (picked == null) return;
@@ -376,7 +379,7 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
       );
     } catch (e) {
       // Storage the vault cannot be written to: the core's message says which.
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(errorMessage(e))));
       return;
     }
     final added = await attachmentList(memoId: widget.id);
@@ -430,16 +433,23 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
   /// storage the app cannot reach — and leaving the screen on a false would throw away what
   /// is typed in it with nothing said, so the caller stays put and shows why. The core's
   /// message says what went wrong; it is shown as it is.
+  ///
+  /// What is written is taken **before** the await, and that is what is recorded as saved.
+  /// Reading the fields again afterwards marked anything typed while the write was in flight
+  /// as saved without it ever being written — every later save then found nothing changed,
+  /// and those letters were lost the moment the app went away.
   Future<bool> _save() async {
-    if (_title.text == _savedTitle && _body.text == _savedBody) return true;
+    final title = _title.text;
+    final body = _body.text;
+    if (title == _savedTitle && body == _savedBody) return true;
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await memoUpsert(id: widget.id, title: _title.text, body: _body.text);
-      _savedTitle = _title.text;
-      _savedBody = _body.text;
+      await memoUpsert(id: widget.id, title: title, body: body);
+      _savedTitle = title;
+      _savedBody = body;
       return true;
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(errorMessage(e))));
       return false;
     }
   }
@@ -620,6 +630,24 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
                               final canvas = Size(area.maxWidth, area.maxHeight);
                               return Stack(
                                 children: [
+                                  // Each code block's background, the width of the field,
+                                  // under it and scrolled with it. On the text itself it
+                                  // stopped at the end of every line's letters.
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                      painter: CodeBlockPainter(
+                                        source: _body.text,
+                                        text: _body.buildTextSpan(
+                                          context: context,
+                                          style: _bodyStyle,
+                                          withComposing: false,
+                                        ),
+                                        textScaler: MediaQuery.textScalerOf(context),
+                                        color: _body.codeBackground,
+                                        scroll: _bodyScrollCtl,
+                                      ),
+                                    ),
+                                  ),
                                   Positioned.fill(
                                     child: TextField(
                                       controller: _body,

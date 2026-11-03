@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../errors.dart';
 import '../src/rust/api.dart';
 import '../sync.dart';
 
@@ -57,7 +58,7 @@ class _ScanScreenState extends State<ScanScreen> {
       navigator.pop(peer);
     } catch (e) {
       // Show the core's message as-is and allow another scan.
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(errorMessage(e))));
       _handled = false;
     }
   }

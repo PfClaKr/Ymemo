@@ -13,6 +13,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'errors.dart';
 import 'src/rust/api.dart';
 import 'ui_util.dart';
 
@@ -93,7 +94,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s.passwordChanged)));
     } catch (e) {
       // Core errors already arrive in the current language.
-      if (mounted) setState(() => _error = '$e');
+      if (mounted) setState(() => _error = errorMessage(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -121,7 +122,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
       await showRecoveryCode(context, widget.strings, code);
       await _refreshRecovery();
     } catch (e) {
-      if (mounted) setState(() => _error = '$e');
+      if (mounted) setState(() => _error = errorMessage(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -216,6 +217,9 @@ String recoveryLines(String code) {
 /// time the code exists in readable form: `barrierDismissible: false` and no back button, so
 /// it cannot be swiped away by accident with nothing written down.
 Future<void> showRecoveryCode(BuildContext context, FfiStrings strings, String code) {
+  // Both ways here come straight from a password field, and its keyboard stayed up over a
+  // page with nothing to type into — covering half of it, on the one page that has to be read.
+  FocusManager.instance.primaryFocus?.unfocus();
   return Navigator.of(context).push<void>(MaterialPageRoute(
     fullscreenDialog: true,
     builder: (context) => PopScope(
