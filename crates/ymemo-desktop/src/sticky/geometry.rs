@@ -140,7 +140,12 @@ const MAX_NUDGES: u8 = 3;
 /// title bar is on a screen is moved, with the screen it was remembered on deciding where.
 /// **Called before** [`remember_geometry`], which would otherwise record the stranded place
 /// and the screen it no longer has.
-pub(crate) fn rescue_offscreen(ctx: &Ctx, list: &crate::ListWindow) {
+///
+/// `others` are the app's remaining windows — lock, settings, security, history, approval.
+/// They have no remembered screen, but a dialog left in the space a monitor used to fill, or
+/// still drawn at a Remote Desktop session's scale, is as stuck as a note: the lock window is
+/// often the very first thing on screen after a return to the desk.
+pub(crate) fn rescue_offscreen(ctx: &Ctx, list: &crate::ListWindow, others: &[&dyn AppWindow]) {
     use crate::screens::{place, reachable};
 
     let Some((screens, primary)) = screens_via(ctx, list) else { return };
@@ -155,7 +160,7 @@ pub(crate) fn rescue_offscreen(ctx: &Ctx, list: &crate::ListWindow) {
         NUDGED.with(|n| n.borrow_mut().clear());
     }
     if RESYNC_UNTIL.with(|u| u.get()).is_some_and(|until| Instant::now() < until) {
-        resync_scales(ctx, list);
+        resync_scales(ctx, list, others);
     }
     if !changed || screens.is_empty() {
         return;
@@ -185,6 +190,28 @@ pub(crate) fn rescue_offscreen(ctx: &Ctx, list: &crate::ListWindow) {
         let was = ctx.settings.borrow().list_screen.clone();
         move_if_stranded(list.window(), was);
     }
+    for other in others {
+        if other.slint_window().is_visible() {
+            move_if_stranded(other.slint_window(), None);
+        }
+    }
+}
+
+/// Any of the app's windows, for the checks that run over all of them after the screens
+/// change. One trait rather than a function per window type: they are five different
+/// generated components, and [`crate::window::nudge`] needs the component, not the window.
+pub(crate) trait AppWindow {
+    fn slint_window(&self) -> &slint::Window;
+    fn nudge(&self);
+}
+
+impl<T: ComponentHandle + 'static> AppWindow for T {
+    fn slint_window(&self) -> &slint::Window {
+        self.window()
+    }
+    fn nudge(&self) {
+        crate::window::nudge(self);
+    }
 }
 
 /// Puts right a window drawing at a scale its screen does not have — for a while after the
@@ -202,7 +229,7 @@ pub(crate) fn rescue_offscreen(ctx: &Ctx, list: &crate::ListWindow) {
 /// The other half is Slint missing a change winit did get, which leaves the same picture with
 /// winit right: that is handed to Slint directly. Each case writes one line to the log — the
 /// two scales, nothing else — so a report says which of them it was.
-fn resync_scales(ctx: &Ctx, list: &crate::ListWindow) {
+fn resync_scales(ctx: &Ctx, list: &crate::ListWindow, others: &[&dyn AppWindow]) {
     let notes: Vec<StickyWindow> = ctx
         .stickies
         .borrow()
@@ -216,10 +243,15 @@ fn resync_scales(ctx: &Ctx, list: &crate::ListWindow) {
     if list.window().is_visible() {
         resync_one(list);
     }
+    for other in others {
+        if other.slint_window().is_visible() {
+            resync_one(*other);
+        }
+    }
 }
 
-fn resync_one<T: ComponentHandle + 'static>(component: &T) {
-    let window = component.window();
+fn resync_one(component: &dyn AppWindow) {
+    let window = component.slint_window();
     let Some(Some((id, told, screen, inner))) = window.with_winit_window(|w| {
         let screen = w.current_monitor()?.scale_factor() as f32;
         Some((w.id(), w.scale_factor() as f32, screen, w.inner_size()))
@@ -236,7 +268,7 @@ fn resync_one<T: ComponentHandle + 'static>(component: &T) {
         });
         if attempts <= MAX_NUDGES {
             diag!("a window drew at scale {told:.2} on a screen at {screen:.2}; nudged it");
-            crate::window::nudge(component);
+            component.nudge();
         }
         return;
     }
