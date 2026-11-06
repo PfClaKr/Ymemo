@@ -7,7 +7,9 @@
 
 use i_slint_backend_winit::WinitWindowAccessor;
 use slint::ComponentHandle;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 use ymemo_core::diag;
 
 use crate::StickyWindow;
@@ -112,7 +114,21 @@ pub(super) fn screens_via(
 thread_local! {
     /// The screens as the last geometry tick saw them; see [`rescue_offscreen`].
     static LAST_SCREENS: RefCell<Option<Vec<crate::screens::Screen>>> = const { RefCell::new(None) };
+    /// Until when [`resync_scales`] runs after the screens changed, and how often each window
+    /// has been nudged since.
+    static RESYNC_UNTIL: Cell<Option<Instant>> = const { Cell::new(None) };
+    static NUDGED: RefCell<HashMap<i_slint_backend_winit::winit::window::WindowId, u8>> =
+        RefCell::new(HashMap::new());
 }
+
+/// How long after a change of screens the scales are checked: long enough for Windows to have
+/// finished putting the windows back, which it does over several seconds after a session
+/// switch (the log shows the screens settling 17 s apart on a return from Remote Desktop).
+const RESYNC_FOR: Duration = Duration::from_secs(30);
+/// Nudges per window per change of screens; a window that still disagrees after these is
+/// standing across two screens on purpose, and jiggling it for the rest of the window would
+/// be the bug.
+const MAX_NUDGES: u8 = 3;
 
 /// Brings back any window a change of monitors has left off every screen, while the app is
 /// running — a laptop unplugged from its dock, a screen switched off.
@@ -134,6 +150,13 @@ pub(crate) fn rescue_offscreen(ctx: &Ctx, list: &crate::ListWindow) {
         *last = Some(screens.clone());
         changed
     });
+    if changed {
+        RESYNC_UNTIL.with(|u| u.set(Some(Instant::now() + RESYNC_FOR)));
+        NUDGED.with(|n| n.borrow_mut().clear());
+    }
+    if RESYNC_UNTIL.with(|u| u.get()).is_some_and(|until| Instant::now() < until) {
+        resync_scales(ctx, list);
+    }
     if !changed || screens.is_empty() {
         return;
     }
@@ -161,6 +184,73 @@ pub(crate) fn rescue_offscreen(ctx: &Ctx, list: &crate::ListWindow) {
     if list.window().is_visible() {
         let was = ctx.settings.borrow().list_screen.clone();
         move_if_stranded(list.window(), was);
+    }
+}
+
+/// Puts right a window drawing at a scale its screen does not have — for a while after the
+/// screens change, since that is when it happens.
+///
+/// Coming back to the desk from a Remote Desktop session on a phone, Windows put each note
+/// back where it was and never sent `WM_DPICHANGED`: the window was 100% again while winit, and
+/// so Slint, still held the phone's scale, and every note drew its writing enormous and cut off
+/// until it was dragged — moving a window is what makes Windows check its scale again. So the
+/// scale each window was last told is compared with its screen's, and a window that disagrees
+/// is moved a pixel and back ([`crate::window::nudge`]), which is the drag without anybody's
+/// hand. Windows only: an X11 window manager re-sends the scale with every configure, and on
+/// Wayland a client cannot move itself.
+///
+/// The other half is Slint missing a change winit did get, which leaves the same picture with
+/// winit right: that is handed to Slint directly. Each case writes one line to the log — the
+/// two scales, nothing else — so a report says which of them it was.
+fn resync_scales(ctx: &Ctx, list: &crate::ListWindow) {
+    let notes: Vec<StickyWindow> = ctx
+        .stickies
+        .borrow()
+        .values()
+        .filter(|e| e.window.window().is_visible())
+        .map(|e| e.window.clone_strong())
+        .collect();
+    for note in &notes {
+        resync_one(note);
+    }
+    if list.window().is_visible() {
+        resync_one(list);
+    }
+}
+
+fn resync_one<T: ComponentHandle + 'static>(component: &T) {
+    let window = component.window();
+    let Some(Some((id, told, screen, inner))) = window.with_winit_window(|w| {
+        let screen = w.current_monitor()?.scale_factor() as f32;
+        Some((w.id(), w.scale_factor() as f32, screen, w.inner_size()))
+    }) else {
+        return;
+    };
+    let differs = |a: f32, b: f32| (a - b).abs() > 0.01;
+    if cfg!(windows) && differs(told, screen) {
+        let attempts = NUDGED.with(|n| {
+            let mut n = n.borrow_mut();
+            let count = n.entry(id).or_insert(0);
+            *count += 1;
+            *count
+        });
+        if attempts <= MAX_NUDGES {
+            diag!("a window drew at scale {told:.2} on a screen at {screen:.2}; nudged it");
+            crate::window::nudge(component);
+        }
+        return;
+    }
+    let slint_scale = window.scale_factor();
+    // `SLINT_SCALE_FACTOR` pins Slint's scale away from the system's on purpose.
+    if differs(slint_scale, told) && std::env::var_os("SLINT_SCALE_FACTOR").is_none() {
+        diag!("the toolkit drew at scale {slint_scale:.2} where the window is at {told:.2}; corrected");
+        use slint::platform::WindowEvent;
+        window.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: told });
+        // Slint does not re-derive the logical size from a new scale on its own; it waits for
+        // a resize that, here, is not coming.
+        let size = slint::PhysicalSize::new(inner.width, inner.height).to_logical(told);
+        window.dispatch_event(WindowEvent::Resized { size });
+        window.request_redraw();
     }
 }
 

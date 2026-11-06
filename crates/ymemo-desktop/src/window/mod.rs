@@ -56,6 +56,37 @@ pub(crate) fn present<T: ComponentHandle + 'static>(component: &T) {
     });
 }
 
+/// Moves a window a pixel to the right and, a moment later, back — so that Windows looks at
+/// which screen it is on again and, if that screen's scale is not the one the window was last
+/// told, sends `WM_DPICHANGED`.
+///
+/// Needed after a Remote Desktop session from a phone: coming back to the console, Windows put
+/// every note back where it was but never sent the scale change, so the notes went on drawing
+/// at the phone's scale — the writing enormous and cut off — until somebody dragged each one,
+/// which is what made Windows notice. See `sticky::geometry::resync_scales`. Over two turns of
+/// the loop, as [`present`]'s resize is, or the two positions cancel and nothing moves.
+pub(crate) fn nudge<T: ComponentHandle + 'static>(component: &T) {
+    use i_slint_backend_winit::winit::dpi::PhysicalPosition;
+    use i_slint_backend_winit::WinitWindowAccessor;
+
+    let Some(Some(at)) = component.window().with_winit_window(|w| w.outer_position().ok()) else {
+        return;
+    };
+    component
+        .window()
+        .with_winit_window(|w| w.set_outer_position(PhysicalPosition::new(at.x + 1, at.y)));
+    let weak = component.as_weak();
+    slint::Timer::single_shot(NUDGE, move || {
+        let Some(c) = weak.upgrade() else { return };
+        c.window().with_winit_window(|w| {
+            // Only undo our own pixel: a drag in the meantime has put it somewhere on purpose.
+            if w.outer_position().ok() == Some(PhysicalPosition::new(at.x + 1, at.y)) {
+                w.set_outer_position(at);
+            }
+        });
+    });
+}
+
 /// Shows a dialog window at its designed size, centred over `anchor` (or the middle of the
 /// screen when that is hidden).
 ///
