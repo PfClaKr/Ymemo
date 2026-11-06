@@ -2940,6 +2940,8 @@ impl SseDecode for crate::api::FfiStrings {
         let mut var_securityTitle = <String>::sse_decode(deserializer);
         let mut var_securityHint = <String>::sse_decode(deserializer);
         let mut var_lockNowHint = <String>::sse_decode(deserializer);
+        let mut var_devicesTitle = <String>::sse_decode(deserializer);
+        let mut var_devicesHint = <String>::sse_decode(deserializer);
         let mut var_tagline = <String>::sse_decode(deserializer);
         let mut var_projectPage = <String>::sse_decode(deserializer);
         let mut var_open = <String>::sse_decode(deserializer);
@@ -3140,6 +3142,8 @@ impl SseDecode for crate::api::FfiStrings {
             security_title: var_securityTitle,
             security_hint: var_securityHint,
             lock_now_hint: var_lockNowHint,
+            devices_title: var_devicesTitle,
+            devices_hint: var_devicesHint,
             tagline: var_tagline,
             project_page: var_projectPage,
             open: var_open,
@@ -3800,6 +3804,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::FfiStrings {
             self.security_title.into_into_dart().into_dart(),
             self.security_hint.into_into_dart().into_dart(),
             self.lock_now_hint.into_into_dart().into_dart(),
+            self.devices_title.into_into_dart().into_dart(),
+            self.devices_hint.into_into_dart().into_dart(),
             self.tagline.into_into_dart().into_dart(),
             self.project_page.into_into_dart().into_dart(),
             self.open.into_into_dart().into_dart(),
@@ -4157,6 +4163,8 @@ impl SseEncode for crate::api::FfiStrings {
         <String>::sse_encode(self.security_title, serializer);
         <String>::sse_encode(self.security_hint, serializer);
         <String>::sse_encode(self.lock_now_hint, serializer);
+        <String>::sse_encode(self.devices_title, serializer);
+        <String>::sse_encode(self.devices_hint, serializer);
         <String>::sse_encode(self.tagline, serializer);
         <String>::sse_encode(self.project_page, serializer);
         <String>::sse_encode(self.open, serializer);
