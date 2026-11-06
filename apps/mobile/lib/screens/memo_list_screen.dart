@@ -274,7 +274,15 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
     await _reload();
   }
 
+  /// Which [_reload] is the newest. Reloads are asked for from several places at once — the
+  /// merge timer, the log watch, the catch-up after a resume, every keystroke of a search —
+  /// and each is a series of calls into the core that can finish in any order. Without this a
+  /// slower, older one could land last and put its result over a newer one: the matches for
+  /// "br" left on screen under "bre" until something reloaded again.
+  int _reloadSerial = 0;
+
   Future<void> _reload() async {
+    final serial = ++_reloadSerial;
     final needle = _query.trim().toLowerCase();
     // Searching looks through the whole vault, not this folder: a memo's folder is exactly
     // what someone searching has forgotten. Matches are on the body as well as the title,
@@ -310,6 +318,7 @@ class _MemoListScreenState extends State<MemoListScreen> with WidgetsBindingObse
     // find nothing — the merge timer's, and now every save of your own, which the log watch
     // notices as a change to this device's own file. Rebuilding the list for those would be
     // work with nothing to show for it.
+    if (serial != _reloadSerial) return; // a newer reload has been asked for since
     final same = listEquals(_folders, folders) &&
         listEquals(_memos, memos) &&
         mapEquals(_counts, counts) &&

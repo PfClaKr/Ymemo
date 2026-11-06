@@ -2184,9 +2184,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FfiStrings dco_decode_ffi_strings(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 199)
+    if (arr.length != 201)
       throw Exception(
-          'unexpected arr length: expect 199 but see ${arr.length}');
+          'unexpected arr length: expect 201 but see ${arr.length}');
     return FfiStrings(
       addPhoto: dco_decode_String(arr[0]),
       bodyHint: dco_decode_String(arr[1]),
@@ -2383,10 +2383,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       securityTitle: dco_decode_String(arr[192]),
       securityHint: dco_decode_String(arr[193]),
       lockNowHint: dco_decode_String(arr[194]),
-      tagline: dco_decode_String(arr[195]),
-      projectPage: dco_decode_String(arr[196]),
-      open: dco_decode_String(arr[197]),
-      back: dco_decode_String(arr[198]),
+      devicesTitle: dco_decode_String(arr[195]),
+      devicesHint: dco_decode_String(arr[196]),
+      tagline: dco_decode_String(arr[197]),
+      projectPage: dco_decode_String(arr[198]),
+      open: dco_decode_String(arr[199]),
+      back: dco_decode_String(arr[200]),
     );
   }
 
@@ -2887,6 +2889,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_securityTitle = sse_decode_String(deserializer);
     var var_securityHint = sse_decode_String(deserializer);
     var var_lockNowHint = sse_decode_String(deserializer);
+    var var_devicesTitle = sse_decode_String(deserializer);
+    var var_devicesHint = sse_decode_String(deserializer);
     var var_tagline = sse_decode_String(deserializer);
     var var_projectPage = sse_decode_String(deserializer);
     var var_open = sse_decode_String(deserializer);
@@ -3087,6 +3091,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         securityTitle: var_securityTitle,
         securityHint: var_securityHint,
         lockNowHint: var_lockNowHint,
+        devicesTitle: var_devicesTitle,
+        devicesHint: var_devicesHint,
         tagline: var_tagline,
         projectPage: var_projectPage,
         open: var_open,
@@ -3589,6 +3595,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.securityTitle, serializer);
     sse_encode_String(self.securityHint, serializer);
     sse_encode_String(self.lockNowHint, serializer);
+    sse_encode_String(self.devicesTitle, serializer);
+    sse_encode_String(self.devicesHint, serializer);
     sse_encode_String(self.tagline, serializer);
     sse_encode_String(self.projectPage, serializer);
     sse_encode_String(self.open, serializer);

@@ -375,6 +375,9 @@ pub struct FfiStrings {
     pub security_title: String,
     pub security_hint: String,
     pub lock_now_hint: String,
+    /// The sync section's way to the device screen, worded as the desktop's sync page has it.
+    pub devices_title: String,
+    pub devices_hint: String,
     /// About: what Ymemo is, and where it lives.
     pub tagline: String,
     pub project_page: String,
@@ -584,6 +587,8 @@ pub fn mobile_strings() -> FfiStrings {
         security_title: t!("ui.settings_security"),
         security_hint: t!("ui.settings_security_hint"),
         lock_now_hint: t!("ui.settings_lock_now_hint"),
+        devices_title: t!("ui.settings_devices"),
+        devices_hint: t!("ui.settings_devices_hint"),
         tagline: t!("ui.settings_tagline"),
         project_page: t!("ui.settings_project"),
         open: t!("ui.list_menu_open"),

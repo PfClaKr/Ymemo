@@ -40,6 +40,7 @@ void main() {
       '****',
       '`',
       '*a* *b* *c*',
+      '```\n[a](b) [unclosed](x [x]\n```',
       '가족 **회의** 메모\n- 준비물\n- 안건',
       '\n\n\n',
       'trailing newline\n',
@@ -80,6 +81,16 @@ void main() {
       // Seven is too many to be a heading, and `#tag` is a word.
       expect(styleOf(md('####### too deep'), '####### too deep').fontSize, 14);
       expect(styleOf(md('#tag here'), '#tag here').fontSize, 14);
+    });
+
+    test("a link's text is underlined and its address fades, an underscore in it no italic", () {
+      const link = 'see [the docs](https://example.com/a_b_c) here';
+      expect(rebuilt(md(link)), md(link));
+      expect(styleOf(md(link), 'the docs').decoration, TextDecoration.underline);
+      expect(styleOf(md(link), '](https://example.com/a_b_c)').color, const Color(0xFF888888));
+      expect(spans(md(link)).where((s) => s.style?.fontStyle == FontStyle.italic), isEmpty);
+      // Outside a region it is writing like any other.
+      expect(styleOf(link, link).decoration, isNull);
     });
 
     test('emphasis does not reach across a line or wrap nothing', () {

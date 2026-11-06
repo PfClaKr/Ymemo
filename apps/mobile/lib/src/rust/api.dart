@@ -1156,6 +1156,10 @@ class FfiStrings {
   final String securityHint;
   final String lockNowHint;
 
+  /// The sync section's way to the device screen, worded as the desktop's sync page has it.
+  final String devicesTitle;
+  final String devicesHint;
+
   /// About: what Ymemo is, and where it lives.
   final String tagline;
   final String projectPage;
@@ -1360,6 +1364,8 @@ class FfiStrings {
     required this.securityTitle,
     required this.securityHint,
     required this.lockNowHint,
+    required this.devicesTitle,
+    required this.devicesHint,
     required this.tagline,
     required this.projectPage,
     required this.open,
@@ -1563,6 +1569,8 @@ class FfiStrings {
       securityTitle.hashCode ^
       securityHint.hashCode ^
       lockNowHint.hashCode ^
+      devicesTitle.hashCode ^
+      devicesHint.hashCode ^
       tagline.hashCode ^
       projectPage.hashCode ^
       open.hashCode ^
@@ -1768,6 +1776,8 @@ class FfiStrings {
           securityTitle == other.securityTitle &&
           securityHint == other.securityHint &&
           lockNowHint == other.lockNowHint &&
+          devicesTitle == other.devicesTitle &&
+          devicesHint == other.devicesHint &&
           tagline == other.tagline &&
           projectPage == other.projectPage &&
           open == other.open &&

@@ -14,6 +14,7 @@ import '../settings.dart';
 import '../src/rust/api.dart';
 import '../sync.dart';
 import '../ui_util.dart';
+import 'sync_screen.dart';
 
 /// What the last update check concluded; the text for it is built at draw time.
 enum _UpdateState { idle, checking, latest, found, failed }
@@ -402,6 +403,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const Divider(),
           _header(s.sectionSync),
+          // Which devices there are, before how fast they hear from each other — the same
+          // order as the desktop's sync page. The device screen was otherwise only behind the
+          // icon at the top of the list, and nothing in the section about syncing led to it.
+          ListTile(
+            leading: const Icon(Icons.devices),
+            title: Text(s.devicesTitle),
+            subtitle: Text(s.devicesHint),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => SyncButton.open(context, widget.strings, widget.sync),
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Text(s.advancedHint, style: Theme.of(context).textTheme.bodySmall),
