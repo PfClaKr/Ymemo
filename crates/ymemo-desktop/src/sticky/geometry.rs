@@ -239,6 +239,11 @@ fn resync_scales(ctx: &Ctx, list: &crate::ListWindow, others: &[&dyn AppWindow])
         .collect();
     for note in &notes {
         resync_one(note);
+        // A correction handed straight to Slint comes with no winit event, so the width the
+        // bar buttons are fitted to (`wire_window_events`) is brought along by hand.
+        if let Some(physical) = note.window().with_winit_window(|w| w.inner_size().width) {
+            note.set_window_width(physical as f32 / note.window().scale_factor());
+        }
     }
     if list.window().is_visible() {
         resync_one(list);
