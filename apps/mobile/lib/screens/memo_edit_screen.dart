@@ -109,15 +109,16 @@ class _MemoEditScreenState extends State<MemoEditScreen> {
 
   /// How tall [prefix] is, laid out the way the field lays it out. This is the measurement
   /// the whole arrangement rests on — a wrapped line is two lines on screen and one in the
-  /// text, so nothing here counts.
-  double _writingHeight(String prefix, double width) {
-    if (prefix.isEmpty) return 0;
-    final painter = TextPainter(
-      text: TextSpan(text: prefix, style: _bodyStyle),
-      textDirection: TextDirection.ltr,
-    )..layout(maxWidth: width);
-    return painter.height;
-  }
+  /// text, so nothing here counts. See [heightAsDrawn] for what "the way the field does"
+  /// takes.
+  double _writingHeight(String prefix, double width) => heightAsDrawn(
+        prefix,
+        width: width,
+        base: _bodyStyle,
+        marker: _body.marker,
+        codeBackground: _body.codeBackground,
+        textScaler: MediaQuery.textScalerOf(context),
+      );
 
   /// Which photo shows its move/resize/detach handles. There is no hovering on a phone, so
   /// a photo has to be tapped before its controls appear; tapping the text puts them away.

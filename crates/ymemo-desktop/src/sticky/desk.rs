@@ -225,6 +225,16 @@ pub(super) fn wire_window_events(
                     w.set_window_width(size.width as f32 / scale);
                 }
             }
+            // The width that decides which bar buttons fit is logical, so a new scale changes
+            // it even when no resize follows — and after a Remote Desktop session none may.
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                if let Some(w) = weak.upgrade() {
+                    let physical = w.window().with_winit_window(|ww| ww.inner_size().width);
+                    if let Some(physical) = physical {
+                        w.set_window_width(physical as f32 / *scale_factor as f32);
+                    }
+                }
+            }
             WindowEvent::HoveredFile(path) => {
                 if looks_like_a_photo(path) {
                     if let Some(w) = weak.upgrade() {

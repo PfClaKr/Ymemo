@@ -74,9 +74,33 @@ fn geometry(ctx: &Ctx, ui: &Ui) -> slint::Timer {
     let timer = slint::Timer::default();
     let ctx = ctx.clone();
     let list_weak = ui.list.as_weak();
+    let (lock, settings, security, history, approve) = (
+        ui.lock.as_weak(),
+        ui.settings.as_weak(),
+        ui.security.as_weak(),
+        ui.history.as_weak(),
+        ui.approve.as_weak(),
+    );
     timer.start(TimerMode::Repeated, GEOMETRY_INTERVAL, move || {
         if let Some(list) = list_weak.upgrade() {
-            sticky::rescue_offscreen(&ctx, &list);
+            let (lock, settings, security, history, approve) = (
+                lock.upgrade(),
+                settings.upgrade(),
+                security.upgrade(),
+                history.upgrade(),
+                approve.upgrade(),
+            );
+            let others: Vec<&dyn sticky::AppWindow> = [
+                lock.as_ref().map(|w| w as &dyn sticky::AppWindow),
+                settings.as_ref().map(|w| w as &dyn sticky::AppWindow),
+                security.as_ref().map(|w| w as &dyn sticky::AppWindow),
+                history.as_ref().map(|w| w as &dyn sticky::AppWindow),
+                approve.as_ref().map(|w| w as &dyn sticky::AppWindow),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            sticky::rescue_offscreen(&ctx, &list, &others);
             sticky::remember_geometry(&ctx, &list);
         }
     });

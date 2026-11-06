@@ -30,7 +30,7 @@ mod snap;
 mod title;
 
 pub(crate) use desk::{hide_open_notes_from_taskbar, raise_open, stack_desk};
-pub(crate) use geometry::{remember_geometry, rescue_offscreen};
+pub(crate) use geometry::{remember_geometry, rescue_offscreen, AppWindow};
 pub(crate) use photos::{forget_all_photos, set_photo_models, split_photo_rows};
 pub(crate) use snap::snap_tick;
 pub(crate) use title::{derive_title, display_title};
