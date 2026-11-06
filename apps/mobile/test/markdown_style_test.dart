@@ -7,6 +7,7 @@
 // Run with `flutter test` from `apps/mobile`.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ymemo_mobile/code_highlight.dart';
 import 'package:ymemo_mobile/markdown_style.dart';
@@ -208,6 +209,71 @@ void main() {
       expect(runs.firstWhere((s) => s.text == 'fn').style!.backgroundColor, isNull);
       expect(runs.firstWhere((s) => s.text == 'tick').style!.backgroundColor,
           const Color(0x11000000));
+    });
+  });
+
+  group('a photo in the writing is placed where the field puts the words', () {
+    // Where the field itself starts the line after [prefix], against what `heightAsDrawn`
+    // says — at a system text size above default, after a heading and a wrapped code line.
+    Future<void> check(WidgetTester tester, String prefix, String rest, double scale) async {
+      const base = TextStyle(fontSize: 16, height: 1.5);
+      const width = 220.0;
+      final text = '$prefix\n$rest';
+      await tester.pumpWidget(MaterialApp(
+        home: MediaQuery(
+          data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+          child: Material(
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: width,
+                child: TextField(
+                  controller: MarkdownEditingController(
+                    text: text,
+                    marker: const Color(0xFF888888),
+                    codeBackground: const Color(0x11000000),
+                    blockBackground: false,
+                  ),
+                  style: base,
+                  maxLines: null,
+                  decoration: const InputDecoration(
+                    contentPadding: EdgeInsets.zero,
+                    border: InputBorder.none,
+                    filled: false,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ));
+      final editable = tester.allRenderObjects.whereType<RenderEditable>().first;
+      final next = prefix.length + 1;
+      // The caret's top is the line's; a glyph's box is drawn inside it by font metrics the
+      // two layouts measure differently, the line pitch they share.
+      final onScreen = editable.getLocalRectForCaret(TextPosition(offset: next)).top;
+      final measured = heightAsDrawn(
+        prefix,
+        width: width,
+        base: base,
+        marker: const Color(0xFF888888),
+        codeBackground: const Color(0x11000000),
+        textScaler: TextScaler.linear(scale),
+      );
+      expect(measured, closeTo(onScreen, 0.5));
+    }
+
+    testWidgets('plain lines, at a larger system text size', (tester) async {
+      await check(tester, 'one\ntwo\nthree', 'after', 1.4);
+    });
+
+    testWidgets('after a heading and a code line long enough to wrap', (tester) async {
+      await check(
+        tester,
+        '```\n# A heading\n```\n```rust\nlet s = "a string long enough to wrap";\n```',
+        'after',
+        1.3,
+      );
     });
   });
 }

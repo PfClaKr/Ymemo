@@ -254,6 +254,45 @@ class CodeBlockPainter extends CustomPainter {
       old.scroll != scroll;
 }
 
+/// How tall [text] stands in a body field [width] wide: the measurement a photo standing in
+/// the writing is placed by.
+///
+/// Laid out the way `EditableText` lays out the field, or the photo lands beside the wrong
+/// words: with the system's text size (Android's font size setting scales the field and did
+/// not scale this, so on a phone set larger than default a photo in the writing sat over the
+/// lines above its room), with the field's forced line height, and with the markdown drawn as
+/// the field draws it — a heading or a code line wraps at a different point than plain text.
+/// A line is styled by what comes before it only, so a prefix's spans are exactly the start
+/// of the whole memo's.
+double heightAsDrawn(
+  String text, {
+  required double width,
+  required TextStyle base,
+  required Color marker,
+  required Color codeBackground,
+  required TextScaler textScaler,
+}) {
+  if (text.isEmpty) return 0;
+  final painter = TextPainter(
+    text: TextSpan(
+      style: base,
+      children: markdownSpans(
+        text,
+        base: base,
+        marker: marker,
+        codeBackground: codeBackground,
+        blockBackground: false,
+      ),
+    ),
+    textDirection: TextDirection.ltr,
+    textScaler: textScaler,
+    strutStyle: StrutStyle.fromTextStyle(base, forceStrutHeight: true),
+  )..layout(maxWidth: width);
+  final height = painter.height;
+  painter.dispose();
+  return height;
+}
+
 /// The lines of `text`, without their newlines. Unlike `split('\n')` this keeps a trailing
 /// empty line, which matters because the offsets have to add up to the whole string.
 List<String> _lines(String text) => text.split('\n');
