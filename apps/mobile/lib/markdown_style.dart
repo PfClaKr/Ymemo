@@ -272,10 +272,15 @@ int _headingLevel(String line) {
 
 /// Emphasis inside one line. Longest markers first, so `**bold**` is not read as two
 /// italics; a marker with nothing between it is left as plain text.
+///
+/// A link is read before the single marks, so the `_` in an address does not start an
+/// italic: its text is underlined and the brackets and address fade like any other marker —
+/// the desktop's read view draws the same link in the note's ink.
 final RegExp _inlinePattern = RegExp(
   r'(\*\*)(?=\S)(.+?)(?<=\S)(\*\*)'
   r'|(~~)(?=\S)(.+?)(?<=\S)(~~)'
   r'|(`)([^`]+)(`)'
+  r'|(\[)([^\]]+)(\]\([^)\s]+\))'
   r'|(\*)(?=\S)([^*]+?)(?<=\S)(\*)'
   r'|(_)(?=\S)([^_]+?)(?<=\S)(_)',
 );
@@ -299,11 +304,18 @@ List<_Run> _inline(
       inner = base.copyWith(decoration: TextDecoration.lineThrough);
     } else if (m.group(7) != null) {
       inner = mono.merge(TextStyle(fontSize: base.fontSize));
+    } else if (m.group(10) != null) {
+      inner = base.copyWith(
+        decoration: TextDecoration.underline,
+        decorationColor: marker.color,
+      );
     } else {
       inner = base.copyWith(fontStyle: FontStyle.italic);
     }
-    final open = (m.group(1) ?? m.group(4) ?? m.group(7) ?? m.group(10) ?? m.group(13))!;
-    final close = (m.group(3) ?? m.group(6) ?? m.group(9) ?? m.group(12) ?? m.group(15))!;
+    final open =
+        (m.group(1) ?? m.group(4) ?? m.group(7) ?? m.group(10) ?? m.group(13) ?? m.group(16))!;
+    final close =
+        (m.group(3) ?? m.group(6) ?? m.group(9) ?? m.group(12) ?? m.group(15) ?? m.group(18))!;
     final openEnd = m.start + open.length;
     final closeStart = m.end - close.length;
     runs.add(_Run(lineStart + m.start, lineStart + openEnd, marker.merge(inner).copyWith(color: marker.color)));
